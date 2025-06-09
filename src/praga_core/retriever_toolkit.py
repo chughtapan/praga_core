@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import abc
 import json
-from abc import ABC
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import wraps
 from hashlib import md5
@@ -12,63 +13,44 @@ from typing import (
     List,
     Sequence,
     Tuple,
+    Union,
     cast,
     get_args,
     get_origin,
     get_type_hints,
 )
 
-from .types import (
-    CacheInvalidator,
-    Document,
-    DocumentSequenceFunction,
-    FunctionInvocation,
-    PageMetadata,
-    PaginatedFunction,
-    PaginatedResponse,
-    ToolFunction,
-    ToolReturnType,
-)
+from .types import Document, PageMetadata, PaginatedResponse
 
 
-def _create_method_stub(fn: Callable) -> Callable:
-    """
-    Create a method stub that preserves the original function's signature.
+@dataclass
+class FunctionInvocation:
+    tool_name: str
+    args: Tuple[Any, ...]
+    kwargs: Dict[str, Any]
 
-    This stub is added to the class at decorator time to make the method
-    visible to static type checkers like mypy. At runtime, the actual
-    wrapped method (with caching, pagination, etc.) replaces this stub.
-    """
-
-    def method_stub(self, *args, **kwargs):
-        # This will be replaced at runtime by the actual wrapped function
-        return fn(*args, **kwargs)
-
-    method_stub.__name__ = fn.__name__
-    method_stub.__doc__ = fn.__doc__
-    method_stub.__annotations__ = fn.__annotations__
-    return method_stub
+    def serialise(self) -> str:
+        payload = {
+            "tool": self.tool_name,
+            "args": self.args,
+            "kwargs": tuple(sorted(self.kwargs.items())),
+        }
+        return json.dumps(payload, sort_keys=True, default=str)
 
 
-class RetrieverToolkit(ABC):
-    """
-    A toolbox that holds **retriever functions** plus:
-        • A per‑instance in‑memory cache
-        • Optional pagination & cache wrappers
-        • A context manager for querylevel logging
-        • A speculation hook (override in subclasses)
+ToolReturnType = Union[Sequence[Document], PaginatedResponse]
+ToolFunction = Callable[..., ToolReturnType]
+DocumentSequenceFunction = Callable[..., Sequence[Document]]
+PaginatedFunction = Callable[..., PaginatedResponse]
+CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
-    All registered tools must return either:
-        • Sequence[Document] (for unpaginated results)
-        • PaginatedResponse (for paginated results)
-    """
+
+class RetrieverToolkitMeta(abc.ABC):
+    """Base class that handles all the internal mechanics for retriever toolkits."""
 
     # Stash for decorator‑based (stateless) tools – stored at *class* level
     _PENDING_TOOLS = "_praga_pending_tools"
 
-    # ─────────────────────────────────────────────────────────
-    #  Constructor
-    # ─────────────────────────────────────────────────────────
     def __init__(self) -> None:
         # Cache maps <key> -> (<value>, <timestamp>)
         self._cache: Dict[str, Tuple[Any, datetime]] = {}
@@ -80,30 +62,79 @@ class RetrieverToolkit(ABC):
         self._register_pending_stateless_tools()
 
     # ========================================================
-    # ================  Public helper methods  ================
+    # ================  Internal Tool Management  ===========
     # ========================================================
-    # These are the pieces most users will touch or override.
-    # --------------------------------------------------------
 
-    def make_cache_key(self, fn: Callable, *args, **kwargs) -> str:
+    def register_tool(
+        self,
+        method: ToolFunction,
+        name: str,
+        cache: bool = False,
+        ttl: timedelta | None = None,
+        invalidator: CacheInvalidator | None = None,
+        paginate: bool = False,
+        max_docs: int = 20,
+        max_tokens: int = 2_048,
+    ):
         """
-        A stable key made of:
-        1) the function's *fully qualified* name
-        2) the positional & keyword arguments (JSON-serialised)
+        Register a tool with the toolkit.
 
-        md5 is simple, available everywhere, and fine for cache keys.
+        Args:
+            method: The tool function to register.
+            name: The name of the tool.
+            cache: Whether to cache the tool.
+            ttl: The time to live for the cache.
+            invalidator: A function to invalidate the cache.
+            paginate: Whether to paginate the tool.
+            max_docs: The maximum number of documents to return.
+            max_tokens: The maximum number of tokens to return.
         """
-        blob = json.dumps(
-            [fn.__qualname__, args, kwargs],
-            default=str,  # fall back to str() for non‑JSON types
-            sort_keys=True,  # ensures the same kwargs order every time
+        if not _has_valid_tool_return_annotation(method):
+            raise TypeError(
+                f"""Tool "{name}" must have return type annotation of either 
+                "Sequence[Document]", "List[Document]', or "PaginatedResponse". 
+                Got: {getattr(method, '__annotations__', {})}
+            """
+            )
+
+        if cache:
+            method = self._wrap_with_cache(
+                method,
+                invalidator=invalidator,
+                ttl=ttl,
+            )
+
+        if paginate:
+            if not _returns_document_sequence(method):
+                raise TypeError(
+                    f"Tool '{name}' with pagination=True must return Sequence[Document] or List[Document], "
+                    f"not PaginatedResponse (pagination wrapper will create the PaginatedResponse)"
+                )
+
+            paginated_tool = self._wrap_with_pagination(
+                cast(DocumentSequenceFunction, method),
+                max_docs=max_docs,
+                max_tokens=max_tokens,
+            )
+
+            method = cast(ToolFunction, paginated_tool)
+
+        self._tools[name] = method
+        setattr(self, name, method)
+
+    def __getattr__(self, name: str) -> ToolFunction:
+        """
+        This allows mypy to understand that dynamically registered methods exist.
+        """
+        if name in self._tools:
+            return self._tools[name]
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
-        return md5(blob.encode()).hexdigest()
 
-    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
-        return []
-
-    # ===============  Wrapping utilities  ===================
+    # ========================================================
+    # ================  Internal Wrapper Methods  ===========
+    # ========================================================
 
     def _wrap_with_cache(
         self,
@@ -186,76 +217,9 @@ class RetrieverToolkit(ABC):
         return paginated_tool
 
     # ========================================================
-    # ================  Tool registration  ===================
-    # ========================================================
-    def register_tool(
-        self,
-        *,
-        method: ToolFunction,
-        name: str,
-        cache: bool = False,
-        ttl: timedelta | None = None,
-        invalidator: CacheInvalidator | None = None,
-        paginate: bool = False,
-        max_docs: int = 20,
-        max_tokens: int = 2_048,
-    ):
-        """
-        Register a tool with the toolkit.
-
-        Steps:
-        1) Validate the method has proper return type annotations
-        2) Add runtime validation wrapper
-        3) Apply caching if requested
-        4) Apply pagination if requested
-        5) Register in the tool registry
-        """
-        if not _has_valid_tool_return_annotation(method):
-            raise TypeError(
-                f"""Tool "{name}" must have return type annotation of either 
-                "Sequence[Document]", "List[Document]', or "PaginatedResponse". 
-                Got: {getattr(method, '__annotations__', {})}
-            """
-            )
-
-        if cache:
-            method = self._wrap_with_cache(
-                method,
-                invalidator=invalidator,
-                ttl=ttl,
-            )
-
-        if paginate:
-            if not _returns_document_sequence(method):
-                raise TypeError(
-                    f"Tool '{name}' with pagination=True must return Sequence[Document] or List[Document], "
-                    f"not PaginatedResponse (pagination wrapper will create the PaginatedResponse)"
-                )
-
-            paginated_tool = self._wrap_with_pagination(
-                cast(DocumentSequenceFunction, method),
-                max_docs=max_docs,
-                max_tokens=max_tokens,
-            )
-
-            method = cast(ToolFunction, paginated_tool)
-
-        self._tools[name] = method
-        setattr(self, name, method)
-
-    def __getattr__(self, name: str) -> ToolFunction:
-        """
-        This allows mypy to understand that dynamically registered methods exist.
-        """
-        if name in self._tools:
-            return self._tools[name]
-        raise AttributeError(
-            f"'{self.__class__.__name__}' object has no attribute '{name}'"
-        )
-
-    # ========================================================
     # ==========  Stateless‑tool decorator support  ==========
     # ========================================================
+
     @classmethod
     def tool(cls, **cfg):
         """
@@ -279,8 +243,8 @@ class RetrieverToolkit(ABC):
 
         return marker
 
-    # Gather and register any decorator‑tagged functions
     def _register_pending_stateless_tools(self):
+        """Gather and register any decorator‑tagged functions."""
         for fn, cfg in getattr(self.__class__, self._PENDING_TOOLS, []):
             self.register_tool(
                 method=fn,
@@ -292,6 +256,52 @@ class RetrieverToolkit(ABC):
                 max_docs=cfg.get("max_docs", 20),
                 max_tokens=cfg.get("max_tokens", 2048),
             )
+
+    # ========================================================
+    # ================  Abstract Methods  ===================
+    # ========================================================
+
+    @abc.abstractmethod
+    def make_cache_key(self, fn: Callable, *args, **kwargs) -> str:
+        pass
+
+    @abc.abstractmethod
+    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
+        pass
+
+
+class RetrieverToolkit(RetrieverToolkitMeta):
+
+    def make_cache_key(self, fn: Callable, *args, **kwargs) -> str:
+        blob = json.dumps([fn.__qualname__, args, kwargs], default=str, sort_keys=True)
+        return md5(blob.encode()).hexdigest()
+
+    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
+        return []
+
+
+# ========================================================
+# ================  Helper Functions  ===================
+# ========================================================
+
+
+def _create_method_stub(fn: Callable) -> Callable:
+    """
+    Create a method stub that preserves the original function's signature.
+
+    This stub is added to the class at decorator time to make the method
+    visible to static type checkers like mypy. At runtime, the actual
+    wrapped method (with caching, pagination, etc.) replaces this stub.
+    """
+
+    def method_stub(self, *args, **kwargs):
+        # This will be replaced at runtime by the actual wrapped function
+        return fn(*args, **kwargs)
+
+    method_stub.__name__ = fn.__name__
+    method_stub.__doc__ = fn.__doc__
+    method_stub.__annotations__ = fn.__annotations__
+    return method_stub
 
 
 def _has_valid_tool_return_annotation(tool_function: Callable) -> bool:
