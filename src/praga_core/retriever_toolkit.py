@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import json
+from collections.abc import Sequence as ABCSequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import wraps
@@ -13,7 +14,6 @@ from typing import (
     List,
     Sequence,
     Tuple,
-    Union,
     cast,
     get_args,
     get_origin,
@@ -38,10 +38,8 @@ class FunctionInvocation:
         return json.dumps(payload, sort_keys=True, default=str)
 
 
-ToolReturnType = Union[Sequence[Document], PaginatedResponse]
+ToolReturnType = Sequence[Document]
 ToolFunction = Callable[..., ToolReturnType]
-DocumentSequenceFunction = Callable[..., Sequence[Document]]
-PaginatedFunction = Callable[..., PaginatedResponse]
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
 
@@ -89,7 +87,7 @@ class RetrieverToolkitMeta(abc.ABC):
             max_docs: The maximum number of documents to return.
             max_tokens: The maximum number of tokens to return.
         """
-        if not _has_valid_tool_return_annotation(method):
+        if not _is_document_sequence_type(method):
             raise TypeError(
                 f"""Tool "{name}" must have return type annotation of either 
                 "Sequence[Document]", "List[Document]', or "PaginatedResponse". 
@@ -105,19 +103,16 @@ class RetrieverToolkitMeta(abc.ABC):
             )
 
         if paginate:
-            if not _returns_document_sequence(method):
+            if _returns_paginated_response(method):
                 raise TypeError(
-                    f"Tool '{name}' with pagination=True must return Sequence[Document] or List[Document], "
-                    f"not PaginatedResponse (pagination wrapper will create the PaginatedResponse)"
+                    f"Cannot paginate tool '{name}' because it already returns a PaginatedResponse"
                 )
 
-            paginated_tool = self._wrap_with_pagination(
-                cast(DocumentSequenceFunction, method),
+            method = self._wrap_with_pagination(
+                method,
                 max_docs=max_docs,
                 max_tokens=max_tokens,
             )
-
-            method = cast(ToolFunction, paginated_tool)
 
         self._tools[name] = method
         setattr(self, name, method)
@@ -173,8 +168,8 @@ class RetrieverToolkitMeta(abc.ABC):
         return cast(ToolFunction, cached_tool)
 
     def _wrap_with_pagination(
-        self, method: DocumentSequenceFunction, *, max_docs: int, max_tokens: int
-    ) -> PaginatedFunction:
+        self, method: ToolFunction, *, max_docs: int, max_tokens: int
+    ) -> ToolFunction:
         """
         Converts a function that returns Sequence[Document] into one that
         accepts a `page` parameter and returns a PaginatedResponse.
@@ -304,8 +299,13 @@ def _create_method_stub(fn: Callable) -> Callable:
     return method_stub
 
 
-def _has_valid_tool_return_annotation(tool_function: Callable) -> bool:
-    """Check if a function has a valid return type annotation for a retriever tool."""
+def _is_document_sequence_type(tool_function: Callable) -> bool:
+    """
+    Check if a function returns Sequence[Document], List[Document], or PaginatedResponse.
+
+    Since PaginatedResponse now implements Sequence[Document], this covers all valid
+    return types for retriever tools.
+    """
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
@@ -313,43 +313,31 @@ def _has_valid_tool_return_annotation(tool_function: Callable) -> bool:
         if return_annotation is None:
             return False
 
+        # PaginatedResponse implements Sequence[Document]
         if return_annotation is PaginatedResponse:
             return True
 
-        return _returns_document_sequence(tool_function)
-    except Exception:
-        return False
-
-
-def _returns_document_sequence(tool_function: ToolFunction) -> bool:
-    """
-    Check if a function returns Sequence[Document] or List[Document].
-
-    This is used for pagination validation - functions that will be paginated
-    must return document sequences, not PaginatedResponse (since pagination
-    wrapper will produce the PaginatedResponse).
-    """
-    try:
-        type_hints = get_type_hints(tool_function)
-        return_annotation = type_hints.get("return", None)
-
-        if return_annotation is None:
-            return False
-
-        # PaginatedResponse is not allowed for functions that will be paginated
-        if return_annotation is PaginatedResponse:
-            return False
-
-        # Must be a sequence type with Document elements
+        # Check for explicit Sequence[Document] or List[Document] annotations
         origin_type = get_origin(return_annotation)
         if origin_type is None:
             return False
 
-        if origin_type in (Sequence, list, List):
+        # Handle both typing.Sequence and collections.abc.Sequence
+        if origin_type in (Sequence, ABCSequence, list, List):
             type_args = get_args(return_annotation)
             if len(type_args) == 1 and type_args[0] is Document:
                 return True
 
         return False
+    except Exception:
+        return False
+
+
+def _returns_paginated_response(tool_function: Callable) -> bool:
+    """Check if a function specifically returns PaginatedResponse."""
+    try:
+        type_hints = get_type_hints(tool_function)
+        return_annotation = type_hints.get("return", None)
+        return return_annotation is PaginatedResponse
     except Exception:
         return False

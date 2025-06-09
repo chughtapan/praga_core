@@ -335,7 +335,7 @@ class TestPagination:
                 documents=[], metadata=PageMetadata(page_number=0, has_next_page=False)
             )
 
-        with pytest.raises(TypeError, match="must return Sequence\\[Document\\]"):
+        with pytest.raises(TypeError, match="Cannot paginate tool"):
             toolkit.register_tool(
                 returns_paginated_response, "invalid_paginated", paginate=True
             )
