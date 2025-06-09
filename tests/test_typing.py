@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Sequence
+from typing import Any, Callable, Dict, List, Sequence, cast
 
 import pytest
 
@@ -12,7 +12,7 @@ from praga_core.types import Document, PageMetadata, PaginatedResponse
 
 
 class DemoToolkit(RetrieverToolkit):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
 
@@ -26,15 +26,15 @@ def get_greeting(name: str) -> List[Document]:
     return [Document(id="greet", content=f"Hello, {name}!", metadata={"name": name})]
 
 
-def test_toolkit():
-    tk = DemoToolkit()
+def test_toolkit() -> None:
+    tk: DemoToolkit = DemoToolkit()
     assert "get_timestamp" in tk._tools
     assert "get_greeting" in tk._tools
 
 
-def test_valid_return_types():
+def test_valid_return_types() -> None:
     """Test that tools with proper return types work correctly."""
-    tk = DemoToolkit()
+    tk: DemoToolkit = DemoToolkit()
 
     # Test List[Document] return
     result = tk.get_greeting("world")
@@ -44,7 +44,7 @@ def test_valid_return_types():
     assert result[0].content == "Hello, world!"
 
 
-def test_invalid_return_type_registration():
+def test_invalid_return_type_registration() -> None:
     """Test that tools with invalid return types are rejected during registration."""
 
     class BadToolkit(RetrieverToolkit):
@@ -53,8 +53,8 @@ def test_invalid_return_type_registration():
     # This should fail because it doesn't have proper type annotation
     with pytest.raises(TypeError, match="must have return type annotation"):
 
-        @BadToolkit.tool()
-        def bad_tool_no_annotation():
+        @BadToolkit.tool()  # type: ignore[arg-type]
+        def bad_tool_no_annotation() -> List[Dict[str, str]]:
             return [{"id": "bad", "content": "test"}]
 
         BadToolkit()  # This triggers registration
@@ -62,18 +62,18 @@ def test_invalid_return_type_registration():
     # This should fail because it returns wrong type
     with pytest.raises(TypeError, match="must have return type annotation"):
 
-        @BadToolkit.tool()
+        @BadToolkit.tool()  # type: ignore[arg-type]
         def bad_tool_wrong_type() -> List[str]:
             return ["hello", "world"]
 
         BadToolkit()  # This triggers registration
 
 
-def test_pagination_with_proper_types():
+def test_pagination_with_proper_types() -> None:
     """Test that pagination works with properly typed tools."""
 
     class PaginatedToolkit(RetrieverToolkit):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.register_tool(
                 method=self.get_many_docs,
@@ -88,10 +88,12 @@ def test_pagination_with_proper_types():
                 for i in range(5)
             ]
 
-    tk = PaginatedToolkit()
+    tk: PaginatedToolkit = PaginatedToolkit()
 
     # Test pagination
-    result = tk.get_many_docs(page=0)
+    # Cast to a callable that accepts 'page' for mypy
+    paginated_method = cast(Callable[..., PaginatedResponse], tk.get_many_docs)
+    result = paginated_method(page=0)
     assert isinstance(result, PaginatedResponse)
     assert len(result.documents) == 2
     assert result.metadata.page_number == 0
@@ -101,7 +103,7 @@ def test_pagination_with_proper_types():
 class TestTypeCheckingLogic:
     """Test the simplified type checking logic in retriever toolkit."""
 
-    def test_is_document_sequence_type_with_list(self):
+    def test_is_document_sequence_type_with_list(self) -> None:
         """Test that List[Document] is considered valid."""
 
         def tool_with_list() -> List[Document]:
@@ -109,7 +111,7 @@ class TestTypeCheckingLogic:
 
         assert _is_document_sequence_type(tool_with_list) is True
 
-    def test_is_document_sequence_type_with_sequence(self):
+    def test_is_document_sequence_type_with_sequence(self) -> None:
         """Test that Sequence[Document] is considered valid."""
 
         def tool_with_sequence() -> Sequence[Document]:
@@ -117,7 +119,7 @@ class TestTypeCheckingLogic:
 
         assert _is_document_sequence_type(tool_with_sequence) is True
 
-    def test_is_document_sequence_type_with_paginated_response(self):
+    def test_is_document_sequence_type_with_paginated_response(self) -> None:
         """Test that PaginatedResponse is considered valid."""
 
         def tool_with_paginated_response() -> PaginatedResponse:
@@ -126,23 +128,23 @@ class TestTypeCheckingLogic:
 
         assert _is_document_sequence_type(tool_with_paginated_response) is True
 
-    def test_is_document_sequence_type_with_invalid_type(self):
+    def test_is_document_sequence_type_with_invalid_type(self) -> None:
         """Test that invalid return types are rejected."""
 
         def tool_with_string() -> str:
             return "hello"
 
-        def tool_with_no_annotation():
+        def tool_with_no_annotation() -> List[Any]:
             return []
 
         def tool_with_wrong_sequence() -> List[str]:
             return ["hello"]
 
-        assert _is_document_sequence_type(tool_with_string) is False
+        assert _is_document_sequence_type(tool_with_string) is False  # type: ignore[arg-type]
         assert _is_document_sequence_type(tool_with_no_annotation) is False
-        assert _is_document_sequence_type(tool_with_wrong_sequence) is False
+        assert _is_document_sequence_type(tool_with_wrong_sequence) is False  # type: ignore[arg-type]
 
-    def test_is_document_sequence_type_covers_all_valid_types(self):
+    def test_is_document_sequence_type_covers_all_valid_types(self) -> None:
         """Test that _is_document_sequence_type covers all valid return types."""
 
         def tool_with_list() -> List[Document]:
@@ -159,7 +161,7 @@ class TestTypeCheckingLogic:
         assert _is_document_sequence_type(tool_with_sequence) is True
         assert _is_document_sequence_type(tool_with_paginated_response) is True
 
-    def test_returns_paginated_response_specific(self):
+    def test_returns_paginated_response_specific(self) -> None:
         """Test that _returns_paginated_response only identifies PaginatedResponse."""
 
         def tool_with_list() -> List[Document]:
@@ -176,7 +178,7 @@ class TestTypeCheckingLogic:
         assert _returns_paginated_response(tool_with_sequence) is False
         assert _returns_paginated_response(tool_with_paginated_response) is True
 
-    def test_can_be_paginated_logic(self):
+    def test_can_be_paginated_logic(self) -> None:
         """Test the logic for determining if a tool can be paginated."""
 
         def tool_with_list() -> List[Document]:
@@ -200,7 +202,7 @@ class TestTypeCheckingLogic:
 class TestPaginationPrevention:
     """Test that we prevent double-pagination correctly."""
 
-    def test_toolkit_prevents_paginating_paginated_response(self):
+    def test_toolkit_prevents_paginating_paginated_response(self) -> None:
         """Test that trying to paginate a tool that returns PaginatedResponse raises an error."""
 
         class TestToolkit(RetrieverToolkit):
@@ -220,7 +222,7 @@ class TestPaginationPrevention:
                 paginate=True,
             )
 
-    def test_toolkit_allows_paginating_document_sequence(self):
+    def test_toolkit_allows_paginating_document_sequence(self) -> None:
         """Test that we can paginate tools that return document sequences."""
 
         class TestToolkit(RetrieverToolkit):
@@ -261,7 +263,7 @@ class TestPaginationPrevention:
         assert isinstance(result1, PaginatedResponse)
         assert isinstance(result2, PaginatedResponse)
 
-    def test_toolkit_allows_non_paginated_paginated_response(self):
+    def test_toolkit_allows_non_paginated_paginated_response(self) -> None:
         """Test that we can register tools that return PaginatedResponse without pagination."""
 
         class TestToolkit(RetrieverToolkit):
@@ -294,9 +296,8 @@ class TestPaginationPrevention:
 class TestTypeEquivalence:
     """Test that PaginatedResponse is now properly recognized as a Sequence[Document]."""
 
-    def test_paginated_response_implements_sequence_protocol(self):
+    def test_paginated_response_implements_sequence_protocol(self) -> None:
         """Test that PaginatedResponse is recognized as implementing Sequence[Document]."""
-        from collections.abc import Sequence
 
         docs = [Document(id="1", content="Content 1")]
         metadata = PageMetadata(page_number=0, has_next_page=False)

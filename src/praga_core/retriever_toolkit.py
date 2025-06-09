@@ -14,6 +14,7 @@ from typing import (
     List,
     Sequence,
     Tuple,
+    Union,
     cast,
     get_args,
     get_origin,
@@ -38,8 +39,10 @@ class FunctionInvocation:
         return json.dumps(payload, sort_keys=True, default=str)
 
 
-ToolReturnType = Sequence[Document]
-ToolFunction = Callable[..., ToolReturnType]
+ToolReturnType = Union[Sequence[Document], PaginatedResponse]
+SequenceToolFunction = Callable[..., Sequence[Document]]
+PaginatedToolFunction = Callable[..., PaginatedResponse]
+ToolFunction = Union[SequenceToolFunction, PaginatedToolFunction]
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
 
@@ -55,6 +58,9 @@ class RetrieverToolkitMeta(abc.ABC):
 
         # Tool registry maps <public_name> -> <callable>
         self._tools: Dict[str, ToolFunction] = {}
+
+        # Track which tools are paginated for correct typing
+        self._paginated_tools: Dict[str, PaginatedToolFunction] = {}
 
         # Register any functions that were tagged with @RetrieverToolkit.tool
         self._register_pending_stateless_tools()
@@ -73,7 +79,7 @@ class RetrieverToolkitMeta(abc.ABC):
         paginate: bool = False,
         max_docs: int = 20,
         max_tokens: int = 2_048,
-    ):
+    ) -> None:
         """
         Register a tool with the toolkit.
 
@@ -108,20 +114,31 @@ class RetrieverToolkitMeta(abc.ABC):
                     f"Cannot paginate tool '{name}' because it already returns a PaginatedResponse"
                 )
 
-            method = self._wrap_with_pagination(
+            paginated_method = self._wrap_with_pagination(
                 method,
                 max_docs=max_docs,
                 max_tokens=max_tokens,
             )
 
-        self._tools[name] = method
-        setattr(self, name, method)
+            # Store paginated tool separately for correct typing
+            self._paginated_tools[name] = paginated_method
+            self._tools[name] = paginated_method
+            # Create a properly typed method stub for this paginated tool
+            setattr(
+                self, name, self._create_paginated_method_stub(paginated_method, name)
+            )
+        else:
+            self._tools[name] = method
+            setattr(self, name, method)
 
-    def __getattr__(self, name: str) -> ToolFunction:
+    def __getattr__(self, name: str) -> Any:
         """
         This allows mypy to understand that dynamically registered methods exist.
         """
-        if name in self._tools:
+        if name in self._paginated_tools:
+            # Return paginated tool with correct type
+            return self._paginated_tools[name]
+        elif name in self._tools:
             return self._tools[name]
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
@@ -141,7 +158,7 @@ class RetrieverToolkitMeta(abc.ABC):
         """Return a cached version of the tool function."""
 
         @wraps(tool_function)
-        def cached_tool(*args, **kwargs) -> ToolReturnType:
+        def cached_tool(*args: Any, **kwargs: Any) -> ToolReturnType:
             cache_key = self.make_cache_key(tool_function, *args, **kwargs)
 
             # Check if we have a fresh cached result
@@ -154,11 +171,13 @@ class RetrieverToolkitMeta(abc.ABC):
                     is_cache_fresh = False
 
                 # Check custom invalidation
-                if invalidator and not invalidator(cache_key, cached_value):
+                if invalidator and not invalidator(
+                    cache_key, cast(Dict[str, Any], cached_value)
+                ):
                     is_cache_fresh = False
 
                 if is_cache_fresh:
-                    return cached_value
+                    return cast(ToolReturnType, cached_value)
 
             # Cache miss or stale - compute fresh result
             fresh_result = tool_function(*args, **kwargs)
@@ -168,15 +187,17 @@ class RetrieverToolkitMeta(abc.ABC):
         return cast(ToolFunction, cached_tool)
 
     def _wrap_with_pagination(
-        self, method: ToolFunction, *, max_docs: int, max_tokens: int
-    ) -> ToolFunction:
+        self, method: SequenceToolFunction, *, max_docs: int, max_tokens: int
+    ) -> PaginatedToolFunction:
         """
         Converts a function that returns Sequence[Document] into one that
         accepts a `page` parameter and returns a PaginatedResponse.
         """
 
         @wraps(method)
-        def paginated_tool(*args, page: int = 0, **kwargs) -> PaginatedResponse:
+        def paginated_tool(
+            *args: Any, page: int = 0, **kwargs: Any
+        ) -> PaginatedResponse:
             # Get all documents from the underlying function
             all_documents: Sequence[Document] = method(*args, **kwargs)
 
@@ -211,12 +232,24 @@ class RetrieverToolkitMeta(abc.ABC):
 
         return paginated_tool
 
+    def _create_paginated_method_stub(
+        self, paginated_method: PaginatedToolFunction, name: str
+    ) -> PaginatedToolFunction:
+        """Create a method stub that preserves the paginated return type."""
+
+        @wraps(paginated_method)
+        def paginated_method_stub(*args: Any, **kwargs: Any) -> PaginatedResponse:
+            return paginated_method(*args, **kwargs)
+
+        paginated_method_stub.__name__ = name
+        return paginated_method_stub
+
     # ========================================================
     # ==========  Stateless‑tool decorator support  ==========
     # ========================================================
 
     @classmethod
-    def tool(cls, **cfg):
+    def tool(cls, **cfg: Any) -> Callable[[ToolFunction], ToolFunction]:
         """
         Thin decorator for functions that **do not** use `self`.
         Example:
@@ -224,7 +257,7 @@ class RetrieverToolkitMeta(abc.ABC):
             def get_docs() -> List[Document]: ...
         """
 
-        def marker(fn: Callable):
+        def marker(fn: ToolFunction) -> ToolFunction:
             bucket = getattr(cls, cls._PENDING_TOOLS, [])
             bucket.append((fn, cfg))
             setattr(cls, cls._PENDING_TOOLS, bucket)
@@ -238,7 +271,7 @@ class RetrieverToolkitMeta(abc.ABC):
 
         return marker
 
-    def _register_pending_stateless_tools(self):
+    def _register_pending_stateless_tools(self) -> None:
         """Gather and register any decorator‑tagged functions."""
         for fn, cfg in getattr(self.__class__, self._PENDING_TOOLS, []):
             self.register_tool(
@@ -257,7 +290,7 @@ class RetrieverToolkitMeta(abc.ABC):
     # ========================================================
 
     @abc.abstractmethod
-    def make_cache_key(self, fn: Callable, *args, **kwargs) -> str:
+    def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
         pass
 
     @abc.abstractmethod
@@ -267,7 +300,7 @@ class RetrieverToolkitMeta(abc.ABC):
 
 class RetrieverToolkit(RetrieverToolkitMeta):
 
-    def make_cache_key(self, fn: Callable, *args, **kwargs) -> str:
+    def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
         blob = json.dumps([fn.__qualname__, args, kwargs], default=str, sort_keys=True)
         return md5(blob.encode()).hexdigest()
 
@@ -280,7 +313,7 @@ class RetrieverToolkit(RetrieverToolkitMeta):
 # ========================================================
 
 
-def _create_method_stub(fn: Callable) -> Callable:
+def _create_method_stub(fn: ToolFunction) -> ToolFunction:
     """
     Create a method stub that preserves the original function's signature.
 
@@ -289,7 +322,7 @@ def _create_method_stub(fn: Callable) -> Callable:
     wrapped method (with caching, pagination, etc.) replaces this stub.
     """
 
-    def method_stub(self, *args, **kwargs):
+    def method_stub(self: Any, *args: Any, **kwargs: Any) -> ToolReturnType:
         # This will be replaced at runtime by the actual wrapped function
         return fn(*args, **kwargs)
 
@@ -299,7 +332,7 @@ def _create_method_stub(fn: Callable) -> Callable:
     return method_stub
 
 
-def _is_document_sequence_type(tool_function: Callable) -> bool:
+def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
     """
     Check if a function returns Sequence[Document], List[Document], or PaginatedResponse.
 
@@ -333,7 +366,7 @@ def _is_document_sequence_type(tool_function: Callable) -> bool:
         return False
 
 
-def _returns_paginated_response(tool_function: Callable) -> bool:
+def _returns_paginated_response(tool_function: ToolFunction) -> bool:
     """Check if a function specifically returns PaginatedResponse."""
     try:
         type_hints = get_type_hints(tool_function)
