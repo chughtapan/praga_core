@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from typing import Any, Dict, List
 
 import pytest
 
@@ -8,16 +9,16 @@ from praga_core.types import Document, PageMetadata, PaginatedResponse
 class TestDocument:
     """Test the Document dataclass."""
 
-    def test_document_creation(self):
+    def test_document_creation(self) -> None:
         """Test basic document creation."""
         doc = Document(id="test_id", content="test content")
         assert doc.id == "test_id"
         assert doc.content == "test content"
         assert doc.metadata is None
 
-    def test_document_with_metadata(self):
+    def test_document_with_metadata(self) -> None:
         """Test document creation with metadata."""
-        metadata = {"key": "value", "count": 42}
+        metadata: Dict[str, Any] = {"key": "value", "count": 42}
         doc = Document(id="test_id", content="test content", metadata=metadata)
         assert doc.metadata == metadata
 
@@ -25,7 +26,7 @@ class TestDocument:
 class TestPageMetadata:
     """Test the PageMetadata dataclass."""
 
-    def test_page_metadata_creation(self):
+    def test_page_metadata_creation(self) -> None:
         """Test basic PageMetadata creation."""
         metadata = PageMetadata(page_number=1, has_next_page=True)
         assert metadata.page_number == 1
@@ -33,7 +34,7 @@ class TestPageMetadata:
         assert metadata.total_documents is None
         assert metadata.token_count is None
 
-    def test_page_metadata_with_optional_fields(self):
+    def test_page_metadata_with_optional_fields(self) -> None:
         """Test PageMetadata creation with optional fields."""
         metadata = PageMetadata(
             page_number=2, has_next_page=False, total_documents=100, token_count=500
@@ -48,7 +49,7 @@ class TestPaginatedResponseSequenceBehavior:
     """Test that PaginatedResponse behaves like a Sequence."""
 
     @pytest.fixture
-    def sample_documents(self):
+    def sample_documents(self) -> List[Document]:
         """Create sample documents for testing."""
         return [
             Document(id="doc1", content="Content 1", metadata={"index": 1}),
@@ -57,28 +58,36 @@ class TestPaginatedResponseSequenceBehavior:
         ]
 
     @pytest.fixture
-    def paginated_response(self, sample_documents):
+    def paginated_response(self, sample_documents: List[Document]) -> PaginatedResponse:
         """Create a sample PaginatedResponse for testing."""
         metadata = PageMetadata(page_number=0, has_next_page=True, total_documents=10)
         return PaginatedResponse(documents=sample_documents, metadata=metadata)
 
     @pytest.fixture
-    def empty_paginated_response(self):
+    def empty_paginated_response(self) -> PaginatedResponse:
         """Create an empty PaginatedResponse for testing."""
         metadata = PageMetadata(page_number=0, has_next_page=False, total_documents=0)
         return PaginatedResponse(documents=[], metadata=metadata)
 
-    def test_implements_sequence_protocol(self, paginated_response):
+    def test_implements_sequence_protocol(
+        self, paginated_response: PaginatedResponse
+    ) -> None:
         """Test that PaginatedResponse implements the Sequence protocol."""
         # Check that it's considered a Sequence
         assert isinstance(paginated_response, Sequence)
 
-    def test_len(self, paginated_response, empty_paginated_response):
+    def test_len(
+        self,
+        paginated_response: PaginatedResponse,
+        empty_paginated_response: PaginatedResponse,
+    ) -> None:
         """Test __len__ method."""
         assert len(paginated_response) == 3
         assert len(empty_paginated_response) == 0
 
-    def test_getitem_by_index(self, paginated_response, sample_documents):
+    def test_getitem_by_index(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test __getitem__ method with integer indices."""
         # Test positive indices
         assert paginated_response[0] == sample_documents[0]
@@ -90,7 +99,9 @@ class TestPaginatedResponseSequenceBehavior:
         assert paginated_response[-2] == sample_documents[1]
         assert paginated_response[-3] == sample_documents[0]
 
-    def test_getitem_by_slice(self, paginated_response, sample_documents):
+    def test_getitem_by_slice(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:  # Added types
         """Test __getitem__ method with slice objects."""
         # Test basic slicing
         slice_result = paginated_response[1:]
@@ -106,7 +117,11 @@ class TestPaginatedResponseSequenceBehavior:
         slice_result = paginated_response[::2]
         assert list(slice_result) == sample_documents[::2]
 
-    def test_getitem_index_error(self, paginated_response, empty_paginated_response):
+    def test_getitem_index_error(
+        self,
+        paginated_response: PaginatedResponse,
+        empty_paginated_response: PaginatedResponse,
+    ) -> None:
         """Test __getitem__ method raises IndexError for invalid indices."""
         with pytest.raises(IndexError):
             paginated_response[10]
@@ -117,23 +132,29 @@ class TestPaginatedResponseSequenceBehavior:
         with pytest.raises(IndexError):
             empty_paginated_response[0]
 
-    def test_iteration(self, paginated_response, sample_documents):
+    def test_iteration(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test __iter__ method."""
         iterated_docs = list(paginated_response)
         assert iterated_docs == sample_documents
 
         # Test that we can iterate multiple times
         count = 0
-        for doc in paginated_response:
+        for _ in paginated_response:
             count += 1
         assert count == 3
 
-    def test_empty_iteration(self, empty_paginated_response):
+    def test_empty_iteration(self, empty_paginated_response: PaginatedResponse) -> None:
         """Test iteration over empty response."""
         iterated_docs = list(empty_paginated_response)
         assert iterated_docs == []
 
-    def test_bool_conversion(self, paginated_response, empty_paginated_response):
+    def test_bool_conversion(
+        self,
+        paginated_response: PaginatedResponse,
+        empty_paginated_response: PaginatedResponse,
+    ) -> None:
         """Test __bool__ method."""
         assert bool(paginated_response) is True
         assert bool(empty_paginated_response) is False
@@ -149,7 +170,9 @@ class TestPaginatedResponseSequenceBehavior:
         else:
             assert True
 
-    def test_contains(self, paginated_response, sample_documents):
+    def test_contains(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test __contains__ method."""
         # Test with documents that are in the response
         assert sample_documents[0] in paginated_response
@@ -160,12 +183,16 @@ class TestPaginatedResponseSequenceBehavior:
         other_doc = Document(id="other", content="Other content")
         assert other_doc not in paginated_response
 
-    def test_contains_empty_response(self, empty_paginated_response):
+    def test_contains_empty_response(
+        self, empty_paginated_response: PaginatedResponse
+    ) -> None:
         """Test __contains__ method with empty response."""
         doc = Document(id="test", content="Test content")
         assert doc not in empty_paginated_response
 
-    def test_sequence_like_operations(self, paginated_response, sample_documents):
+    def test_sequence_like_operations(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test various sequence-like operations."""
         # Test slicing behavior (if getitem supports it)
         try:
@@ -182,7 +209,9 @@ class TestPaginatedResponseSequenceBehavior:
         for index, doc in zip(indices, paginated_response):
             assert doc == sample_documents[index]
 
-    def test_count_method_via_sequence(self, paginated_response, sample_documents):
+    def test_count_method_via_sequence(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test count method inherited from Sequence ABC."""
         # Since PaginatedResponse doesn't override count, it should use
         # the default implementation from Sequence ABC
@@ -196,11 +225,13 @@ class TestPaginatedResponseSequenceBehavior:
         count = sum(1 for doc in paginated_response if doc == other_doc)
         assert count == 0
 
-    def test_index_method_simulation(self, paginated_response, sample_documents):
+    def test_index_method_simulation(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test index-like functionality (finding position of document)."""
 
         # Since we implement __iter__ and __getitem__, we can simulate index
-        def find_index(response, target_doc):
+        def find_index(response: PaginatedResponse, target_doc: Document) -> int:
             for i, doc in enumerate(response):
                 if doc == target_doc:
                     return i
@@ -214,13 +245,15 @@ class TestPaginatedResponseSequenceBehavior:
         with pytest.raises(ValueError):
             find_index(paginated_response, other_doc)
 
-    def test_reverse_iteration(self, paginated_response, sample_documents):
+    def test_reverse_iteration(
+        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+    ) -> None:
         """Test reverse iteration."""
         reversed_docs = list(reversed(paginated_response))
         expected = list(reversed(sample_documents))
         assert reversed_docs == expected
 
-    def test_equality_comparison(self, sample_documents):
+    def test_equality_comparison(self, sample_documents: List[Document]) -> None:
         """Test equality between PaginatedResponse instances."""
         metadata1 = PageMetadata(page_number=0, has_next_page=True)
         metadata2 = PageMetadata(page_number=0, has_next_page=True)
@@ -240,7 +273,7 @@ class TestPaginatedResponseSequenceBehavior:
 class TestPaginatedResponseEdgeCases:
     """Test edge cases for PaginatedResponse."""
 
-    def test_single_document(self):
+    def test_single_document(self) -> None:
         """Test with single document."""
         doc = Document(id="single", content="Single doc")
         metadata = PageMetadata(page_number=0, has_next_page=False)
@@ -252,7 +285,7 @@ class TestPaginatedResponseEdgeCases:
         assert bool(response) is True
         assert list(response) == [doc]
 
-    def test_large_response(self):
+    def test_large_response(self) -> None:
         """Test with many documents."""
         docs = [Document(id=f"doc_{i}", content=f"Content {i}") for i in range(100)]
         metadata = PageMetadata(page_number=0, has_next_page=True, total_documents=1000)

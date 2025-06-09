@@ -6,7 +6,7 @@ from praga_core.types import Document
 
 
 class NullToolkit(RetrieverToolkit):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         # Register a state‑ful method (needs `self`)

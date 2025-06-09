@@ -1,6 +1,6 @@
 import time
 from datetime import timedelta
-from typing import Dict, List
+from typing import Any, Callable, Dict, List, cast
 
 import pytest
 
@@ -11,12 +11,12 @@ from praga_core.types import Document, PageMetadata, PaginatedResponse
 class MockRetrieverToolkit(RetrieverToolkit):
     """Mock implementation of RetrieverToolkit for testing purposes."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.call_count = 0
-        self.cache_key_calls = []
+        self.call_count: int = 0
+        self.cache_key_calls: List[str] = []
 
-    def reset_counters(self):
+    def reset_counters(self) -> None:
         """Reset test counters."""
         self.call_count = 0
         self.cache_key_calls = []
@@ -24,13 +24,13 @@ class MockRetrieverToolkit(RetrieverToolkit):
 
 # Test fixtures
 @pytest.fixture
-def toolkit():
+def toolkit() -> MockRetrieverToolkit:
     """Create a fresh RetrieverToolkit for each test."""
     return MockRetrieverToolkit()
 
 
 @pytest.fixture
-def sample_documents():
+def sample_documents() -> List[Document]:
     """Create sample documents for testing."""
     return [
         Document(
@@ -45,7 +45,7 @@ def sample_documents():
 class TestCaching:
     """Test caching functionality of the RetrieverToolkit."""
 
-    def test_cache_basic_functionality(self, toolkit):
+    def test_cache_basic_functionality(self, toolkit: MockRetrieverToolkit) -> None:
         """Test basic caching behavior - cache hits and misses."""
 
         def get_docs() -> List[Document]:
@@ -68,7 +68,9 @@ class TestCaching:
         # Results should be identical
         assert result1 == result2
 
-    def test_cache_with_different_arguments(self, toolkit):
+    def test_cache_with_different_arguments(
+        self, toolkit: MockRetrieverToolkit
+    ) -> None:
         """Test that cache distinguishes between different arguments."""
 
         def get_docs_with_arg(name: str) -> List[Document]:
@@ -87,7 +89,7 @@ class TestCaching:
         assert result2[0].content == "arg2_2"
         assert result3[0].content == "arg1_1"  # Cached result
 
-    def test_cache_ttl_expiration(self, toolkit):
+    def test_cache_ttl_expiration(self, toolkit: MockRetrieverToolkit) -> None:
         """Test that cache entries expire after TTL."""
 
         def get_docs() -> List[Document]:
@@ -116,7 +118,7 @@ class TestCaching:
         assert toolkit.call_count == 2
         assert result3[0].content == "call_2"
 
-    def test_cache_invalidator(self, toolkit):
+    def test_cache_invalidator(self, toolkit: MockRetrieverToolkit) -> None:
         """Test custom cache invalidation logic."""
 
         def get_docs() -> List[Document]:
@@ -124,7 +126,7 @@ class TestCaching:
             return [Document(id="test", content=f"call_{toolkit.call_count}")]
 
         # Custom invalidator that always invalidates
-        def always_invalidate(cache_key: str, cached_value: Dict) -> bool:
+        def always_invalidate(cache_key: str, cached_value: Dict[str, Any]) -> bool:
             return False  # Always invalidate
 
         toolkit.register_tool(
@@ -139,7 +141,7 @@ class TestCaching:
         assert result1[0].content == "call_1"
         assert result2[0].content == "call_2"
 
-    def test_cache_invalidator_conditional(self, toolkit):
+    def test_cache_invalidator_conditional(self, toolkit: MockRetrieverToolkit) -> None:
         """Test conditional cache invalidation."""
 
         def get_docs() -> List[Document]:
@@ -147,7 +149,9 @@ class TestCaching:
             return [Document(id="test", content=f"call_{toolkit.call_count}")]
 
         # Invalidator that invalidates after 2 calls
-        def conditional_invalidate(cache_key: str, cached_value: Dict) -> bool:
+        def conditional_invalidate(
+            cache_key: str, cached_value: Dict[str, Any]
+        ) -> bool:
             return toolkit.call_count < 2
 
         toolkit.register_tool(
@@ -169,7 +173,7 @@ class TestCaching:
         _ = toolkit.get_docs()
         assert toolkit.call_count == 3
 
-    def test_cache_key_generation(self, toolkit):
+    def test_cache_key_generation(self, toolkit: MockRetrieverToolkit) -> None:
         """Test that cache keys are generated consistently."""
 
         def get_docs(arg1: str, arg2: int = 10) -> List[Document]:
@@ -187,7 +191,9 @@ class TestCaching:
 class TestPagination:
     """Test pagination functionality of the RetrieverToolkit."""
 
-    def test_pagination_basic_functionality(self, toolkit, sample_documents):
+    def test_pagination_basic_functionality(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
         """Test basic pagination behavior."""
 
         def get_all_docs() -> List[Document]:
@@ -207,33 +213,40 @@ class TestPagination:
         doc_ids = [doc.id for doc in result.documents]
         assert doc_ids == ["doc_0", "doc_1", "doc_2"]
 
-    def test_pagination_multiple_pages(self, toolkit, sample_documents):
+    def test_pagination_multiple_pages(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
         """Test pagination across multiple pages."""
 
         def get_all_docs() -> List[Document]:
             return sample_documents
 
         toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=4)
+        paginated_tool_call = cast(
+            Callable[..., PaginatedResponse], toolkit.get_all_docs
+        )
 
         # Page 0
-        page0 = toolkit.get_all_docs(page=0)
+        page0 = paginated_tool_call(page=0)
         assert len(page0.documents) == 4
         assert page0.metadata.page_number == 0
         assert page0.metadata.has_next_page is True
 
         # Page 1
-        page1 = toolkit.get_all_docs(page=1)
+        page1 = paginated_tool_call(page=1)
         assert len(page1.documents) == 4
         assert page1.metadata.page_number == 1
         assert page1.metadata.has_next_page is True
 
         # Page 2 (partial)
-        page2 = toolkit.get_all_docs(page=2)
+        page2 = paginated_tool_call(page=2)
         assert len(page2.documents) == 2  # Remaining documents
         assert page2.metadata.page_number == 2
         assert page2.metadata.has_next_page is False
 
-    def test_pagination_last_page(self, toolkit, sample_documents):
+    def test_pagination_last_page(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:  # Added types
         """Test pagination on the last page."""
 
         def get_all_docs() -> List[Document]:
@@ -251,7 +264,9 @@ class TestPagination:
         assert len(page1.documents) == 2
         assert page1.metadata.has_next_page is False
 
-    def test_pagination_empty_page(self, toolkit, sample_documents):
+    def test_pagination_empty_page(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
         """Test pagination when requesting a page beyond available data."""
 
         def get_all_docs() -> List[Document]:
@@ -269,7 +284,7 @@ class TestPagination:
         assert len(page1.documents) == 0
         assert page1.metadata.has_next_page is False
 
-    def test_pagination_with_token_limits(self, toolkit):
+    def test_pagination_with_token_limits(self, toolkit: MockRetrieverToolkit) -> None:
         """Test pagination with token count limits."""
 
         docs_with_tokens = [
@@ -301,7 +316,9 @@ class TestPagination:
         assert result.documents[1].id == "doc_2"
         assert result.metadata.token_count == 15
 
-    def test_pagination_with_missing_token_metadata(self, toolkit):
+    def test_pagination_with_missing_token_metadata(
+        self, toolkit: MockRetrieverToolkit
+    ) -> None:
         """Test pagination when documents don't have token_count metadata."""
 
         docs_no_tokens = [
@@ -320,14 +337,15 @@ class TestPagination:
             max_docs=5,
             max_tokens=10,
         )
-
         result = toolkit.get_docs_no_tokens(page=0)
 
         # Should include all documents since they have 0 tokens each
         assert len(result.documents) == 3
         assert result.metadata.token_count == 0
 
-    def test_pagination_invalid_return_type(self, toolkit):
+    def test_pagination_invalid_return_type(
+        self, toolkit: MockRetrieverToolkit
+    ) -> None:
         """Test that pagination fails with invalid return types."""
 
         def returns_paginated_response() -> PaginatedResponse:
@@ -344,7 +362,9 @@ class TestPagination:
 class TestCombinedFeatures:
     """Test combinations of caching and pagination."""
 
-    def test_cache_and_pagination_together(self, toolkit, sample_documents):
+    def test_cache_and_pagination_together(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
         """Test that caching and pagination work together correctly."""
 
         def get_docs() -> List[Document]:
@@ -375,7 +395,7 @@ class TestCombinedFeatures:
 class TestDecoratorTools:
     """Test the @RetrieverToolkit.tool decorator functionality."""
 
-    def test_decorator_basic_functionality(self):
+    def test_decorator_basic_functionality(self) -> None:
         """Test basic decorator-based tool registration."""
 
         call_count = {"value": 0}
@@ -399,7 +419,7 @@ class TestDecoratorTools:
         assert len(result) == 1
         assert result[0].content == "call_1"
 
-    def test_decorator_with_caching(self):
+    def test_decorator_with_caching(self) -> None:
         """Test decorator with caching options."""
 
         call_count = {"value": 0}
@@ -423,7 +443,7 @@ class TestDecoratorTools:
         assert call_count["value"] == 1
         assert result1 == result2
 
-    def test_decorator_with_pagination(self, sample_documents):
+    def test_decorator_with_pagination(self, sample_documents: List[Document]) -> None:
         """Test decorator with pagination options."""
 
         class PaginatedDecoratorToolkit(RetrieverToolkit):
@@ -434,13 +454,12 @@ class TestDecoratorTools:
             return sample_documents
 
         toolkit = PaginatedDecoratorToolkit()
-
         result = toolkit.get_paginated_docs(page=0)
         assert isinstance(result, PaginatedResponse)
         assert len(result.documents) == 4
         assert result.metadata.has_next_page is True
 
-    def test_decorator_with_all_options(self, sample_documents):
+    def test_decorator_with_all_options(self, sample_documents: List[Document]) -> None:
         """Test decorator with all options combined."""
 
         call_count = {"value": 0}
@@ -476,25 +495,25 @@ class TestDecoratorTools:
 class TestErrorHandling:
     """Test error handling and edge cases."""
 
-    def test_invalid_tool_registration(self, toolkit):
+    def test_invalid_tool_registration(self, toolkit: MockRetrieverToolkit) -> None:
         """Test registration of tools with invalid signatures."""
 
-        def no_return_annotation():
+        def no_return_annotation():  # type: ignore[no-untyped-def]
             return []
 
         with pytest.raises(TypeError, match="must have return type annotation"):
             toolkit.register_tool(no_return_annotation, "invalid")
 
-    def test_invalid_return_type(self, toolkit):
+    def test_invalid_return_type(self, toolkit: MockRetrieverToolkit) -> None:
         """Test registration of tools with invalid return types."""
 
         def wrong_return_type() -> str:
             return "not a document list"
 
         with pytest.raises(TypeError, match="must have return type annotation"):
-            toolkit.register_tool(wrong_return_type, "invalid")
+            toolkit.register_tool(wrong_return_type, "invalid")  # type: ignore[arg-type]
 
-    def test_tool_attribute_access(self, toolkit):
+    def test_tool_attribute_access(self, toolkit: MockRetrieverToolkit) -> None:
         """Test accessing tools as attributes."""
 
         def valid_tool() -> List[Document]:
