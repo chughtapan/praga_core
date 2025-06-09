@@ -1,0 +1,43 @@
+[project]
+name = "praga_core"
+version = "0.0.0dev"
+description = "Core library for building Pragmatic RAG Agents"
+authors = [
+    {name = "Tapan Chugh", email = "tapanc@cs.washington.edu"}
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mypy>=1.5.1",
+    "flake8-pyproject==1.2.3",
+    "flake8>=6.1.0",
+    "autoflake8>=0.4.1",
+    "black>=23.9.1",
+    "isort>=5.12.0",
+    "pre-commit==3.5.0",
+    "pyproject-autoflake>=1.0.2",
+    "pytest>=8.4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+
+[tool.flake8]
+max-line-length = 80
+extend-select = "B950"
+extend-ignore = "E203,E501,E701,W291"
+
