@@ -40,6 +40,7 @@ line_length = 88
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"
+exclude = "^examples/google_api"
 
 [tool.flake8]
 max-line-length = 80

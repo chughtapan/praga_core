@@ -9,6 +9,7 @@ repos:
         stages: [commit]
         additional_dependencies: []
         pass_filenames: true
+        exclude: "^examples/google_api"
 
       - id: isort
         name: isort
