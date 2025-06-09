@@ -23,6 +23,10 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
 [tool.black]
 line-length = 88
 target-version = ['py311']
@@ -35,6 +39,8 @@ line_length = 88
 
 [tool.mypy]
 python_version = "3.11"
+mypy_path = "src"
+exclude = "^examples/google_api"
 
 [tool.flake8]
 max-line-length = 80
