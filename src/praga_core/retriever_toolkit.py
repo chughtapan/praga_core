@@ -1,30 +1,34 @@
-"""
-praga/retriever_toolkit.py
-──────────────────────────
-A **beginner‑friendly reference implementation** of the RetrieverToolkit.
-
- • Only the Python standard‑library is used        (no pydantic, no fancy hashes)
- • Each helper is broken into 5–15 line functions  (easy to read / step through)
- • Generous comments explain *why* every step exists.
-"""
-
 from __future__ import annotations
 
 import json
 from abc import ABC
-from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import wraps
-from hashlib import md5  # small but good‑enough hash
-from typing import Any, Callable, Dict, List, Protocol, Tuple
+from hashlib import md5
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Sequence,
+    Tuple,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
-from .types import Document, FunctionInvocation
-
-
-class CacheInvalidator(Protocol):
-    """Return True if a cached value is *still* valid."""
-
-    def __call__(self, key: str, value: Any) -> bool: ...
+from .types import (
+    CacheInvalidator,
+    Document,
+    DocumentSequenceFunction,
+    FunctionInvocation,
+    PageMetadata,
+    PaginatedFunction,
+    PaginatedResponse,
+    ToolFunction,
+    ToolReturnType,
+)
 
 
 def _create_method_stub(fn: Callable) -> Callable:
@@ -46,16 +50,17 @@ def _create_method_stub(fn: Callable) -> Callable:
     return method_stub
 
 
-# ╔══════════════════════════════════════════════════════════╗
-# ║                    RetrieverToolkit                      ║
-# ╚══════════════════════════════════════════════════════════╝
 class RetrieverToolkit(ABC):
     """
     A toolbox that holds **retriever functions** plus:
         • A per‑instance in‑memory cache
         • Optional pagination & cache wrappers
-        • A context manager for query‑level logging
+        • A context manager for querylevel logging
         • A speculation hook (override in subclasses)
+
+    All registered tools must return either:
+        • Sequence[Document] (for unpaginated results)
+        • PaginatedResponse (for paginated results)
     """
 
     # Stash for decorator‑based (stateless) tools – stored at *class* level
@@ -69,7 +74,7 @@ class RetrieverToolkit(ABC):
         self._cache: Dict[str, Tuple[Any, datetime]] = {}
 
         # Tool registry maps <public_name> -> <callable>
-        self._tools: Dict[str, Callable] = {}
+        self._tools: Dict[str, ToolFunction] = {}
 
         # Register any functions that were tagged with @RetrieverToolkit.tool
         self._register_pending_stateless_tools()
@@ -84,7 +89,7 @@ class RetrieverToolkit(ABC):
         """
         A stable key made of:
         1) the function's *fully qualified* name
-        2) the positional & keyword arguments (JSON‑serialised)
+        2) the positional & keyword arguments (JSON-serialised)
 
         md5 is simple, available everywhere, and fine for cache keys.
         """
@@ -95,112 +100,98 @@ class RetrieverToolkit(ABC):
         )
         return md5(blob.encode()).hexdigest()
 
-    @contextmanager
-    def logging_context(self, query: str):
-        """
-        Gives the agent a harmless place to attach per‑query logs.
-        The base class does *nothing* – advanced users can override.
-        """
-        query_id = self.make_cache_key(lambda x: x, query)
-        try:
-            yield query_id
-        finally:
-            pass  # plug in your DB / stdout / OpenTelemetry here
+    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
+        return []
 
-    # Pure‑python token guess: 1.3 × word count  —— good enough
-    @staticmethod
-    def estimate_tokens(text: str) -> int:
-        return int(len(text.split()) * 1.3)
-
-    # ---------------- speculation ---------------------------
-    # Override this for BM25 / embeddings etc.
-    def speculate(
-        self, query: str, *, top_k: int = 10
-    ) -> List[Tuple[FunctionInvocation, List[Document]]]:
-        return []  # no‑op default
-
-    # ========================================================
     # ===============  Wrapping utilities  ===================
-    # ========================================================
-    # Keep each wrapper short so it’s easy to follow.
 
-    # ---- caching ------------------------------------------
     def _wrap_with_cache(
         self,
-        fn: Callable,
+        tool_function: ToolFunction,
         *,
         invalidator: CacheInvalidator | None,
         ttl: timedelta | None,
-    ) -> Callable:
-        """Return a new function that consults & updates self._cache."""
+    ) -> ToolFunction:
+        """Return a cached version of the tool function."""
 
-        @wraps(fn)
-        def cached_fn(*args, **kwargs):
-            key = self.make_cache_key(fn, *args, **kwargs)
+        @wraps(tool_function)
+        def cached_tool(*args, **kwargs) -> ToolReturnType:
+            cache_key = self.make_cache_key(tool_function, *args, **kwargs)
 
-            if key in self._cache:
-                value, timestamp = self._cache[key]
-                is_fresh = True
+            # Check if we have a fresh cached result
+            if cache_key in self._cache:
+                cached_value, cached_timestamp = self._cache[cache_key]
+                is_cache_fresh = True
 
-                if ttl and datetime.utcnow() - timestamp > ttl:
-                    is_fresh = False
-                if invalidator and not invalidator(key, value):
-                    is_fresh = False
+                # Check TTL expiration
+                if ttl and datetime.utcnow() - cached_timestamp > ttl:
+                    is_cache_fresh = False
 
-                if is_fresh:
-                    return value
+                # Check custom invalidation
+                if invalidator and not invalidator(cache_key, cached_value):
+                    is_cache_fresh = False
 
-            # Cache miss or stale
-            value = fn(*args, **kwargs)
-            self._cache[key] = (value, datetime.utcnow())
-            return value
+                if is_cache_fresh:
+                    return cached_value
 
-        return cached_fn
+            # Cache miss or stale - compute fresh result
+            fresh_result = tool_function(*args, **kwargs)
+            self._cache[cache_key] = (fresh_result, datetime.utcnow())
+            return fresh_result
 
-    # ---- pagination ---------------------------------------
+        return cast(ToolFunction, cached_tool)
+
     def _wrap_with_pagination(
-        self, fn: Callable, *, max_docs: int, max_tokens: int
-    ) -> Callable:
+        self, method: DocumentSequenceFunction, *, max_docs: int, max_tokens: int
+    ) -> PaginatedFunction:
         """
-        Turns a *flat* retriever (List[Document]) into one that accepts
-        `page=N` and returns a dict with docs + metadata.
+        Converts a function that returns Sequence[Document] into one that
+        accepts a `page` parameter and returns a PaginatedResponse.
         """
 
-        @wraps(fn)
-        def paginated_fn(*args, page: int = 0, **kwargs):
-            full_docs: List[Document] = fn(*args, **kwargs)
+        @wraps(method)
+        def paginated_tool(*args, page: int = 0, **kwargs) -> PaginatedResponse:
+            # Get all documents from the underlying function
+            all_documents: Sequence[Document] = method(*args, **kwargs)
 
-            # Step 1 – slice by document count
-            doc_start = page * max_docs
-            doc_end = doc_start + max_docs
-            docs_slice = full_docs[doc_start:doc_end]
+            # Calculate page slice boundaries
+            page_start = page * max_docs
+            page_end = page_start + max_docs
+            page_documents = all_documents[page_start:page_end]
 
-            # Step 2 – respect token budget
-            result_docs: List[Document] = []
-            running_tokens = 0
-            for doc in docs_slice:
-                metadata = doc.metadata or {}
-                running_tokens += metadata.get("token_count", 0)
-                if running_tokens > max_tokens:
+            # Apply token budget limit within the page
+            final_documents: List[Document] = []
+            total_tokens = 0
+
+            for document in page_documents:
+                doc_metadata = document.metadata or {}
+                doc_tokens = doc_metadata.get("token_count", 0)
+
+                if total_tokens + doc_tokens > max_tokens:
                     break
-                result_docs.append(doc)
 
-            return {
-                "docs": result_docs,
-                "page": page,
-                "has_next": doc_end < len(full_docs),
-                "token_est": running_tokens,
-            }
+                final_documents.append(document)
+                total_tokens += doc_tokens
 
-        return paginated_fn
+            return PaginatedResponse(
+                documents=final_documents,
+                metadata=PageMetadata(
+                    page_number=page,
+                    has_next_page=page_end < len(all_documents),
+                    total_documents=len(all_documents),
+                    token_count=total_tokens,
+                ),
+            )
+
+        return paginated_tool
 
     # ========================================================
     # ================  Tool registration  ===================
     # ========================================================
-    def _register_tool(
+    def register_tool(
         self,
         *,
-        method: Callable,
+        method: ToolFunction,
         name: str,
         cache: bool = False,
         ttl: timedelta | None = None,
@@ -210,34 +201,50 @@ class RetrieverToolkit(ABC):
         max_tokens: int = 2_048,
     ):
         """
-        Common entry point used from __init__.
+        Register a tool with the toolkit.
 
-        1) Wrap method with cache and/or pagination.
-        2) Add to `. _tools` (visible to the agent).
-        3) Replace self.<name> so you can still call it directly.
+        Steps:
+        1) Validate the method has proper return type annotations
+        2) Add runtime validation wrapper
+        3) Apply caching if requested
+        4) Apply pagination if requested
+        5) Register in the tool registry
         """
-        wrapped = method
+        if not _has_valid_tool_return_annotation(method):
+            raise TypeError(
+                f"""Tool "{name}" must have return type annotation of either 
+                "Sequence[Document]", "List[Document]', or "PaginatedResponse". 
+                Got: {getattr(method, '__annotations__', {})}
+            """
+            )
 
         if cache:
-            wrapped = self._wrap_with_cache(
-                wrapped,
+            method = self._wrap_with_cache(
+                method,
                 invalidator=invalidator,
                 ttl=ttl,
             )
 
         if paginate:
-            wrapped = self._wrap_with_pagination(
-                wrapped,
+            if not _returns_document_sequence(method):
+                raise TypeError(
+                    f"Tool '{name}' with pagination=True must return Sequence[Document] or List[Document], "
+                    f"not PaginatedResponse (pagination wrapper will create the PaginatedResponse)"
+                )
+
+            paginated_tool = self._wrap_with_pagination(
+                cast(DocumentSequenceFunction, method),
                 max_docs=max_docs,
                 max_tokens=max_tokens,
             )
 
-        self._tools[name] = wrapped
-        setattr(self, name, wrapped)  # keeps instance attribute useful
+            method = cast(ToolFunction, paginated_tool)
 
-    def __getattr__(self, name: str) -> Callable[..., Any]:
+        self._tools[name] = method
+        setattr(self, name, method)
+
+    def __getattr__(self, name: str) -> ToolFunction:
         """
-        Enable dynamic attribute access for registered tools.
         This allows mypy to understand that dynamically registered methods exist.
         """
         if name in self._tools:
@@ -255,7 +262,7 @@ class RetrieverToolkit(ABC):
         Thin decorator for functions that **do not** use `self`.
         Example:
             @RetrieverToolkit.tool(cache=False)
-            def utc_time(): ...
+            def get_docs() -> List[Document]: ...
         """
 
         def marker(fn: Callable):
@@ -275,7 +282,7 @@ class RetrieverToolkit(ABC):
     # Gather and register any decorator‑tagged functions
     def _register_pending_stateless_tools(self):
         for fn, cfg in getattr(self.__class__, self._PENDING_TOOLS, []):
-            self._register_tool(
+            self.register_tool(
                 method=fn,
                 name=fn.__name__,
                 cache=cfg.get("cache", False),
@@ -285,3 +292,54 @@ class RetrieverToolkit(ABC):
                 max_docs=cfg.get("max_docs", 20),
                 max_tokens=cfg.get("max_tokens", 2048),
             )
+
+
+def _has_valid_tool_return_annotation(tool_function: Callable) -> bool:
+    """Check if a function has a valid return type annotation for a retriever tool."""
+    try:
+        type_hints = get_type_hints(tool_function)
+        return_annotation = type_hints.get("return", None)
+
+        if return_annotation is None:
+            return False
+
+        if return_annotation is PaginatedResponse:
+            return True
+
+        return _returns_document_sequence(tool_function)
+    except Exception:
+        return False
+
+
+def _returns_document_sequence(tool_function: ToolFunction) -> bool:
+    """
+    Check if a function returns Sequence[Document] or List[Document].
+
+    This is used for pagination validation - functions that will be paginated
+    must return document sequences, not PaginatedResponse (since pagination
+    wrapper will produce the PaginatedResponse).
+    """
+    try:
+        type_hints = get_type_hints(tool_function)
+        return_annotation = type_hints.get("return", None)
+
+        if return_annotation is None:
+            return False
+
+        # PaginatedResponse is not allowed for functions that will be paginated
+        if return_annotation is PaginatedResponse:
+            return False
+
+        # Must be a sequence type with Document elements
+        origin_type = get_origin(return_annotation)
+        if origin_type is None:
+            return False
+
+        if origin_type in (Sequence, list, List):
+            type_args = get_args(return_annotation)
+            if len(type_args) == 1 and type_args[0] is Document:
+                return True
+
+        return False
+    except Exception:
+        return False

@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 
 @dataclass
@@ -39,4 +39,21 @@ class FunctionInvocation:
         return json.dumps(payload, sort_keys=True, default=str)
 
 
+# ========================================================
+# ================  Tool Type Definitions  ==============
+# ========================================================
+
+# Valid return types for retriever tools
+ToolReturnType = Union[Sequence[Document], PaginatedResponse]
+
+# Function signature for a valid retriever tool
+ToolFunction = Callable[..., ToolReturnType]
+
+# Function that returns only Document sequences (used for pagination input)
+DocumentSequenceFunction = Callable[..., Sequence[Document]]
+
+# Function that returns paginated results
+PaginatedFunction = Callable[..., PaginatedResponse]
+
+# Cache invalidation function
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
