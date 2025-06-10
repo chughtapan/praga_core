@@ -10,7 +10,7 @@ repos:
         stages: [commit]
         additional_dependencies: []
         pass_filenames: true
-        exclude: tests/
+        exclude: ^(tests/|examples/)
 
       - id: isort
         name: isort

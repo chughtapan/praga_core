@@ -127,6 +127,64 @@ class MockRetrieverToolkit(RetrieverToolkit):
         return None
 
 
+class MockEmailToolkit(RetrieverToolkit):
+    """Mock email toolkit for testing multiple toolkits."""
+
+    def __init__(self):
+        super().__init__()
+
+        # Mock email documents
+        self.emails = [
+            MockDocument("email_1", "Meeting about AI project from John"),
+            MockDocument("email_2", "Budget discussion from Sarah"),
+        ]
+
+        # Register email-specific tools
+        self.register_tool(method=self.search_emails, name="search_emails")
+
+    def search_emails(self, query: str) -> List[Document]:
+        """Search through emails."""
+        if not query:
+            return []
+        return [doc for doc in self.emails if query.lower() in doc.content.lower()]
+
+    def get_document_by_id(self, document_id: str) -> Document | None:
+        """Get email by ID."""
+        for doc in self.emails:
+            if doc.id == document_id:
+                return doc
+        return None
+
+
+class MockCalendarToolkit(RetrieverToolkit):
+    """Mock calendar toolkit for testing multiple toolkits."""
+
+    def __init__(self):
+        super().__init__()
+
+        # Mock calendar documents
+        self.events = [
+            MockDocument("cal_1", "Daily standup meeting"),
+            MockDocument("cal_2", "Team planning session"),
+        ]
+
+        # Register calendar-specific tools
+        self.register_tool(method=self.search_events, name="search_events")
+
+    def search_events(self, query: str) -> List[Document]:
+        """Search through calendar events."""
+        if not query:
+            return []
+        return [doc for doc in self.events if query.lower() in doc.content.lower()]
+
+    def get_document_by_id(self, document_id: str) -> Document | None:
+        """Get event by ID."""
+        for doc in self.events:
+            if doc.id == document_id:
+                return doc
+        return None
+
+
 class TestReActAgentBasic:
     """Test basic ReAct agent functionality."""
 
@@ -283,6 +341,122 @@ class TestReActAgentBasic:
         references = self.agent.search("Test markdown parsing")
         assert len(references) == 1
         assert references[0].id == "1"
+
+
+class TestReActAgentMultipleToolkits:
+    """Test ReAct agent with multiple toolkits."""
+
+    def setup_method(self):
+        """Set up test fixtures with multiple toolkits."""
+        self.mock_client = MockOpenAIClient()
+        self.email_toolkit = MockEmailToolkit()
+        self.calendar_toolkit = MockCalendarToolkit()
+
+        # Test with multiple toolkits
+        self.agent = ReActAgent(
+            toolkit=[self.email_toolkit, self.calendar_toolkit],
+            openai_client=self.mock_client,
+            max_iterations=3,
+        )
+
+    def test_multiple_toolkits_initialization(self):
+        """Test that multiple toolkits are properly initialized."""
+        # Should have tools from both toolkits
+        assert "search_emails" in self.agent._tool_registry
+        assert "search_events" in self.agent._tool_registry
+
+        # Should map tools to correct toolkits
+        assert self.agent._toolkit_for_tool["search_emails"] == self.email_toolkit
+        assert self.agent._toolkit_for_tool["search_events"] == self.calendar_toolkit
+
+    def test_search_email_tool(self):
+        """Test searching using email toolkit tool."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for emails about meetings",
+                "action": "search_emails",
+                "action_input": {"query": "meeting"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found email about AI meeting",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "email_1", "explanation": "Meeting about AI project"}
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find emails about meetings")
+        assert len(references) == 1
+        assert references[0].id == "email_1"
+
+    def test_search_calendar_tool(self):
+        """Test searching using calendar toolkit tool."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for calendar events about standup",
+                "action": "search_events",
+                "action_input": {"query": "standup"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found standup meeting",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "cal_1", "explanation": "Daily standup meeting"}
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find standup meetings")
+        assert len(references) == 1
+        assert references[0].id == "cal_1"
+
+    def test_tool_name_conflict_warning(self, caplog):
+        """Test that tool name conflicts generate warnings."""
+        # Create toolkits with conflicting tool names
+        toolkit1 = MockRetrieverToolkit()
+        toolkit2 = MockRetrieverToolkit()
+
+        # Both have 'search_documents' tool
+        with caplog.at_level("WARNING"):
+            _ = ReActAgent(toolkit=[toolkit1, toolkit2], openai_client=self.mock_client)
+
+        # Should have logged a warning about tool name conflict
+        assert "Tool name conflict" in caplog.text
+        assert "search_documents" in caplog.text
+
+    def test_single_toolkit_compatibility(self):
+        """Test that single toolkit still works (backwards compatibility)."""
+        single_toolkit = MockRetrieverToolkit()
+        agent = ReActAgent(
+            toolkit=single_toolkit,  # Pass single toolkit
+            openai_client=self.mock_client,
+        )
+
+        # Should still work with single toolkit
+        assert len(agent.toolkits) == 1
+        assert agent.toolkits[0] == single_toolkit
+        assert "search_documents" in agent._tool_registry
 
 
 if __name__ == "__main__":

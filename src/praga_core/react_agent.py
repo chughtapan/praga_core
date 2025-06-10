@@ -11,6 +11,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from .format_instructions import get_agent_format_instructions
 from .response import AgentResponse, ResponseCode, parse_agent_response
 from .retriever_toolkit import RetrieverToolkitMeta
+from .tool import Tool
 
 # Configure logger with a professional format
 logger = logging.getLogger(__name__)
@@ -250,7 +251,7 @@ Begin! Remember to:
 
     def __init__(
         self,
-        toolkit: RetrieverToolkitMeta,
+        toolkit: Union[RetrieverToolkitMeta, List[RetrieverToolkitMeta]],
         openai_client: Optional[OpenAI] = None,
         model: str = "gpt-4o-mini",
         max_iterations: int = 10,
@@ -260,14 +261,33 @@ Begin! Remember to:
         """Initialize the ReAct agent.
 
         Args:
-            toolkit: The retriever toolkit containing available tools
+            toolkit: The retriever toolkit(s) containing available tools. Can be a single toolkit or a list of toolkits.
             openai_client: OpenAI client instance. If None, creates a new client with openai_kwargs
             model: OpenAI model to use (default: gpt-4o-mini)
             max_iterations: Maximum number of reasoning iterations
             debug: Enable debug logging (default: False)
             **openai_kwargs: Additional arguments for OpenAI client creation (api_key, etc.)
         """
-        self.toolkit = toolkit
+        # Handle both single toolkit and list of toolkits
+        if isinstance(toolkit, list):
+            self.toolkits = toolkit
+        else:
+            self.toolkits = [toolkit]
+
+        # Create a combined tool registry for easy lookup
+        self._tool_registry: Dict[str, Tool] = {}
+        self._toolkit_for_tool: Dict[str, RetrieverToolkitMeta] = {}
+
+        for tk in self.toolkits:
+            for name, tool in tk.tools.items():
+                if name in self._tool_registry:
+                    logger.warning(
+                        f"Tool name conflict: '{name}' exists in multiple toolkits. Using first occurrence."
+                    )
+                    continue
+                self._tool_registry[name] = tool
+                self._toolkit_for_tool[name] = tk
+
         self.client = openai_client or OpenAI(**openai_kwargs)
         self.model = model
         self.max_iterations = max_iterations
@@ -284,10 +304,10 @@ Begin! Remember to:
         """Create the system prompt for the ReAct agent."""
         format_instructions = get_agent_format_instructions()
 
-        # Get tool descriptions from the toolkit
+        # Get tool descriptions from all toolkits
         tool_descriptions = []
         tool_names = []
-        for name, tool in self.toolkit.tools.items():
+        for name, tool in self._tool_registry.items():
             tool_descriptions.append(tool.formatted_description)
             tool_names.append(f'"{name}"')
 
@@ -364,9 +384,15 @@ Begin! Remember to:
                     {"role": "assistant", "content": parsed_output.to_json()}
                 )
 
-                # Execute the tool
+                # Execute the tool - find the correct toolkit for this tool
                 try:
-                    result = self.toolkit.invoke_tool(
+                    toolkit = self._toolkit_for_tool.get(parsed_output.action)
+                    if toolkit is None:
+                        raise ValueError(
+                            f"Tool '{parsed_output.action}' not found in any toolkit"
+                        )
+
+                    result = toolkit.invoke_tool(
                         parsed_output.action, parsed_output.action_input
                     )
 
