@@ -17,6 +17,7 @@ dependencies = [
     "pre-commit==3.5.0",
     "pyproject-autoflake>=1.0.2",
     "pytest>=8.4.0",
+    "pydantic>=2.11.5",
 ]
 
 [build-system]
