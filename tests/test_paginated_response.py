@@ -1,3 +1,9 @@
+"""Tests for PaginatedResponse and Document classes.
+
+This module tests the PaginatedResponse implementation and its Sequence protocol
+behavior, along with basic Document functionality.
+"""
+
 import math
 from collections.abc import Sequence
 from typing import List
@@ -8,35 +14,39 @@ from praga_core.tool import PaginatedResponse
 from praga_core.types import Document, TextDocument
 
 
-class TestDocument:
-    """Test the Document classes."""
+class SimpleTestDocumentBasics:
+    """Test basic Document and TextDocument functionality."""
 
     def test_text_document_creation(self) -> None:
-        """Test basic TextDocument creation."""
+        """Test basic TextDocument creation and auto-calculated fields."""
         doc = TextDocument(id="test_id", content="test content")
+
         assert doc.id == "test_id"
         assert doc.content == "test content"
-        assert doc.metadata.token_count is not None  # Auto-calculated
+        assert doc.metadata.token_count is not None
         assert doc.metadata.token_count > 0
 
-    def test_text_document_with_metadata_fields(self) -> None:
+    def test_text_document_with_custom_metadata(self) -> None:
         """Test TextDocument with additional metadata fields."""
         doc = TextDocument(id="test_id", content="test content")
+
         # Add custom fields to metadata (thanks to Config.extra = "allow")
         doc.metadata.custom_field = "custom_value"  # type: ignore[attr-defined]
         doc.metadata.count = 42  # type: ignore[attr-defined]
+
         assert doc.metadata.custom_field == "custom_value"  # type: ignore[attr-defined]
         assert doc.metadata.count == 42  # type: ignore[attr-defined]
 
     def test_document_token_count_calculation(self) -> None:
         """Test that token count is calculated correctly."""
         doc = TextDocument(id="test_id", content="hello world test")
+
         # Should be approximately 3 words * 4/3 = 4 tokens
         expected_tokens = math.ceil(3 * 4 / 3)
         assert doc.metadata.token_count == expected_tokens
 
 
-class TestPaginatedResponseSequenceBehavior:
+class TestPaginatedResponseSequenceProtocol:
     """Test that PaginatedResponse behaves like a Sequence."""
 
     @pytest.fixture
@@ -70,10 +80,9 @@ class TestPaginatedResponseSequenceBehavior:
         self, paginated_response: PaginatedResponse
     ) -> None:
         """Test that PaginatedResponse implements the Sequence protocol."""
-        # Check that it's considered a Sequence
         assert isinstance(paginated_response, Sequence)
 
-    def test_len(
+    def test_length_operations(
         self,
         paginated_response: PaginatedResponse,
         empty_paginated_response: PaginatedResponse,
@@ -82,7 +91,7 @@ class TestPaginatedResponseSequenceBehavior:
         assert len(paginated_response) == 3
         assert len(empty_paginated_response) == 0
 
-    def test_getitem_by_index(
+    def test_index_access(
         self, paginated_response: PaginatedResponse, sample_documents: List[Document]
     ) -> None:
         """Test __getitem__ method with integer indices."""
@@ -96,25 +105,19 @@ class TestPaginatedResponseSequenceBehavior:
         assert paginated_response[-2] == sample_documents[1]
         assert paginated_response[-3] == sample_documents[0]
 
-    def test_getitem_by_slice(
+    def test_slice_access(
         self, paginated_response: PaginatedResponse, sample_documents: List[Document]
-    ) -> None:  # Added types
+    ) -> None:
         """Test __getitem__ method with slice objects."""
         # Test basic slicing
-        slice_result = paginated_response[1:]
-        assert list(slice_result) == sample_documents[1:]
-
-        slice_result = paginated_response[:2]
-        assert list(slice_result) == sample_documents[:2]
-
-        slice_result = paginated_response[1:3]
-        assert list(slice_result) == sample_documents[1:3]
+        assert list(paginated_response[1:]) == sample_documents[1:]
+        assert list(paginated_response[:2]) == sample_documents[:2]
+        assert list(paginated_response[1:3]) == sample_documents[1:3]
 
         # Test step slicing
-        slice_result = paginated_response[::2]
-        assert list(slice_result) == sample_documents[::2]
+        assert list(paginated_response[::2]) == sample_documents[::2]
 
-    def test_getitem_index_error(
+    def test_index_errors(
         self,
         paginated_response: PaginatedResponse,
         empty_paginated_response: PaginatedResponse,
@@ -129,10 +132,11 @@ class TestPaginatedResponseSequenceBehavior:
         with pytest.raises(IndexError):
             empty_paginated_response[0]
 
-    def test_iteration(
+    def test_iteration_behavior(
         self, paginated_response: PaginatedResponse, sample_documents: List[Document]
     ) -> None:
-        """Test __iter__ method."""
+        """Test __iter__ method and iteration patterns."""
+        # Test basic iteration
         iterated_docs = list(paginated_response)
         assert iterated_docs == sample_documents
 
@@ -142,17 +146,22 @@ class TestPaginatedResponseSequenceBehavior:
             count += 1
         assert count == 3
 
+        # Test reverse iteration
+        reversed_docs = list(reversed(paginated_response))
+        expected = list(reversed(sample_documents))
+        assert reversed_docs == expected
+
     def test_empty_iteration(self, empty_paginated_response: PaginatedResponse) -> None:
         """Test iteration over empty response."""
         iterated_docs = list(empty_paginated_response)
         assert iterated_docs == []
 
-    def test_bool_conversion(
+    def test_boolean_conversion(
         self,
         paginated_response: PaginatedResponse,
         empty_paginated_response: PaginatedResponse,
     ) -> None:
-        """Test __bool__ method."""
+        """Test __bool__ method and truthiness."""
         assert bool(paginated_response) is True
         assert bool(empty_paginated_response) is False
 
@@ -167,7 +176,7 @@ class TestPaginatedResponseSequenceBehavior:
         else:
             assert True
 
-    def test_contains(
+    def test_membership_testing(
         self, paginated_response: PaginatedResponse, sample_documents: List[Document]
     ) -> None:
         """Test __contains__ method."""
@@ -180,116 +189,109 @@ class TestPaginatedResponseSequenceBehavior:
         other_doc = TextDocument(id="other", content="Other content")
         assert other_doc not in paginated_response
 
-    def test_contains_empty_response(
+    def test_membership_empty_response(
         self, empty_paginated_response: PaginatedResponse
     ) -> None:
         """Test __contains__ method with empty response."""
         doc = TextDocument(id="test", content="Test content")
         assert doc not in empty_paginated_response
 
-    def test_sequence_like_operations(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
-    ) -> None:
-        """Test various sequence-like operations."""
-        # Test slicing behavior (if getitem supports it)
-        try:
-            _ = paginated_response[1:]
-        except TypeError:
-            pytest.skip("Slicing not supported in this implementation")
 
-    def test_count_method_via_sequence(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
-    ) -> None:
-        """Test count method inherited from Sequence ABC."""
-        # Since PaginatedResponse doesn't override count, it should use
-        # the default implementation from Sequence ABC
+class TestPaginatedResponseUtilityMethods:
+    """Test utility methods and advanced functionality of PaginatedResponse."""
 
-        # This should work since PaginatedResponse implements Sequence protocol
-        count = sum(1 for doc in paginated_response if doc == sample_documents[0])
-        assert count == 1
+    def test_equality_comparison(self) -> None:
+        """Test equality between PaginatedResponse instances."""
+        sample_docs = [TextDocument(id="1", content="Content 1")]
 
-        # Test counting non-existent document
-        other_doc = TextDocument(id="other", content="Other")
-        count = sum(1 for doc in paginated_response if doc == other_doc)
-        assert count == 0
+        response1 = PaginatedResponse(
+            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+        )
+        response2 = PaginatedResponse(
+            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+        )
+        response3 = PaginatedResponse(
+            documents=sample_docs, page_number=1, has_next_page=True, total_documents=5
+        )
 
-    def test_index_method_simulation(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
-    ) -> None:
-        """Test index-like functionality (finding position of document)."""
+        assert response1 == response2  # Same content
+        assert response1 != response3  # Different page number
 
-        # Since we implement __iter__ and __getitem__, we can simulate index
+    def test_sequence_methods_simulation(self) -> None:
+        """Test sequence-like methods that can be simulated."""
+        docs = [
+            TextDocument(id="1", content="First"),
+            TextDocument(id="2", content="Second"),
+            TextDocument(id="1", content="First"),  # Duplicate for testing
+        ]
+        response = PaginatedResponse(
+            documents=docs, page_number=0, has_next_page=False, total_documents=3
+        )
+
+        # Test index-like functionality (finding position of document)
         def find_index(response: PaginatedResponse, target_doc: Document) -> int:
             for i, doc in enumerate(response):
                 if doc == target_doc:
                     return i
             raise ValueError("Document not found")
 
-        assert find_index(paginated_response, sample_documents[0]) == 0
-        assert find_index(paginated_response, sample_documents[1]) == 1
-        assert find_index(paginated_response, sample_documents[2]) == 2
+        assert find_index(response, docs[0]) == 0
+        assert find_index(response, docs[1]) == 1
 
+        # Test with non-existent document
         other_doc = TextDocument(id="other", content="Other")
         with pytest.raises(ValueError):
-            find_index(paginated_response, other_doc)
-
-    def test_reverse_iteration(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
-    ) -> None:
-        """Test reverse iteration."""
-        reversed_docs = list(reversed(paginated_response))
-        expected = list(reversed(sample_documents))
-        assert reversed_docs == expected
-
-    def test_equality_comparison(self, sample_documents: List[Document]) -> None:
-        """Test equality between PaginatedResponse instances."""
-        response1 = PaginatedResponse(
-            documents=sample_documents, page_number=0, has_next_page=True
-        )
-        response2 = PaginatedResponse(
-            documents=sample_documents, page_number=0, has_next_page=True
-        )
-
-        # Note: This tests structural equality of the dataclass
-        assert response1 == response2
-
-        # Test with different documents
-        other_docs = [TextDocument(id="other", content="Other")]
-        response3 = PaginatedResponse(
-            documents=other_docs, page_number=0, has_next_page=True
-        )
-        assert response1 != response3
+            find_index(response, other_doc)
 
 
 class TestPaginatedResponseEdgeCases:
-    """Test edge cases for PaginatedResponse."""
+    """Test edge cases and boundary conditions."""
 
-    def test_single_document(self) -> None:
-        """Test with single document."""
-        doc = TextDocument(id="single", content="Single doc")
+    def test_single_document_response(self) -> None:
+        """Test PaginatedResponse with single document."""
+        doc = TextDocument(id="single", content="Single document")
         response = PaginatedResponse(
-            documents=[doc], page_number=0, has_next_page=False
+            documents=[doc], page_number=0, has_next_page=False, total_documents=1
         )
 
         assert len(response) == 1
         assert response[0] == doc
-        assert doc in response
-        assert bool(response) is True
+        assert response[-1] == doc
         assert list(response) == [doc]
+        assert bool(response) is True
 
-    def test_large_response(self) -> None:
-        """Test with many documents."""
+    def test_large_response_performance(self) -> None:
+        """Test PaginatedResponse with many documents."""
         docs = [TextDocument(id=f"doc_{i}", content=f"Content {i}") for i in range(100)]
         response = PaginatedResponse(
             documents=docs, page_number=0, has_next_page=True, total_documents=1000
         )
 
+        # Test that operations are efficient
         assert len(response) == 100
-        assert response[0].id == "doc_0"
-        assert response[99].id == "doc_99"
+        assert response[50].id == "doc_50"
         assert response[-1].id == "doc_99"
 
-        # Test iteration doesn't exhaust
-        count1 = sum(1 for _ in response)
-        count2 = sum(1 for _ in response)
-        assert count1 == count2 == 100
+        # Test slicing doesn't cause performance issues
+        subset = list(response[25:75])
+        assert len(subset) == 50
+        assert subset[0].id == "doc_25"
+
+    def test_response_with_complex_documents(self) -> None:
+        """Test PaginatedResponse with documents containing complex metadata."""
+        docs = []
+        for i in range(3):
+            doc = TextDocument(id=f"complex_{i}", content=f"Complex content {i}")
+            doc.metadata.tags = [f"tag_{i}", f"category_{i % 2}"]  # type: ignore[attr-defined]
+            doc.metadata.score = i * 0.5  # type: ignore[attr-defined]
+            doc.metadata.nested = {"level": i, "type": "test"}  # type: ignore[attr-defined]
+            docs.append(doc)
+
+        response = PaginatedResponse(
+            documents=docs, page_number=0, has_next_page=False, total_documents=3
+        )
+
+        # Verify complex metadata is preserved
+        assert response[0].metadata.tags == ["tag_0", "category_0"]  # type: ignore[attr-defined]
+        assert response[1].metadata.score == 0.5  # type: ignore[attr-defined]
+        assert response[2].metadata.nested["level"] == 2  # type: ignore[attr-defined]

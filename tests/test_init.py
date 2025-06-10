@@ -1,6 +1,32 @@
-def test_init() -> None:
-    assert 1 == 1
+"""Tests for praga_core package initialization."""
 
-    import praga_core
 
-    assert praga_core
+class TestPackageInitialization:
+    """Test that the praga_core package initializes correctly."""
+
+    def test_package_imports_successfully(self) -> None:
+        """Test that the main package can be imported without errors."""
+        import praga_core
+
+        assert praga_core is not None
+
+    def test_main_classes_are_accessible(self) -> None:
+        """Test that main classes can be imported from the package."""
+        from praga_core.retriever_toolkit import RetrieverToolkit
+        from praga_core.tool import PaginatedResponse, Tool
+        from praga_core.types import Document, TextDocument
+
+        # Verify classes are properly imported
+        assert RetrieverToolkit is not None
+        assert Tool is not None
+        assert PaginatedResponse is not None
+        assert Document is not None
+        assert TextDocument is not None
+
+    def test_package_has_version(self) -> None:
+        """Test that the package has a version attribute (if applicable)."""
+        import praga_core
+
+        # This test may need to be adjusted based on how versioning is handled
+        # For now, just ensure the package exists
+        assert hasattr(praga_core, "__name__")

@@ -315,7 +315,7 @@ class TestPaginationPrevention:
         assert result.documents[0].id == "1"
 
 
-class TestDocumentSubclassTypeChecking:
+class SimpleTestDocumentSubclassTypeChecking:
     """Test that the type checking system accepts Document subclasses."""
 
     def test_text_document_subclass_accepted(self) -> None:

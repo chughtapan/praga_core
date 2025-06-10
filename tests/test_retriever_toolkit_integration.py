@@ -21,8 +21,8 @@ class SimpleDocument(Document):
         self._metadata.token_count = (len(self.title) + len(self.content)) // 4
 
 
-class TestRetrieverToolkit(RetrieverToolkit):
-    """Test toolkit for testing integration."""
+class IntegrationTestToolkit(RetrieverToolkit):
+    """Toolkit for testing integration functionality."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -81,7 +81,7 @@ def get_test_docs(category: str = "general") -> List[SimpleDocument]:
 
 
 # Test stateless tool with decorator
-@TestRetrieverToolkit.tool(
+@IntegrationTestToolkit.tool(
     cache=True, ttl=timedelta(minutes=10), paginate=True, max_docs=2
 )
 def get_cached_docs(topic: str) -> List[SimpleDocument]:
@@ -101,7 +101,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_toolkit_initialization(self) -> None:
         """Test toolkit initializes with correct tools."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         expected_tools = {
             "search_documents",
@@ -113,7 +113,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_direct_method_call_no_pagination(self) -> None:
         """Test direct method calls bypass pagination."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Direct call should return all documents without pagination
         docs = toolkit.search_documents("python", limit=8)
@@ -124,7 +124,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_invoke_method_with_pagination(self) -> None:
         """Test invoke method applies pagination when enabled."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Invoke call should apply pagination
         result = toolkit.invoke_tool(
@@ -144,7 +144,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_invoke_method_pagination_second_page(self) -> None:
         """Test invoke method can get second page."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         result = toolkit.invoke_tool(
             "search_documents", {"query": "python", "limit": 8, "page": 1}
@@ -156,7 +156,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_invoke_method_without_pagination(self) -> None:
         """Test invoke method on non-paginated tool."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Direct call
         docs_direct = toolkit.count_documents("test")
@@ -171,7 +171,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_string_input_for_invoke(self) -> None:
         """Test invoke with string input maps to first parameter."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         result = toolkit.invoke_tool("search_documents", "javascript")
 
@@ -182,7 +182,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_tool_inspection(self) -> None:
         """Test tool inspection and metadata."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Get tool objects
         search_tool = toolkit.get_tool("search_documents")
@@ -200,7 +200,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_stateless_tool_decorator(self) -> None:
         """Test stateless tool registration with decorator."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Direct call
         docs_direct = toolkit.get_cached_docs("AI")
@@ -216,7 +216,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_caching_behavior(self) -> None:
         """Test that caching still works with the new Tool integration."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # First call (should hit the actual function)
         result1 = toolkit.invoke_tool(
@@ -234,7 +234,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_different_pages_same_cache(self) -> None:
         """Test that different pages use the same cached underlying data."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Get page 0
         page0 = toolkit.invoke_tool(
@@ -258,7 +258,7 @@ class TestRetrieverToolkitIntegration:
 
     def test_error_handling_no_documents(self) -> None:
         """Test error handling is preserved through Tool wrapper."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Create a method that raises the specific error
         def failing_search(query: str) -> List[SimpleDocument]:
@@ -275,14 +275,14 @@ class TestRetrieverToolkitIntegration:
 
     def test_tool_not_found(self) -> None:
         """Test error when tool doesn't exist."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
             toolkit.get_tool("nonexistent")
 
     def test_mixed_usage_patterns(self) -> None:
         """Test that direct calls and invoke calls can be mixed."""
-        toolkit = TestRetrieverToolkit()
+        toolkit = IntegrationTestToolkit()
 
         # Mix direct and invoke calls
         docs_direct = toolkit.search_documents("mixed_test", 6)
