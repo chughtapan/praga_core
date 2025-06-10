@@ -1,0 +1,289 @@
+"""Comprehensive pytest tests for the ReAct agent."""
+
+import json
+from typing import List
+from unittest.mock import MagicMock
+
+import pytest
+from pydantic import Field
+
+from praga_core import (
+    ReActAgent,
+    RetrieverToolkit,
+)
+from praga_core.types import Document
+
+
+class MockOpenAIClient:
+    """Mock OpenAI client for testing that simulates LLM responses."""
+
+    def __init__(self):
+        self.responses = []
+        self.call_count = 0
+        self.messages_history = []
+        self.chat = MagicMock()
+        self.chat.completions = MagicMock()
+        self.chat.completions.create = self._create_completion
+
+    def add_response(self, response: str):
+        """Add a response to the queue."""
+        self.responses.append(response)
+
+    def _create_completion(self, **kwargs):
+        """Mock completion creation."""
+        self.messages_history.append(kwargs.get("messages", []))
+
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_message = MagicMock()
+
+        if self.call_count < len(self.responses):
+            content = self.responses[self.call_count]
+            self.call_count += 1
+        else:
+            # Default fallback response
+            content = json.dumps(
+                {
+                    "thought": "Default response",
+                    "action": "Final Answer",
+                    "action_input": {
+                        "response_code": "success",
+                        "references": [],
+                        "error_message": "",
+                    },
+                }
+            )
+
+        mock_message.content = content
+        mock_choice.message = mock_message
+        mock_response.choices = [mock_choice]
+        return mock_response
+
+    def get_last_messages(self):
+        """Get the last set of messages sent to the client."""
+        return self.messages_history[-1] if self.messages_history else []
+
+    def reset(self):
+        """Reset the mock client state."""
+        self.responses = []
+        self.call_count = 0
+        self.messages_history = []
+
+
+class MockDocument(Document):
+    """A simple document class for testing."""
+
+    content: str = Field(description="The content of the document")
+    document_type: str = Field(default="MockDocument", description="Type of document")
+
+    def __init__(self, doc_id: str, content: str, **data):
+        super().__init__(
+            id=doc_id, content=content, document_type="MockDocument", **data
+        )
+
+
+class MockRetrieverToolkit(RetrieverToolkit):
+    """Mock retriever toolkit for testing the ReAct agent."""
+
+    def __init__(self):
+        super().__init__()
+
+        # Mock document store
+        self.documents = [
+            MockDocument("1", "John works in AI research"),
+            MockDocument("2", "Sarah is a Machine Learning engineer"),
+            MockDocument("3", "Bob teaches Python programming"),
+            MockDocument("4", "John likes Python and AI"),
+        ]
+
+        # Register mock tools
+        self.register_tool(method=self.search_documents, name="search_documents")
+        self.register_tool(
+            method=self.search_by_person_and_topic, name="search_by_person_and_topic"
+        )
+
+    def search_documents(self, query: str) -> List[Document]:
+        """Search through documents based on a query."""
+        if not query:
+            return []
+        return [doc for doc in self.documents if query.lower() in doc.content.lower()]
+
+    def search_by_person_and_topic(self, person: str, topic: str) -> List[Document]:
+        """Search documents by person name and topic."""
+        if not person or not topic:
+            return []
+        return [
+            doc
+            for doc in self.documents
+            if person.lower() in doc.content.lower()
+            and topic.lower() in doc.content.lower()
+        ]
+
+    def get_document_by_id(self, document_id: str) -> Document | None:
+        """Get document by ID."""
+        for doc in self.documents:
+            if doc.id == document_id:
+                return doc
+        return None
+
+
+class TestReActAgentBasic:
+    """Test basic ReAct agent functionality."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.mock_client = MockOpenAIClient()
+        self.toolkit = MockRetrieverToolkit()
+        self.agent = ReActAgent(
+            toolkit=self.toolkit, openai_client=self.mock_client, max_iterations=3
+        )
+
+    def test_search_basic(self):
+        """Test basic search functionality."""
+        # Set up mock responses
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for documents about AI",
+                "action": "search_documents",
+                "action_input": {"query": "AI"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found relevant documents about AI",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "1", "explanation": "Contains AI research"},
+                        {"id": "4", "explanation": "Contains AI"},
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        # Execute search
+        references = self.agent.search("Find documents about AI")
+
+        # Verify results
+        assert len(references) == 2
+        assert references[0].id == "1"
+        assert references[1].id == "4"
+
+        # Verify the client was called correctly
+        messages = self.mock_client.get_last_messages()
+        assert len(messages) >= 2  # System message + user query
+        assert messages[1]["content"] == "Find documents about AI"
+
+    def test_search_no_results(self):
+        """Test search with query that should return no results."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for documents about quantum physics",
+                "action": "search_documents",
+                "action_input": {"query": "quantum physics"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "No documents found about quantum physics",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "error_no_documents_found",
+                    "references": [],
+                    "error_message": "No matching documents found",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find documents about quantum physics")
+        assert len(references) == 0
+
+    def test_search_by_person_and_topic(self):
+        """Test search using a tool with multiple arguments."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should use the search_by_person_and_topic tool",
+                "action": "search_by_person_and_topic",
+                "action_input": {"person": "John", "topic": "AI"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found documents where John talks about AI",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "1", "explanation": "John works in AI research"},
+                        {"id": "4", "explanation": "John likes AI"},
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find where John talks about AI")
+
+        assert len(references) == 2
+        assert references[0].id == "1"
+        assert references[1].id == "4"
+
+    def test_max_iterations_limit(self):
+        """Test that agent respects max iterations limit."""
+        # Add responses that will cause the agent to loop
+        for _ in range(5):  # More than max_iterations
+            self.mock_client.add_response(
+                json.dumps(
+                    {
+                        "thought": "Still searching...",
+                        "action": "search_documents",
+                        "action_input": {"query": "test"},
+                    }
+                )
+            )
+
+        references = self.agent.search("Test max iterations")
+        assert len(references) == 0  # Should return empty due to max iterations
+
+    def test_markdown_json_parsing(self):
+        """Test parsing JSON wrapped in markdown code blocks."""
+        markdown_response = """
+        Here's my response:
+        ```json
+        {
+            "thought": "Found relevant documents",
+            "action": "Final Answer",
+            "action_input": {
+                "response_code": "success",
+                "references": [
+                    {"id": "1", "explanation": "Found in markdown"}
+                ],
+                "error_message": ""
+            }
+        }
+        ```
+        """
+
+        self.mock_client.add_response(markdown_response)
+
+        references = self.agent.search("Test markdown parsing")
+        assert len(references) == 1
+        assert references[0].id == "1"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

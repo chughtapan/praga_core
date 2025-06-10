@@ -255,6 +255,17 @@ class RetrieverToolkitMeta(abc.ABC):
     def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
         pass
 
+    @abc.abstractmethod
+    def get_document_by_id(self, document_id: str) -> Document | None:
+        """Get a document by its ID.
+
+        Args:
+            document_id: The unique identifier of the document
+
+        Returns:
+            The document if found, None otherwise
+        """
+
 
 class RetrieverToolkit(RetrieverToolkitMeta):
 
@@ -264,6 +275,10 @@ class RetrieverToolkit(RetrieverToolkitMeta):
 
     def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
         return []
+
+    def get_document_by_id(self, document_id: str) -> Document | None:
+        """Default implementation that returns None."""
+        return None
 
 
 # ========================================================

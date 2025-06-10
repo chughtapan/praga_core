@@ -18,6 +18,7 @@ dependencies = [
     "pyproject-autoflake>=1.0.2",
     "pytest>=8.4.0",
     "pydantic>=2.11.5",
+    "openai>=1.0.0",
 ]
 
 [build-system]
