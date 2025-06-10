@@ -17,6 +17,7 @@ class GoogleAuthManager:
     SCOPES = [
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/contacts.readonly",  # For People API
     ]
 
     def __init__(self, secrets_dir: Optional[str] = None):
@@ -74,3 +75,7 @@ class GoogleAuthManager:
     def get_calendar_service(self):
         """Get Calendar API service."""
         return self.get_service("calendar", "v3")
+
+    def get_people_service(self):
+        """Get People API service."""
+        return self.get_service("people", "v1")

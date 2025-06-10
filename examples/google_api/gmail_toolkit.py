@@ -1,13 +1,13 @@
 """Gmail toolkit for retrieving and searching emails."""
 
 import base64
+import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from auth import GoogleAuthManager
+from google_base_toolkit import GoogleBaseToolkit
 from pydantic import Field
 
-from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document
 
 
@@ -30,14 +30,12 @@ class EmailDocument(Document):
         self.metadata.token_count = len(self.body) // 4  # Rough token count estimation
 
 
-class GmailToolkit(RetrieverToolkit):
+class GmailToolkit(GoogleBaseToolkit):
     """Toolkit for retrieving emails from Gmail using Google API."""
 
     def __init__(self, secrets_dir: Optional[str] = None):
         """Initialize the Gmail toolkit with authentication."""
-        super().__init__()
-
-        self.auth_manager = GoogleAuthManager(secrets_dir)
+        super().__init__(secrets_dir)
         self._service = None
 
         # Register all Gmail tools with caching and pagination
@@ -211,25 +209,43 @@ class GmailToolkit(RetrieverToolkit):
         )
 
     def get_emails_by_sender(
-        self, sender_email: str, max_results: int = 50
+        self, sender: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails from a specific sender."""
+        """Get emails from a specific sender.
+
+        Args:
+            sender: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        sender_email = self._resolve_person_to_email(sender)
         query = f"from:{sender_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
 
     def get_emails_by_recipient(
-        self, recipient_email: str, max_results: int = 50
+        self, recipient: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails sent to a specific recipient."""
+        """Get emails sent to a specific recipient.
+
+        Args:
+            recipient: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        recipient_email = self._resolve_person_to_email(recipient)
         query = f"to:{recipient_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
 
     def get_emails_by_cc_participant(
-        self, cc_email: str, max_results: int = 50
+        self, cc_participant: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails where a specific email address was CC'd."""
+        """Get emails where a specific person was CC'd.
+
+        Args:
+            cc_participant: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        cc_email = self._resolve_person_to_email(cc_participant)
         query = f"cc:{cc_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
@@ -264,6 +280,53 @@ class GmailToolkit(RetrieverToolkit):
             query = ""
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
+
+    def _fallback_person_search(self, person_identifier: str) -> str:
+        """Gmail-specific fallback search for person resolution.
+
+        Searches through sent/received emails to find email addresses
+        associated with the person identifier.
+
+        Args:
+            person_identifier: The person identifier to search for
+
+        Returns:
+            Email address if found, otherwise returns the original identifier
+        """
+        try:
+            # Search in sent/received emails for the person identifier
+            query = f'from:"{person_identifier}" OR to:"{person_identifier}"'
+            messages = self._search_emails(query, max_results=5)
+
+            for message in messages:
+                headers = {
+                    h["name"]: h["value"] for h in message["payload"].get("headers", [])
+                }
+
+                # Check From header
+                from_header = headers.get("From", "")
+                if person_identifier.lower() in from_header.lower():
+                    # Extract email from "Name <email@domain.com>" format
+                    email_match = re.search(r"<([^>]+)>", from_header)
+                    if email_match:
+                        return email_match.group(1)
+                    # Or if it's just the email
+                    elif "@" in from_header:
+                        return from_header.strip()
+
+                # Check To header
+                to_header = headers.get("To", "")
+                if person_identifier.lower() in to_header.lower():
+                    email_match = re.search(r"<([^>]+)>", to_header)
+                    if email_match:
+                        return email_match.group(1)
+                    elif "@" in to_header:
+                        return to_header.strip()
+
+        except Exception as e:
+            print(f"Error in Gmail fallback search for '{person_identifier}': {e}")
+
+        return person_identifier
 
 
 # Stateless tools using decorator
