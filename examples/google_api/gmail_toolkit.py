@@ -2,12 +2,32 @@
 
 import base64
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from auth import GoogleAuthManager
+from pydantic import Field
 
 from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document
+
+
+class EmailDocument(Document):
+    """A document representing an email with all email-specific fields."""
+
+    message_id: str = Field(description="Gmail message ID")
+    thread_id: str = Field(description="Gmail thread ID")
+    subject: str = Field(description="Email subject")
+    sender: str = Field(description="Email sender")
+    recipients: List[str] = Field(description="List of email recipients")
+    cc_list: List[str] = Field(
+        default_factory=list, description="List of CC recipients"
+    )
+    body: str = Field(description="Email body content")
+    time: datetime = Field(description="Email timestamp")
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        self.metadata.token_count = len(self.body) // 4  # Rough token count estimation
 
 
 class GmailToolkit(RetrieverToolkit):
@@ -142,41 +162,57 @@ class GmailToolkit(RetrieverToolkit):
 
         return get_text_from_payload(payload)
 
-    def _message_to_document(self, message: dict) -> Document:
-        """Convert a Gmail message to a Document."""
+    def _message_to_document(self, message: dict) -> EmailDocument:
+        """Convert a Gmail message to an EmailDocument."""
         headers = {h["name"]: h["value"] for h in message["payload"].get("headers", [])}
 
         subject = headers.get("Subject", "(No Subject)")
         sender = headers.get("From", "Unknown Sender")
         date_str = headers.get("Date", "")
 
-        # Extract email content
-        content = self._extract_email_content(message)
-
-        # Format the document content
-        doc_content = (
-            f"Subject: {subject}\nFrom: {sender}\nDate: {date_str}\n\n{content}"
+        # Parse recipients
+        to_field = headers.get("To", "")
+        recipients = (
+            [addr.strip() for addr in to_field.split(",") if addr.strip()]
+            if to_field
+            else []
         )
 
-        # Calculate rough token count (4 chars per token approximation)
-        token_count = len(doc_content) // 4
+        # Parse CC list
+        cc_field = headers.get("Cc", "")
+        cc_list = (
+            [addr.strip() for addr in cc_field.split(",") if addr.strip()]
+            if cc_field
+            else []
+        )
 
-        metadata = {
-            "subject": subject,
-            "from": sender,
-            "to": headers.get("To", ""),
-            "cc": headers.get("Cc", ""),
-            "date": date_str,
-            "message_id": message["id"],
-            "token_count": token_count,
-            "labels": message.get("labelIds", []),
-        }
+        # Extract email content
+        body = self._extract_email_content(message)
 
-        return Document(id=message["id"], content=doc_content, metadata=metadata)
+        # Parse timestamp - try to convert date string to datetime
+        try:
+            # Gmail date format is typically RFC 2822
+            from email.utils import parsedate_to_datetime
+
+            email_time = parsedate_to_datetime(date_str) if date_str else datetime.now()
+        except (ValueError, TypeError):
+            email_time = datetime.now()
+
+        return EmailDocument(
+            id=message["id"],
+            message_id=message["id"],
+            thread_id=message.get("threadId", ""),
+            subject=subject,
+            sender=sender,
+            recipients=recipients,
+            cc_list=cc_list,
+            body=body,
+            time=email_time,
+        )
 
     def get_emails_by_sender(
         self, sender_email: str, max_results: int = 50
-    ) -> List[Document]:
+    ) -> List[EmailDocument]:
         """Get emails from a specific sender."""
         query = f"from:{sender_email}"
         messages = self._search_emails(query, max_results)
@@ -184,7 +220,7 @@ class GmailToolkit(RetrieverToolkit):
 
     def get_emails_by_recipient(
         self, recipient_email: str, max_results: int = 50
-    ) -> List[Document]:
+    ) -> List[EmailDocument]:
         """Get emails sent to a specific recipient."""
         query = f"to:{recipient_email}"
         messages = self._search_emails(query, max_results)
@@ -192,7 +228,7 @@ class GmailToolkit(RetrieverToolkit):
 
     def get_emails_by_cc_participant(
         self, cc_email: str, max_results: int = 50
-    ) -> List[Document]:
+    ) -> List[EmailDocument]:
         """Get emails where a specific email address was CC'd."""
         query = f"cc:{cc_email}"
         messages = self._search_emails(query, max_results)
@@ -200,7 +236,7 @@ class GmailToolkit(RetrieverToolkit):
 
     def get_emails_by_date_range(
         self, start_date: str, end_date: str, max_results: int = 50
-    ) -> List[Document]:
+    ) -> List[EmailDocument]:
         """Get emails within a date range.
 
         Args:
@@ -218,7 +254,7 @@ class GmailToolkit(RetrieverToolkit):
 
     def get_emails_with_body_keyword(
         self, keyword: str, max_results: int = 50
-    ) -> List[Document]:
+    ) -> List[EmailDocument]:
         """Get emails containing a specific keyword in the body or subject."""
         # Use Gmail's search syntax to search in body and subject
         if keyword.strip():
@@ -232,7 +268,7 @@ class GmailToolkit(RetrieverToolkit):
 
 # Stateless tools using decorator
 @GmailToolkit.tool(cache=True, ttl=timedelta(hours=1))
-def get_recent_emails(days: int = 7) -> List[Document]:
+def get_recent_emails(days: int = 7) -> List[EmailDocument]:
     """Get recent emails from the last N days."""
     toolkit = GmailToolkit()
 
@@ -279,7 +315,7 @@ def get_recent_emails(days: int = 7) -> List[Document]:
 
 
 @GmailToolkit.tool(cache=True, ttl=timedelta(minutes=30))
-def get_unread_emails() -> List[Document]:
+def get_unread_emails() -> List[EmailDocument]:
     """Get all unread emails."""
     toolkit = GmailToolkit()
 

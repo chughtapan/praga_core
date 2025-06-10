@@ -5,11 +5,12 @@ repos:
         name: mypy
         entry: uv run mypy
         language: system
-        types: [python]
+        types: [python]	
+        args: ["--config", "pyproject.toml"]
         stages: [commit]
         additional_dependencies: []
         pass_filenames: true
-        exclude: "^examples/google_api"
+        exclude: tests/
 
       - id: isort
         name: isort

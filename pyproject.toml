@@ -17,6 +17,7 @@ dependencies = [
     "pre-commit==3.5.0",
     "pyproject-autoflake>=1.0.2",
     "pytest>=8.4.0",
+    "pydantic>=2.11.5",
 ]
 
 [build-system]
@@ -40,7 +41,7 @@ line_length = 88
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "src"
-exclude = "^examples/google_api"
+exclude = "^examples/google_api|tests"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
