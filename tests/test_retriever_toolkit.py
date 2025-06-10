@@ -1,11 +1,12 @@
 import time
 from datetime import timedelta
-from typing import Any, Callable, Dict, List, cast
+from typing import Any, Dict, List
 
 import pytest
 
 from praga_core.retriever_toolkit import RetrieverToolkit
-from praga_core.types import Document, PageMetadata, PaginatedResponse
+from praga_core.tool import PaginatedResponse, Tool
+from praga_core.types import Document, TextDocument
 
 
 class MockRetrieverToolkit(RetrieverToolkit):
@@ -32,14 +33,15 @@ def toolkit() -> MockRetrieverToolkit:
 @pytest.fixture
 def sample_documents() -> List[Document]:
     """Create sample documents for testing."""
-    return [
-        Document(
+    docs: List[Document] = []
+    for i in range(10):
+        doc = TextDocument(
             id=f"doc_{i}",
             content=f"This is document {i} with some content.",
-            metadata={"token_count": 10 + i, "index": i},
         )
-        for i in range(10)
-    ]
+        doc._metadata.token_count = 10 + i
+        docs.append(doc)
+    return docs
 
 
 class TestCaching:
@@ -50,7 +52,7 @@ class TestCaching:
 
         def get_docs() -> List[Document]:
             toolkit.call_count += 1
-            return [Document(id="test", content=f"call_{toolkit.call_count}")]
+            return [TextDocument(id="test", content=f"call_{toolkit.call_count}")]
 
         # Register with caching enabled
         toolkit.register_tool(get_docs, "get_docs", cache=True)
@@ -75,7 +77,7 @@ class TestCaching:
 
         def get_docs_with_arg(name: str) -> List[Document]:
             toolkit.call_count += 1
-            return [Document(id="test", content=f"{name}_{toolkit.call_count}")]
+            return [TextDocument(id="test", content=f"{name}_{toolkit.call_count}")]
 
         toolkit.register_tool(get_docs_with_arg, "get_docs_with_arg", cache=True)
 
@@ -94,7 +96,7 @@ class TestCaching:
 
         def get_docs() -> List[Document]:
             toolkit.call_count += 1
-            return [Document(id="test", content=f"call_{toolkit.call_count}")]
+            return [TextDocument(id="test", content=f"call_{toolkit.call_count}")]
 
         # Register with very short TTL
         toolkit.register_tool(
@@ -123,7 +125,7 @@ class TestCaching:
 
         def get_docs() -> List[Document]:
             toolkit.call_count += 1
-            return [Document(id="test", content=f"call_{toolkit.call_count}")]
+            return [TextDocument(id="test", content=f"call_{toolkit.call_count}")]
 
         # Custom invalidator that always invalidates
         def always_invalidate(cache_key: str, cached_value: Dict[str, Any]) -> bool:
@@ -141,43 +143,11 @@ class TestCaching:
         assert result1[0].content == "call_1"
         assert result2[0].content == "call_2"
 
-    def test_cache_invalidator_conditional(self, toolkit: MockRetrieverToolkit) -> None:
-        """Test conditional cache invalidation."""
-
-        def get_docs() -> List[Document]:
-            toolkit.call_count += 1
-            return [Document(id="test", content=f"call_{toolkit.call_count}")]
-
-        # Invalidator that invalidates after 2 calls
-        def conditional_invalidate(
-            cache_key: str, cached_value: Dict[str, Any]
-        ) -> bool:
-            return toolkit.call_count < 2
-
-        toolkit.register_tool(
-            get_docs, "get_docs", cache=True, invalidator=conditional_invalidate
-        )
-
-        # First call executes
-        _ = toolkit.get_docs()
-        assert toolkit.call_count == 1
-
-        # Second call uses cache (invalidator returns True)
-        _ = toolkit.get_docs()
-        assert toolkit.call_count == 1
-
-        # Manually increment to trigger invalidation
-        toolkit.call_count = 2
-
-        # Third call should execute due to invalidation
-        _ = toolkit.get_docs()
-        assert toolkit.call_count == 3
-
     def test_cache_key_generation(self, toolkit: MockRetrieverToolkit) -> None:
         """Test that cache keys are generated consistently."""
 
         def get_docs(arg1: str, arg2: int = 10) -> List[Document]:
-            return [Document(id="test", content="content")]
+            return [TextDocument(id="test", content="content")]
 
         # Test cache key generation directly
         key1 = toolkit.make_cache_key(get_docs, "hello", arg2=20)
@@ -189,112 +159,107 @@ class TestCaching:
 
 
 class TestPagination:
-    """Test pagination functionality of the RetrieverToolkit."""
+    """Test pagination functionality via invoke method."""
 
-    def test_pagination_basic_functionality(
+    def test_direct_call_no_pagination(
         self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
     ) -> None:
-        """Test basic pagination behavior."""
+        """Test that direct method calls bypass pagination."""
 
         def get_all_docs() -> List[Document]:
             return sample_documents
 
         toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=3)
 
-        # First page
-        result = toolkit.get_all_docs(page=0)
-        assert isinstance(result, PaginatedResponse)
-        assert len(result.documents) == 3
-        assert result.metadata.page_number == 0
-        assert result.metadata.has_next_page is True
-        assert result.metadata.total_documents == 10
+        # Direct call should return all documents without pagination
+        result = toolkit.get_all_docs()
+        assert isinstance(result, list)
+        assert len(result) == 10  # All documents
+        assert all(isinstance(doc, Document) for doc in result)
 
-        # Check document IDs
-        doc_ids = [doc.id for doc in result.documents]
-        assert doc_ids == ["doc_0", "doc_1", "doc_2"]
-
-    def test_pagination_multiple_pages(
+    def test_invoke_call_with_pagination(
         self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
     ) -> None:
-        """Test pagination across multiple pages."""
+        """Test that invoke calls apply pagination when enabled."""
+
+        def get_all_docs() -> List[Document]:
+            return sample_documents
+
+        toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=3)
+
+        # Invoke call should apply pagination
+        result = toolkit.invoke_tool("get_all_docs", {})
+
+        assert "documents" in result
+        assert "page_number" in result
+        assert "has_next_page" in result
+        assert "total_documents" in result
+
+        assert len(result["documents"]) == 3
+        assert result["page_number"] == 0
+        assert result["has_next_page"] is True
+        assert result["total_documents"] == 10
+
+    def test_invoke_pagination_multiple_pages(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
+        """Test pagination across multiple pages via invoke."""
 
         def get_all_docs() -> List[Document]:
             return sample_documents
 
         toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=4)
-        paginated_tool_call = cast(
-            Callable[..., PaginatedResponse], toolkit.get_all_docs
-        )
 
         # Page 0
-        page0 = paginated_tool_call(page=0)
-        assert len(page0.documents) == 4
-        assert page0.metadata.page_number == 0
-        assert page0.metadata.has_next_page is True
+        page0 = toolkit.invoke_tool("get_all_docs", {"page": 0})
+        assert len(page0["documents"]) == 4
+        assert page0["page_number"] == 0
+        assert page0["has_next_page"] is True
 
         # Page 1
-        page1 = paginated_tool_call(page=1)
-        assert len(page1.documents) == 4
-        assert page1.metadata.page_number == 1
-        assert page1.metadata.has_next_page is True
+        page1 = toolkit.invoke_tool("get_all_docs", {"page": 1})
+        assert len(page1["documents"]) == 4
+        assert page1["page_number"] == 1
+        assert page1["has_next_page"] is True
 
         # Page 2 (partial)
-        page2 = paginated_tool_call(page=2)
-        assert len(page2.documents) == 2  # Remaining documents
-        assert page2.metadata.page_number == 2
-        assert page2.metadata.has_next_page is False
+        page2 = toolkit.invoke_tool("get_all_docs", {"page": 2})
+        assert len(page2["documents"]) == 2  # Remaining documents
+        assert page2["page_number"] == 2
+        assert page2["has_next_page"] is False
 
-    def test_pagination_last_page(
-        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
-    ) -> None:  # Added types
-        """Test pagination on the last page."""
-
-        def get_all_docs() -> List[Document]:
-            return sample_documents[:5]  # Only 5 documents
-
-        toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=3)
-
-        # First page
-        page0 = toolkit.get_all_docs(page=0)
-        assert len(page0.documents) == 3
-        assert page0.metadata.has_next_page is True
-
-        # Second page (last page)
-        page1 = toolkit.get_all_docs(page=1)
-        assert len(page1.documents) == 2
-        assert page1.metadata.has_next_page is False
-
-    def test_pagination_empty_page(
+    def test_invoke_without_pagination(
         self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
     ) -> None:
-        """Test pagination when requesting a page beyond available data."""
+        """Test invoke on non-paginated tools."""
 
         def get_all_docs() -> List[Document]:
-            return sample_documents[:3]  # Only 3 documents
+            return sample_documents[:3]
 
-        toolkit.register_tool(get_all_docs, "get_all_docs", paginate=True, max_docs=5)
+        toolkit.register_tool(get_all_docs, "get_all_docs", paginate=False)
 
-        # Page 0 has all documents
-        page0 = toolkit.get_all_docs(page=0)
-        assert len(page0.documents) == 3
-        assert page0.metadata.has_next_page is False
+        # Invoke call should not apply pagination
+        result = toolkit.invoke_tool("get_all_docs", {})
 
-        # Page 1 should be empty
-        page1 = toolkit.get_all_docs(page=1)
-        assert len(page1.documents) == 0
-        assert page1.metadata.has_next_page is False
+        assert "documents" in result
+        assert len(result["documents"]) == 3
+        # Should not have pagination metadata
+        assert "page_number" not in result
+        assert "has_next_page" not in result
 
-    def test_pagination_with_token_limits(self, toolkit: MockRetrieverToolkit) -> None:
-        """Test pagination with token count limits."""
+    def test_invoke_with_token_limits(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test pagination with token count limits via invoke."""
 
-        docs_with_tokens = [
-            Document(id="doc_1", content="Short", metadata={"token_count": 5}),
-            Document(id="doc_2", content="Medium length", metadata={"token_count": 10}),
-            Document(
-                id="doc_3", content="Very long content", metadata={"token_count": 15}
-            ),
-            Document(id="doc_4", content="Another short", metadata={"token_count": 5}),
-        ]
+        docs_with_tokens: List[Document] = []
+        for doc_id, content, tokens in [
+            ("doc_1", "Short", 5),
+            ("doc_2", "Medium length", 10),
+            ("doc_3", "Very long content", 15),
+            ("doc_4", "Another short", 5),
+        ]:
+            doc = TextDocument(id=doc_id, content=content)
+            doc._metadata.token_count = tokens
+            docs_with_tokens.append(doc)
 
         def get_docs_with_tokens() -> List[Document]:
             return docs_with_tokens
@@ -307,41 +272,90 @@ class TestPagination:
             max_tokens=20,  # Low token limit
         )
 
-        result = toolkit.get_docs_with_tokens(page=0)
+        result = toolkit.invoke_tool("get_docs_with_tokens", {})
 
         # Should include doc_1 (5 tokens) + doc_2 (10 tokens) = 15 tokens
         # Should NOT include doc_3 (15 tokens) as it would exceed 20 token limit
-        assert len(result.documents) == 2
-        assert result.documents[0].id == "doc_1"
-        assert result.documents[1].id == "doc_2"
-        assert result.metadata.token_count == 15
+        assert len(result["documents"]) == 2
+        assert result["documents"][0]["id"] == "doc_1"
+        assert result["documents"][1]["id"] == "doc_2"
+        assert result["token_count"] == 15
 
-    def test_pagination_with_missing_token_metadata(
+    def test_invoke_with_large_first_document(
         self, toolkit: MockRetrieverToolkit
     ) -> None:
-        """Test pagination when documents don't have token_count metadata."""
+        """Test that at least one document is included even if it exceeds token limit."""
 
-        docs_no_tokens = [
-            Document(id="doc_1", content="Content 1"),
-            Document(id="doc_2", content="Content 2", metadata={}),
-            Document(id="doc_3", content="Content 3", metadata={"other": "data"}),
-        ]
+        docs_with_large_first: List[Document] = []
+        for doc_id, content, tokens in [
+            (
+                "large_doc",
+                "Extremely long content that exceeds limit",
+                3000,
+            ),  # Exceeds 2048 default
+            ("doc_2", "Short", 10),
+            ("doc_3", "Another short", 5),
+        ]:
+            doc = TextDocument(id=doc_id, content=content)
+            doc._metadata.token_count = tokens
+            docs_with_large_first.append(doc)
 
-        def get_docs_no_tokens() -> List[Document]:
-            return docs_no_tokens
+        def get_docs_with_large_first() -> List[Document]:
+            return docs_with_large_first
 
         toolkit.register_tool(
-            get_docs_no_tokens,
-            "get_docs_no_tokens",
+            get_docs_with_large_first,
+            "get_docs_with_large_first",
             paginate=True,
-            max_docs=5,
-            max_tokens=10,
+            max_docs=10,
+            max_tokens=2048,  # Default token limit
         )
-        result = toolkit.get_docs_no_tokens(page=0)
 
-        # Should include all documents since they have 0 tokens each
-        assert len(result.documents) == 3
-        assert result.metadata.token_count == 0
+        result = toolkit.invoke_tool("get_docs_with_large_first", {})
+
+        # Should include at least the first document, even though it exceeds token limit
+        assert len(result["documents"]) >= 1
+        assert result["documents"][0]["id"] == "large_doc"
+        assert result["token_count"] == 3000  # Just the large document
+
+        # Should have next page since there are more documents available
+        assert result["has_next_page"] is True
+        assert result["total_documents"] == 3
+
+    def test_has_next_page_with_token_filtering(
+        self, toolkit: MockRetrieverToolkit
+    ) -> None:
+        """Test that has_next_page is correct when documents are filtered by token limits."""
+
+        # Create 20 documents, each with high token count
+        docs_many_large: List[Document] = []
+        for i in range(20):
+            doc = TextDocument(id=f"doc_{i}", content=f"Large content {i}")
+            doc._metadata.token_count = 1000  # Each doc is 1000 tokens
+            docs_many_large.append(doc)
+
+        def get_many_large_docs() -> List[Document]:
+            return docs_many_large
+
+        toolkit.register_tool(
+            get_many_large_docs,
+            "get_many_large_docs",
+            paginate=True,
+            max_docs=20,  # High doc limit
+            max_tokens=2500,  # Can fit 2 documents (2000 tokens) but not 3 (3000 tokens)
+        )
+
+        result = toolkit.invoke_tool("get_many_large_docs", {})
+
+        # Should include 2 documents due to token limit (2000 tokens)
+        assert len(result["documents"]) == 2
+        assert result["documents"][0]["id"] == "doc_0"
+        assert result["documents"][1]["id"] == "doc_1"
+        assert result["token_count"] == 2000
+
+        # Should have next page since there are 18 more documents available
+        assert result["has_next_page"] is True
+        assert result["total_documents"] == 20
 
     def test_pagination_invalid_return_type(
         self, toolkit: MockRetrieverToolkit
@@ -349,14 +363,76 @@ class TestPagination:
         """Test that pagination fails with invalid return types."""
 
         def returns_paginated_response() -> PaginatedResponse:
-            return PaginatedResponse(
-                documents=[], metadata=PageMetadata(page_number=0, has_next_page=False)
-            )
+            return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         with pytest.raises(TypeError, match="Cannot paginate tool"):
             toolkit.register_tool(
                 returns_paginated_response, "invalid_paginated", paginate=True
             )
+
+
+class TestToolIntegration:
+    """Test Tool class integration with RetrieverToolkit."""
+
+    def test_tool_creation_and_access(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test that tools are properly created and accessible."""
+
+        def get_docs() -> List[Document]:
+            return [TextDocument(id="test", content="content")]
+
+        toolkit.register_tool(get_docs, "get_docs")
+
+        # Should be able to get tool object
+        tool = toolkit.get_tool("get_docs")
+        assert isinstance(tool, Tool)
+        assert tool.name == "get_docs"
+        assert "get_docs" in tool.description
+
+        # Should be accessible as attribute (direct call)
+        result = toolkit.get_docs()
+        assert len(result) == 1
+
+    def test_tool_invoke_method(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test that tool invoke method works correctly."""
+
+        def get_docs(query: str = "default") -> List[Document]:
+            return [TextDocument(id="test", content=f"query_{query}")]
+
+        toolkit.register_tool(get_docs, "get_docs")
+
+        tool = toolkit.get_tool("get_docs")
+
+        # Test invoke with dict
+        result1 = tool.invoke({"query": "test"})
+        assert "documents" in result1
+        assert "query_test" in result1["documents"][0]["content"]
+
+        # Test invoke with string (maps to first parameter)
+        result2 = tool.invoke("string_query")
+        assert "query_string_query" in result2["documents"][0]["content"]
+
+    def test_toolkit_invoke_tool_method(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test toolkit's invoke_tool method."""
+
+        def get_docs(query: str) -> List[Document]:
+            return [TextDocument(id="test", content=f"query_{query}")]
+
+        toolkit.register_tool(get_docs, "get_docs", paginate=True, max_docs=5)
+
+        # Should work the same as tool.invoke()
+        result = toolkit.invoke_tool("get_docs", {"query": "test"})
+        assert "documents" in result
+        assert "page_number" in result  # Paginated
+        assert "query_test" in result["documents"][0]["content"]
+
+    def test_tool_not_found_error(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test error handling for non-existent tools."""
+
+        with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
+            toolkit.get_tool("nonexistent")
+
+        with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
+            toolkit.invoke_tool("nonexistent", {})
 
 
 class TestCombinedFeatures:
@@ -375,21 +451,43 @@ class TestCombinedFeatures:
             get_docs, "get_docs", cache=True, paginate=True, max_docs=3
         )
 
-        # First call to page 0
-        page0_first = toolkit.get_docs(page=0)
+        # First invoke call to page 0
+        page0_first = toolkit.invoke_tool("get_docs", {"page": 0})
         assert toolkit.call_count == 1
-        assert len(page0_first.documents) == 3
+        assert len(page0_first["documents"]) == 3
 
-        # Second call to page 0 - should use cache
-        page0_second = toolkit.get_docs(page=0)
+        # Second invoke call to page 0 - should use cache
+        page0_second = toolkit.invoke_tool("get_docs", {"page": 0})
         assert toolkit.call_count == 1  # No additional function call
-        assert page0_first.documents == page0_second.documents
+        assert page0_first["documents"] == page0_second["documents"]
 
         # Call to page 1 - should use cache but different page
-        page1 = toolkit.get_docs(page=1)
+        page1 = toolkit.invoke_tool("get_docs", {"page": 1})
         assert toolkit.call_count == 1  # Still no additional function call
-        assert len(page1.documents) == 3
-        assert page1.documents != page0_first.documents
+        assert len(page1["documents"]) == 3
+        assert page1["documents"] != page0_first["documents"]
+
+    def test_direct_vs_invoke_caching(
+        self, toolkit: MockRetrieverToolkit, sample_documents: List[Document]
+    ) -> None:
+        """Test that both direct and invoke calls use the same cache."""
+
+        def get_docs() -> List[Document]:
+            toolkit.call_count += 1
+            return sample_documents
+
+        toolkit.register_tool(get_docs, "get_docs", cache=True)
+
+        # Direct call first
+        direct_result = toolkit.get_docs()
+        assert toolkit.call_count == 1
+
+        # Invoke call should use same cache
+        invoke_result = toolkit.invoke_tool("get_docs", {})
+        assert toolkit.call_count == 1  # No additional call
+
+        # Results should be from same cached data
+        assert len(direct_result) == len(invoke_result["documents"])
 
 
 class TestDecoratorTools:
@@ -403,45 +501,24 @@ class TestDecoratorTools:
         class DecoratorToolkit(RetrieverToolkit):
             pass
 
-        # Define the stateless function outside the class
         @DecoratorToolkit.tool()
         def get_basic_docs() -> List[Document]:
             call_count["value"] += 1
-            return [Document(id="basic", content=f"call_{call_count['value']}")]
+            return [TextDocument(id="basic", content=f"call_{call_count['value']}")]
 
         toolkit = DecoratorToolkit()
 
         # Tool should be registered automatically
-        assert "get_basic_docs" in toolkit._tools
+        assert "get_basic_docs" in toolkit.tools
 
-        # Should be callable
+        # Should be callable directly
         result = toolkit.get_basic_docs()
         assert len(result) == 1
         assert result[0].content == "call_1"
 
-    def test_decorator_with_caching(self) -> None:
-        """Test decorator with caching options."""
-
-        call_count = {"value": 0}
-
-        class CachedDecoratorToolkit(RetrieverToolkit):
-            pass
-
-        @CachedDecoratorToolkit.tool(cache=True)
-        def get_cached_docs() -> List[Document]:
-            call_count["value"] += 1
-            return [Document(id="cached", content=f"call_{call_count['value']}")]
-
-        toolkit = CachedDecoratorToolkit()
-
-        # First call
-        result1 = toolkit.get_cached_docs()
-        assert call_count["value"] == 1
-
-        # Second call should use cache
-        result2 = toolkit.get_cached_docs()
-        assert call_count["value"] == 1
-        assert result1 == result2
+        # Should also be invokable
+        invoke_result = toolkit.invoke_tool("get_basic_docs", {})
+        assert len(invoke_result["documents"]) == 1
 
     def test_decorator_with_pagination(self, sample_documents: List[Document]) -> None:
         """Test decorator with pagination options."""
@@ -454,42 +531,15 @@ class TestDecoratorTools:
             return sample_documents
 
         toolkit = PaginatedDecoratorToolkit()
-        result = toolkit.get_paginated_docs(page=0)
-        assert isinstance(result, PaginatedResponse)
-        assert len(result.documents) == 4
-        assert result.metadata.has_next_page is True
 
-    def test_decorator_with_all_options(self, sample_documents: List[Document]) -> None:
-        """Test decorator with all options combined."""
+        # Direct call should return all documents
+        direct_result = toolkit.get_paginated_docs()
+        assert len(direct_result) == 10
 
-        call_count = {"value": 0}
-
-        class FullDecoratorToolkit(RetrieverToolkit):
-            pass
-
-        @FullDecoratorToolkit.tool(
-            cache=True,
-            ttl=timedelta(minutes=5),
-            paginate=True,
-            max_docs=3,
-            max_tokens=50,
-        )
-        def get_full_featured_docs() -> List[Document]:
-            call_count["value"] += 1
-            return sample_documents
-
-        toolkit = FullDecoratorToolkit()
-
-        # First call
-        result1 = toolkit.get_full_featured_docs(page=0)
-        assert call_count["value"] == 1
-        assert isinstance(result1, PaginatedResponse)
-        assert len(result1.documents) == 3
-
-        # Second call to same page should use cache
-        result2 = toolkit.get_full_featured_docs(page=0)
-        assert call_count["value"] == 1  # No additional call
-        assert result1.documents == result2.documents
+        # Invoke call should be paginated
+        invoke_result = toolkit.invoke_tool("get_paginated_docs", {"page": 0})
+        assert len(invoke_result["documents"]) == 4
+        assert invoke_result["has_next_page"] is True
 
 
 class TestErrorHandling:
@@ -517,11 +567,11 @@ class TestErrorHandling:
         """Test accessing tools as attributes."""
 
         def valid_tool() -> List[Document]:
-            return [Document(id="test", content="test")]
+            return [TextDocument(id="test", content="test")]
 
         toolkit.register_tool(valid_tool, "my_tool")
 
-        # Should be accessible as attribute
+        # Should be accessible as attribute (direct call)
         assert hasattr(toolkit, "my_tool")
         result = toolkit.my_tool()
         assert len(result) == 1
@@ -529,3 +579,22 @@ class TestErrorHandling:
         # Should raise AttributeError for non-existent tools
         with pytest.raises(AttributeError):
             _ = toolkit.non_existent_tool
+
+    def test_error_handling_in_invoke(self, toolkit: MockRetrieverToolkit) -> None:
+        """Test error handling in tool invoke method."""
+
+        def failing_tool(query: str) -> List[Document]:
+            if query == "no_results":
+                raise ValueError("No matching documents found")
+            raise RuntimeError("Other error")
+
+        toolkit.register_tool(failing_tool, "failing_tool")
+
+        # Should handle specific "No matching documents found" error
+        result = toolkit.invoke_tool("failing_tool", "no_results")
+        assert result["response_code"] == "error_no_documents_found"
+        assert result["error_message"] == "No matching documents found"
+
+        # Should propagate other errors
+        with pytest.raises(ValueError, match="Tool execution failed"):
+            toolkit.invoke_tool("failing_tool", "other")

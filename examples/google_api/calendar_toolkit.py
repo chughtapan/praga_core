@@ -4,9 +4,38 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from auth import GoogleAuthManager
+from pydantic import Field
 
 from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document
+
+
+class CalendarEventDocument(Document):
+    """A document representing a calendar event with all event-specific fields."""
+
+    event_id: str = Field(description="Google Calendar event ID")
+    summary: str = Field(description="Event title/summary")
+    description: str = Field(default="", description="Event description")
+    start_time: str = Field(description="Event start time")
+    end_time: str = Field(description="Event end time")
+    location: str = Field(default="", description="Event location")
+    organizer_email: str = Field(description="Organizer email address")
+    organizer_name: str = Field(description="Organizer display name")
+    attendee_emails: List[str] = Field(
+        default_factory=list, description="List of attendee emails"
+    )
+    attendee_names: List[str] = Field(
+        default_factory=list, description="List of attendee names"
+    )
+    status: str = Field(default="", description="Event status")
+    created: str = Field(default="", description="Event creation timestamp")
+    updated: str = Field(default="", description="Event last updated timestamp")
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Calculate token count based on summary and description
+        content_length = len(self.summary) + len(self.description)
+        self.metadata.token_count = content_length // 4
 
 
 class CalendarToolkit(RetrieverToolkit):
@@ -100,8 +129,8 @@ class CalendarToolkit(RetrieverToolkit):
             print(f"Error retrieving calendar events: {e}")
             return []
 
-    def _event_to_document(self, event: Dict) -> Document:
-        """Convert a Calendar event to a Document."""
+    def _event_to_document(self, event: Dict) -> CalendarEventDocument:
+        """Convert a Calendar event to a CalendarEventDocument."""
         event_id = event.get("id", "unknown")
         summary = event.get("summary", "(No Title)")
         description = event.get("description", "")
@@ -120,7 +149,9 @@ class CalendarToolkit(RetrieverToolkit):
 
         # Get attendees information
         attendees = event.get("attendees", [])
-        attendee_emails = [att.get("email", "") for att in attendees]
+        attendee_emails = [
+            att.get("email", "") for att in attendees if att.get("email")
+        ]
         attendee_names = [
             att.get("displayName", att.get("email", "")) for att in attendees
         ]
@@ -128,45 +159,22 @@ class CalendarToolkit(RetrieverToolkit):
         # Get location
         location = event.get("location", "")
 
-        # Format the document content
-        content_parts = [f"Title: {summary}"]
-
-        if start_time:
-            content_parts.append(f"Start: {start_time}")
-        if end_time:
-            content_parts.append(f"End: {end_time}")
-        if location:
-            content_parts.append(f"Location: {location}")
-        if organizer_name:
-            content_parts.append(f"Organizer: {organizer_name}")
-        if attendee_names:
-            content_parts.append(f"Attendees: {', '.join(attendee_names)}")
-        if description:
-            content_parts.append(f"\nDescription:\n{description}")
-
-        doc_content = "\n".join(content_parts)
-
-        # Calculate rough token count (4 chars per token approximation)
-        token_count = len(doc_content) // 4
-
-        metadata = {
-            "summary": summary,
-            "description": description,
-            "start_time": start_time,
-            "end_time": end_time,
-            "location": location,
-            "organizer_email": organizer_email,
-            "organizer_name": organizer_name,
-            "attendee_emails": attendee_emails,
-            "attendee_names": attendee_names,
-            "event_id": event_id,
-            "token_count": token_count,
-            "status": event.get("status", ""),
-            "created": event.get("created", ""),
-            "updated": event.get("updated", ""),
-        }
-
-        return Document(id=event_id, content=doc_content, metadata=metadata)
+        return CalendarEventDocument(
+            id=event_id,
+            event_id=event_id,
+            summary=summary,
+            description=description,
+            start_time=start_time,
+            end_time=end_time,
+            location=location,
+            organizer_email=organizer_email,
+            organizer_name=organizer_name,
+            attendee_emails=attendee_emails,
+            attendee_names=attendee_names,
+            status=event.get("status", ""),
+            created=event.get("created", ""),
+            updated=event.get("updated", ""),
+        )
 
     def get_calendar_entries_by_date_range(
         self,
@@ -174,7 +182,7 @@ class CalendarToolkit(RetrieverToolkit):
         end_date: str,
         calendar_id: str = "primary",
         max_results: int = 100,
-    ) -> List[Document]:
+    ) -> List[CalendarEventDocument]:
         """Get calendar events within a date range.
 
         Args:
@@ -207,7 +215,7 @@ class CalendarToolkit(RetrieverToolkit):
         days_ahead: int = 30,
         calendar_id: str = "primary",
         max_results: int = 100,
-    ) -> List[Document]:
+    ) -> List[CalendarEventDocument]:
         """Get calendar events where a specific email address is an attendee.
 
         Args:
@@ -248,7 +256,7 @@ class CalendarToolkit(RetrieverToolkit):
         days_ahead: int = 30,
         calendar_id: str = "primary",
         max_results: int = 100,
-    ) -> List[Document]:
+    ) -> List[CalendarEventDocument]:
         """Get calendar events organized by a specific email address.
 
         Args:
@@ -288,7 +296,7 @@ class CalendarToolkit(RetrieverToolkit):
         days_ahead: int = 30,
         calendar_id: str = "primary",
         max_results: int = 100,
-    ) -> List[Document]:
+    ) -> List[CalendarEventDocument]:
         """Get calendar events containing a topic keyword in subject or description.
 
         Args:
@@ -338,7 +346,7 @@ class CalendarToolkit(RetrieverToolkit):
 
 # Stateless tools using decorator
 @CalendarToolkit.tool(cache=True, ttl=timedelta(hours=1))
-def get_todays_events() -> List[Document]:
+def get_todays_events() -> List[CalendarEventDocument]:
     """Get today's calendar events."""
     toolkit = CalendarToolkit()
 
@@ -347,7 +355,7 @@ def get_todays_events() -> List[Document]:
 
 
 @CalendarToolkit.tool(cache=True, ttl=timedelta(minutes=30))
-def get_upcoming_events(days: int = 7) -> List[Document]:
+def get_upcoming_events(days: int = 7) -> List[CalendarEventDocument]:
     """Get upcoming calendar events for the next N days."""
     toolkit = CalendarToolkit()
 
@@ -361,7 +369,7 @@ def get_upcoming_events(days: int = 7) -> List[Document]:
 
 
 @CalendarToolkit.tool(cache=True, ttl=timedelta(hours=2))
-def get_meetings_this_week() -> List[Document]:
+def get_meetings_this_week() -> List[CalendarEventDocument]:
     """Get all meetings for the current week."""
     toolkit = CalendarToolkit()
 
@@ -379,8 +387,59 @@ def get_meetings_this_week() -> List[Document]:
     # Filter for events that look like meetings (have attendees)
     meetings = []
     for event in events:
-        attendees = event.metadata.get("attendee_emails", [])
-        if len(attendees) > 1:  # More than just the organizer
+        if len(event.attendee_emails) > 1:  # More than just the organizer
             meetings.append(event)
 
     return meetings
+
+
+# Example usage demonstrating both direct calls and invoke calls
+if __name__ == "__main__":
+    # Create toolkit instance
+    calendar_toolkit = CalendarToolkit()
+
+    # Example 1: Direct method call (no pagination)
+    print("=== Direct Method Call (No Pagination) ===")
+    events_direct = calendar_toolkit.get_calendar_entries_by_date_range(
+        start_date="2024-01-01", end_date="2024-01-31"
+    )
+    print(f"Direct call returned {len(events_direct)} events")
+
+    # Example 2: Invoke method call (with pagination if configured)
+    print("\n=== Invoke Method Call (With Pagination) ===")
+    events_paginated = calendar_toolkit.invoke_tool(
+        "get_calendar_entries_by_date_range",
+        {"start_date": "2024-01-01", "end_date": "2024-01-31", "page": 0},  # First page
+    )
+    print(f"Invoke call returned: {events_paginated}")
+
+    # Example 3: Get next page
+    print("\n=== Getting Next Page ===")
+    if events_paginated.get("has_next_page", False):
+        next_page = calendar_toolkit.invoke_tool(
+            "get_calendar_entries_by_date_range",
+            {
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-31",
+                "page": 1,  # Second page
+            },
+        )
+        print(f"Next page returned: {next_page}")
+
+    # Example 4: Using string input for invoke
+    print("\n=== String Input for Invoke ===")
+    events_string = calendar_toolkit.invoke_tool(
+        "get_calendar_entries_by_topic",
+        "meeting",  # This will be mapped to the first parameter
+    )
+    print(f"String input returned: {events_string}")
+
+    # Example 5: Direct access to Tool objects
+    print("\n=== Direct Tool Access ===")
+    tool = calendar_toolkit.get_tool("get_calendar_entries_by_date_range")
+    print(f"Tool name: {tool.name}")
+    print(f"Tool paginate setting: {tool.paginate}")
+    print(f"Tool max_docs: {tool.max_docs}")
+
+    # List all available tools
+    print(f"\nAvailable tools: {list(calendar_toolkit.tools.keys())}")

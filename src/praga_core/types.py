@@ -1,52 +1,55 @@
-from collections.abc import Sequence as SequenceABC
-from dataclasses import dataclass
-from typing import Any, Dict, Iterator, Optional, Sequence, Union, overload
+import json
+import math
+from abc import ABC
+from datetime import datetime
+from typing import Any, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 
-@dataclass
-class Document:
-    id: str
-    content: str
-    metadata: Dict[str, Any] | None = None
+class DocumentMetadata(BaseModel):
+    """Metadata for documents with extensible fields."""
+
+    model_config = ConfigDict(extra="allow")
+
+    token_count: Optional[int] = Field(
+        None, description="Number of tokens in the document"
+    )
 
 
-@dataclass
-class PageMetadata:
-    page_number: int
-    has_next_page: bool
-    total_documents: Optional[int] = None
-    token_count: Optional[int] = None
+class Document(BaseModel, ABC):
+    """A document with an ID, content, and optional metadata."""
+
+    model_config = ConfigDict(
+        json_encoders={datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")},
+    )
+
+    id: str = Field()
+    _metadata: DocumentMetadata = PrivateAttr(
+        default_factory=lambda: DocumentMetadata(token_count=None)
+    )
+
+    @property
+    def metadata(self) -> DocumentMetadata:
+        """Access to document metadata."""
+        return self._metadata
+
+    @property
+    def text(self) -> str:
+        return json.dumps(self.model_dump(), indent=2)
+
+    def __str__(self) -> str:
+        return self.text
+
+    def __repr__(self) -> str:
+        return self.text
 
 
-@dataclass
-class PaginatedResponse(SequenceABC[Document]):
-    documents: Sequence[Document]
-    metadata: PageMetadata
+class TextDocument(Document):
+    """A document with text content."""
 
-    def __len__(self) -> int:
-        """Return the number of documents in this page."""
-        return len(self.documents)
+    content: str = Field(description="The text content of the document")
 
-    @overload
-    def __getitem__(self, index: int) -> Document: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> Sequence[Document]: ...
-
-    def __getitem__(
-        self, index: Union[int, slice]
-    ) -> Union[Document, Sequence[Document]]:
-        """Get a document by index or a sequence of documents by slice."""
-        return self.documents[index]
-
-    def __iter__(self) -> Iterator[Document]:
-        """Iterate over the documents."""
-        return iter(self.documents)
-
-    def __bool__(self) -> bool:
-        """Return True if there are any documents."""
-        return len(self.documents) > 0
-
-    def __contains__(self, item: object) -> bool:
-        """Check if a document is in this response."""
-        return item in self.documents
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        self._metadata.token_count = math.ceil(len(self.content.split()) * 4 / 3)

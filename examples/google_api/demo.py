@@ -14,75 +14,76 @@ def demo_gmail_toolkit():
         print("Initializing Gmail toolkit...")
         gmail = GmailToolkit()
 
-        # Demo 1: Get recent emails
-        print("\n1. Getting recent emails (last 7 days)...")
+        # Demo 1: Direct method calls (no pagination)
+        print("\n1. Direct Method Calls (No Pagination)")
+        print("-" * 40)
+        print("Getting recent emails using direct method call...")
         recent_emails = gmail.get_recent_emails(days=7)
         print(f"Found {len(recent_emails)} recent emails")
 
-        # Demo 2: Search by keyword
-        print("\n2. Searching emails with keyword 'meeting'...")
-        meeting_emails = gmail.get_emails_with_body_keyword("meeting", max_results=5)
-        print(f"Found {len(meeting_emails)} emails containing 'meeting'")
+        # Show first few emails
+        for i, email in enumerate(recent_emails[:2]):
+            print(f"\nRecent Email {i+1}:")
+            print(f"  Subject: {email.subject}")
+            print(f"  From: {email.sender}")
+            print(f"  Date: {email.time}")
 
-        for i, email in enumerate(meeting_emails[:2]):  # Show first 2
-            print(f"\nMeeting Email {i+1}:")
-            print(f"  Subject: {email.metadata.get('subject', 'N/A')}")
-            print(f"  From: {email.metadata.get('from', 'N/A')}")
-            print(f"  Date: {email.metadata.get('date', 'N/A')}")
-            print(f"  Content preview: {email.content[:150]}...")
+        # Demo 2: Invoke method calls (with pagination)
+        print("\n2. Invoke Method Calls (With Pagination)")
+        print("-" * 40)
+        print("Getting emails with keyword using invoke method (paginated)...")
 
-        # Demo 3: Get emails by date range
-        print("\n3. Getting emails from last week...")
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=7)
-
-        date_range_emails = gmail.get_emails_by_date_range(
-            start_date.strftime("%Y-%m-%d"),
-            end_date.strftime("%Y-%m-%d"),
-            max_results=5,
+        # Use invoke_tool for paginated results
+        paginated_result = gmail.invoke_tool(
+            "get_emails_with_body_keyword", {"keyword": "meeting", "max_results": 20}
         )
-        print(f"Found {len(date_range_emails)} emails in date range")
+
+        print("Page 0 results:")
+        print(f"  Documents in this page: {len(paginated_result['documents'])}")
+        print(f"  Has next page: {paginated_result.get('has_next_page', 'N/A')}")
+        print(f"  Total documents: {paginated_result.get('total_documents', 'N/A')}")
+
+        # Show first email from paginated results
+        if paginated_result["documents"]:
+            first_email = paginated_result["documents"][0]
+            print("\nFirst paginated email:")
+            print(f"  Subject: {first_email.get('subject', 'N/A')}")
+            print(f"  From: {first_email.get('sender', 'N/A')}")
+
+        # Demo 3: String input for invoke
+        print("\n3. String Input for Invoke")
+        print("-" * 40)
+        string_result = gmail.invoke_tool("get_emails_with_body_keyword", "project")
+        print(f"String input result - documents: {len(string_result['documents'])}")
+
+        # Demo 4: Compare direct vs invoke for same tool
+        print("\n4. Comparing Direct vs Invoke Calls")
+        print("-" * 40)
+
+        # Direct call
+        print("Direct call to get_emails_by_sender...")
+        direct_emails = gmail.get_emails_by_sender("test@example.com", max_results=10)
+        print(f"Direct call returned {len(direct_emails)} emails")
+
+        # Invoke call
+        print("Invoke call to get_emails_by_sender...")
+        invoke_emails = gmail.invoke_tool(
+            "get_emails_by_sender",
+            {"sender_email": "test@example.com", "max_results": 10},
+        )
         print(
-            f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+            f"Invoke call returned {len(invoke_emails['documents'])} emails in current page"
         )
+        if "total_documents" in invoke_emails:
+            print(f"Total documents available: {invoke_emails['total_documents']}")
 
-        for i, email in enumerate(date_range_emails[:2]):  # Show first 2
-            print(f"\nDate Range Email {i+1}:")
-            print(f"  Subject: {email.metadata.get('subject', 'N/A')}")
-            print(f"  From: {email.metadata.get('from', 'N/A')}")
-            print(f"  Date: {email.metadata.get('date', 'N/A')}")
-
-        # Demo 4: Get any emails (broader search)
-        print("\n4. Getting any emails (broader search)...")
-        try:
-            all_emails = gmail.get_emails_with_body_keyword(
-                "", max_results=10
-            )  # Empty keyword gets all
-            print(f"Found {len(all_emails)} emails with empty keyword search")
-
-            for i, email in enumerate(all_emails[:3]):  # Show first 3
-                print(f"\nAny Email {i+1}:")
-                print(f"  Subject: {email.metadata.get('subject', 'N/A')}")
-                print(f"  From: {email.metadata.get('from', 'N/A')}")
-                print(f"  Date: {email.metadata.get('date', 'N/A')}")
-        except Exception as e:
-            print(f"Error with broad search: {e}")
-
-        # Demo 5: Test pagination
-        print("\n5. Testing pagination...")
-        paginated_result = gmail.get_emails_with_body_keyword(
-            "", page=0
-        )  # Get all emails, first page
-        print(f"Page 0: {len(paginated_result.documents)} documents")
-        print(f"Has next page: {paginated_result.metadata.has_next_page}")
-        print(f"Total documents: {paginated_result.metadata.total_documents}")
-
-        if len(paginated_result.documents) > 0:
-            print("\nFirst email from pagination:")
-            first_email = paginated_result.documents[0]
-            print(f"  Subject: {first_email.metadata.get('subject', 'N/A')}")
-            print(f"  From: {first_email.metadata.get('from', 'N/A')}")
-            print(f"  Date: {first_email.metadata.get('date', 'N/A')}")
+        # Demo 5: Tool inspection
+        print("\n5. Tool Inspection")
+        print("-" * 40)
+        print("Available tools in Gmail toolkit:")
+        for tool_name in gmail.tools.keys():
+            tool = gmail.get_tool(tool_name)
+            print(f"  - {tool.name}: {tool.description[:60]}...")
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
@@ -101,49 +102,85 @@ def demo_calendar_toolkit():
         print("Initializing Calendar toolkit...")
         calendar = CalendarToolkit()
 
-        # Demo 1: Get today's events
-        print("\n1. Getting today's events...")
+        # Demo 1: Direct method calls
+        print("\n1. Direct Method Calls (No Pagination)")
+        print("-" * 40)
+        print("Getting today's events using direct method call...")
         todays_events = calendar.get_todays_events()
         print(f"Found {len(todays_events)} events today")
 
-        for i, event in enumerate(todays_events[:3]):  # Show first 3
+        for i, event in enumerate(todays_events[:2]):
             print(f"\nEvent {i+1}:")
-            print(f"  Title: {event.metadata.get('summary', 'N/A')}")
-            print(f"  Start: {event.metadata.get('start_time', 'N/A')}")
-            print(f"  Organizer: {event.metadata.get('organizer_name', 'N/A')}")
+            print(f"  Title: {event.summary}")
+            print(f"  Start: {event.start_time}")
+            print(f"  Organizer: {event.organizer_name}")
 
-        # Demo 2: Get upcoming events
-        print("\n2. Getting upcoming events (next 7 days)...")
-        upcoming_events = calendar.get_upcoming_events(days=7)
-        print(f"Found {len(upcoming_events)} upcoming events")
+        # Demo 2: Invoke method calls with pagination
+        print("\n2. Invoke Method Calls (With Pagination)")
+        print("-" * 40)
 
-        # Demo 3: Search by topic
-        print("\n3. Searching for events with topic 'meeting'...")
-        meeting_events = calendar.get_calendar_entries_by_topic(
+        # Calculate date range
+        today = datetime.now()
+        end_date = today + timedelta(days=30)
+
+        paginated_events = calendar.invoke_tool(
+            "get_calendar_entries_by_date_range",
+            {
+                "start_date": today.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
+                "page": 0,  # First page
+            },
+        )
+
+        print("Paginated calendar results (page 0):")
+        print(f"  Documents in this page: {len(paginated_events['documents'])}")
+        print(f"  Has next page: {paginated_events.get('has_next_page', 'N/A')}")
+        print(f"  Total documents: {paginated_events.get('total_documents', 'N/A')}")
+
+        # Get next page if available
+        if paginated_events.get("has_next_page"):
+            print("\nGetting next page...")
+            next_page = calendar.invoke_tool(
+                "get_calendar_entries_by_date_range",
+                {
+                    "start_date": today.strftime("%Y-%m-%d"),
+                    "end_date": end_date.strftime("%Y-%m-%d"),
+                    "page": 1,  # Second page
+                },
+            )
+            print(f"  Documents in page 1: {len(next_page['documents'])}")
+
+        # Demo 3: Search by topic using both methods
+        print("\n3. Search by Topic - Direct vs Invoke")
+        print("-" * 40)
+
+        # Direct call
+        direct_meetings = calendar.get_calendar_entries_by_topic(
             "meeting", days_ahead=14
         )
-        print(f"Found {len(meeting_events)} events with topic 'meeting'")
+        print(f"Direct search for 'meeting': {len(direct_meetings)} events")
 
-        # Demo 4: Get events by date range
-        print("\n4. Getting events for next week...")
-        today = datetime.now()
-        next_week_start = today + timedelta(days=1)
-        next_week_end = today + timedelta(days=8)
-
-        next_week_events = calendar.get_calendar_entries_by_date_range(
-            next_week_start.strftime("%Y-%m-%d"), next_week_end.strftime("%Y-%m-%d")
+        # Invoke call
+        invoke_meetings = calendar.invoke_tool(
+            "get_calendar_entries_by_topic", {"topic": "meeting", "days_ahead": 14}
         )
-        print(f"Found {len(next_week_events)} events for next week")
-
-        # Demo 5: Test pagination
-        print("\n5. Testing pagination...")
-        paginated_result = calendar.get_calendar_entries_by_date_range(
-            (today - timedelta(days=30)).strftime("%Y-%m-%d"),
-            (today + timedelta(days=30)).strftime("%Y-%m-%d"),
-            page=0,
+        print(
+            f"Invoke search for 'meeting': {len(invoke_meetings['documents'])} events in current page"
         )
-        print(f"Page 0: {len(paginated_result.documents)} documents")
-        print(f"Has next page: {paginated_result.metadata.has_next_page}")
+
+        # Demo 4: String input with invoke
+        print("\n4. String Input for Invoke")
+        print("-" * 40)
+        string_search = calendar.invoke_tool("get_calendar_entries_by_topic", "standup")
+        print(f"String search for 'standup': {len(string_search['documents'])} events")
+
+        # Demo 5: Tool inspection
+        print("\n5. Tool Inspection")
+        print("-" * 40)
+        print("Available tools in Calendar toolkit:")
+        for tool_name in calendar.tools.keys():
+            tool = calendar.get_tool(tool_name)
+            print(f"  - {tool.name}: {tool.description[:60]}...")
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
@@ -153,7 +190,7 @@ def demo_calendar_toolkit():
 
 
 def demo_advanced_features():
-    """Demonstrate advanced features like caching and search."""
+    """Demonstrate advanced features like caching and tool integration."""
     print("\n" + "=" * 60)
     print("Advanced Features Demo")
     print("=" * 60)
@@ -162,8 +199,9 @@ def demo_advanced_features():
         gmail = GmailToolkit()
         calendar = CalendarToolkit()
 
-        # Demo caching
-        print("\n1. Testing caching (Gmail)...")
+        # Demo 1: Caching behavior
+        print("\n1. Testing Caching Behavior")
+        print("-" * 40)
         import time
 
         print("Making first API call (no cache)...")
@@ -180,32 +218,169 @@ def demo_advanced_features():
         print(f"Second call (cached) took: {second_call_time:.2f}s")
         print(f"Results are identical: {emails1 == emails2}")
 
-        # Demo speculate method
-        print("\n2. Testing speculate method...")
-        speculations = gmail.speculate("recent emails about meetings")
-        print(f"Gmail speculate returned {len(speculations)} suggestions")
+        # Demo 2: Caching with invoke calls
+        print("\n2. Testing Caching with Invoke Calls")
+        print("-" * 40)
 
-        speculations = calendar.speculate("upcoming meetings this week")
-        print(f"Calendar speculate returned {len(speculations)} suggestions")
+        print("First invoke call...")
+        start_time = time.time()
+        result1 = gmail.invoke_tool(
+            "get_emails_with_body_keyword", {"keyword": "test", "max_results": 5}
+        )
+        first_invoke_time = time.time() - start_time
+
+        print("Second invoke call (should use cache)...")
+        start_time = time.time()
+        result2 = gmail.invoke_tool(
+            "get_emails_with_body_keyword", {"keyword": "test", "max_results": 5}
+        )
+        second_invoke_time = time.time() - start_time
+
+        print(f"First invoke call took: {first_invoke_time:.2f}s")
+        print(f"Second invoke call (cached) took: {second_invoke_time:.2f}s")
+        print(f"Results are identical: {result1 == result2}")
+
+        # Demo 3: Pagination across pages uses same cache
+        print("\n3. Testing Pagination with Caching")
+        print("-" * 40)
+
+        page0 = calendar.invoke_tool(
+            "get_calendar_entries_by_date_range",
+            {"start_date": "2024-01-01", "end_date": "2024-12-31", "page": 0},
+        )
+
+        page1 = calendar.invoke_tool(
+            "get_calendar_entries_by_date_range",
+            {"start_date": "2024-01-01", "end_date": "2024-12-31", "page": 1},
+        )
+
+        print(f"Page 0: {len(page0['documents'])} documents")
+        print(f"Page 1: {len(page1['documents'])} documents")
+        print(
+            f"Both pages have same total_documents: {page0.get('total_documents') == page1.get('total_documents')}"
+        )
+
+        # Demo 4: Tool error handling
+        print("\n4. Testing Error Handling")
+        print("-" * 40)
+
+        try:
+            # Try to access non-existent tool
+            gmail.get_tool("nonexistent_tool")
+        except ValueError as e:
+            print(f"Expected error for non-existent tool: {e}")
+
+        # Demo 5: Tool metadata and inspection
+        print("\n5. Tool Metadata and Inspection")
+        print("-" * 40)
+
+        # Get a tool and inspect it
+        search_tool = gmail.get_tool("get_emails_with_body_keyword")
+        print(f"Tool name: {search_tool.name}")
+        print(f"Tool description: {search_tool.description[:100]}...")
+
+        # Show how to use both direct and invoke
+        print("\nThis tool can be used in two ways:")
+        print("1. Direct call: gmail.get_emails_with_body_keyword('keyword')")
+        print(
+            "2. Invoke call: gmail.invoke_tool('get_emails_with_body_keyword', 'keyword')"
+        )
+        print("   - Direct calls return all results")
+        print("   - Invoke calls apply pagination if configured")
 
     except Exception as e:
         print(f"Error in advanced features demo: {e}")
 
 
+def demo_tool_comparison():
+    """Demonstrate the key differences between direct and invoke calls."""
+    print("\n" + "=" * 60)
+    print("Direct vs Invoke Call Comparison")
+    print("=" * 60)
+
+    try:
+        gmail = GmailToolkit()
+
+        print("\nKey Differences:")
+        print("1. Direct calls: toolkit.method_name(...)")
+        print("   - Return raw results (List[Document])")
+        print("   - No pagination applied")
+        print("   - Use original function behavior")
+
+        print("\n2. Invoke calls: toolkit.invoke_tool('method_name', {...})")
+        print("   - Return serialized results (Dict)")
+        print("   - Apply pagination if configured")
+        print("   - Provide metadata (page info, token counts)")
+
+        print("\nExample comparison:")
+        print("-" * 40)
+
+        # Direct call example
+        print("Direct call example:")
+        try:
+            direct_result = gmail.get_recent_emails(days=3)
+            print(f"  Returns: List of {len(direct_result)} EmailDocument objects")
+            if direct_result:
+                print(f"  First item type: {type(direct_result[0])}")
+        except Exception as e:
+            print(f"  Error: {e}")
+
+        # Invoke call example
+        print("\nInvoke call example:")
+        try:
+            invoke_result = gmail.invoke_tool("get_recent_emails", {"days": 3})
+            print(f"  Returns: Dictionary with keys: {list(invoke_result.keys())}")
+            print(f"  Documents count: {len(invoke_result.get('documents', []))}")
+            if "page_number" in invoke_result:
+                print(
+                    f"  Page info: page {invoke_result['page_number']}, has_next: {invoke_result.get('has_next_page', False)}"
+                )
+        except Exception as e:
+            print(f"  Error: {e}")
+
+        print("\nWhen to use which:")
+        print(
+            "- Use direct calls for: simple scripting, data processing, when you need all results"
+        )
+        print(
+            "- Use invoke calls for: API endpoints, pagination, when integrating with external systems"
+        )
+
+    except Exception as e:
+        print(f"Error in tool comparison demo: {e}")
+
+
 def main():
     """Run all demos."""
-    print("Google API Toolkits Demo")
+    print("Google API Toolkits Demo with Tool Integration")
+    print("=" * 60)
+    print("This demo showcases the new Tool integration that provides:")
+    print("- Direct method calls (no pagination)")
+    print("- Invoke method calls (with pagination)")
+    print("- Caching and error handling")
+    print("- Tool inspection and metadata")
+    print("=" * 60)
+
     print(
-        "Make sure you have set up OAuth credentials in ~/.praga_secrets/credentials.json"
+        "\nMake sure you have set up OAuth credentials in ~/.praga_secrets/credentials.json"
     )
 
-    print("Running demos...")
-    demos = [demo_gmail_toolkit, demo_calendar_toolkit, demo_advanced_features]
+    print("\nRunning demos...")
+    demos = [
+        demo_gmail_toolkit,
+        demo_calendar_toolkit,
+        demo_advanced_features,
+        demo_tool_comparison,
+    ]
 
     for demo_func in demos:
-        demo_func()
+        try:
+            demo_func()
+        except Exception as e:
+            print(f"Error in {demo_func.__name__}: {e}")
+            continue
 
-    print("=" * 60)
+    print("\n" + "=" * 60)
     print("All demos completed!")
     print("=" * 60)
 

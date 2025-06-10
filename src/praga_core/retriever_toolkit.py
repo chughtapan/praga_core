@@ -3,7 +3,6 @@ from __future__ import annotations
 import abc
 import json
 from collections.abc import Sequence as ABCSequence
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import wraps
 from hashlib import md5
@@ -21,14 +20,18 @@ from typing import (
     get_type_hints,
 )
 
-from .types import Document, PageMetadata, PaginatedResponse
+from pydantic import BaseModel, Field
+
+from .tool import PaginatedResponse, Tool
+from .types import Document
 
 
-@dataclass
-class FunctionInvocation:
-    tool_name: str
-    args: Tuple[Any, ...]
-    kwargs: Dict[str, Any]
+class FunctionInvocation(BaseModel):
+    """Represents a function invocation with tool name, arguments, and keyword arguments."""
+
+    tool_name: str = Field(description="Name of the tool being invoked")
+    args: Tuple[Any, ...] = Field(description="Positional arguments for the tool")
+    kwargs: Dict[str, Any] = Field(description="Keyword arguments for the tool")
 
     def serialise(self) -> str:
         payload = {
@@ -56,11 +59,8 @@ class RetrieverToolkitMeta(abc.ABC):
         # Cache maps <key> -> (<value>, <timestamp>)
         self._cache: Dict[str, Tuple[Any, datetime]] = {}
 
-        # Tool registry maps <public_name> -> <callable>
-        self._tools: Dict[str, ToolFunction] = {}
-
-        # Track which tools are paginated for correct typing
-        self._paginated_tools: Dict[str, PaginatedToolFunction] = {}
+        # Tool registry maps <public_name> -> <Tool>
+        self._tools: Dict[str, Tool] = {}
 
         # Register any functions that were tagged with @RetrieverToolkit.tool
         self._register_pending_stateless_tools()
@@ -89,9 +89,9 @@ class RetrieverToolkitMeta(abc.ABC):
             cache: Whether to cache the tool.
             ttl: The time to live for the cache.
             invalidator: A function to invalidate the cache.
-            paginate: Whether to paginate the tool.
-            max_docs: The maximum number of documents to return.
-            max_tokens: The maximum number of tokens to return.
+            paginate: Whether to paginate the tool via invoke method.
+            max_docs: The maximum number of documents to return per page.
+            max_tokens: The maximum number of tokens to return per page.
         """
         if not _is_document_sequence_type(method):
             raise TypeError(
@@ -101,6 +101,12 @@ class RetrieverToolkitMeta(abc.ABC):
             """
             )
 
+        if paginate and _returns_paginated_response(method):
+            raise TypeError(
+                f"Cannot paginate tool '{name}' because it already returns a PaginatedResponse"
+            )
+
+        # Apply caching wrapper if requested
         if cache:
             method = self._wrap_with_cache(
                 method,
@@ -108,38 +114,48 @@ class RetrieverToolkitMeta(abc.ABC):
                 ttl=ttl,
             )
 
-        if paginate:
-            if _returns_paginated_response(method):
-                raise TypeError(
-                    f"Cannot paginate tool '{name}' because it already returns a PaginatedResponse"
-                )
+        # Create Tool wrapper with pagination handled internally
+        page_size = max_docs if paginate else None
+        max_tokens_param = max_tokens if paginate else None
+        tool = Tool(
+            func=method,
+            name=name,
+            description=method.__doc__ or f"Tool for {name}",
+            page_size=page_size,
+            max_tokens=max_tokens_param,
+        )
 
-            paginated_method = self._wrap_with_pagination(
-                method,
-                max_docs=max_docs,
-                max_tokens=max_tokens,
-            )
+        # Register the tool
+        self._tools[name] = tool
 
-            # Store paginated tool separately for correct typing
-            self._paginated_tools[name] = paginated_method
-            self._tools[name] = paginated_method
-            # Create a properly typed method stub for this paginated tool
-            setattr(
-                self, name, self._create_paginated_method_stub(paginated_method, name)
-            )
-        else:
-            self._tools[name] = method
-            setattr(self, name, method)
+        # Set the direct method on the toolkit instance (calls without pagination)
+        setattr(self, name, method)
+
+    def get_tool(self, name: str) -> Tool:
+        """Get a tool by name."""
+        if name not in self._tools:
+            raise ValueError(f"Tool '{name}' not found")
+        return self._tools[name]
+
+    def invoke_tool(
+        self, name: str, raw_input: Union[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Invoke a tool by name with pagination support."""
+        tool = self.get_tool(name)
+        return tool.invoke(raw_input)
+
+    @property
+    def tools(self) -> Dict[str, Tool]:
+        """Get all registered tools."""
+        return self._tools.copy()
 
     def __getattr__(self, name: str) -> Any:
         """
         This allows mypy to understand that dynamically registered methods exist.
         """
-        if name in self._paginated_tools:
-            # Return paginated tool with correct type
-            return self._paginated_tools[name]
-        elif name in self._tools:
-            return self._tools[name]
+        if name in self._tools:
+            # Return the direct method (without pagination)
+            return getattr(self, name, None)
         raise AttributeError(
             f"'{self.__class__.__name__}' object has no attribute '{name}'"
         )
@@ -185,64 +201,6 @@ class RetrieverToolkitMeta(abc.ABC):
             return fresh_result
 
         return cast(ToolFunction, cached_tool)
-
-    def _wrap_with_pagination(
-        self, method: SequenceToolFunction, *, max_docs: int, max_tokens: int
-    ) -> PaginatedToolFunction:
-        """
-        Converts a function that returns Sequence[Document] into one that
-        accepts a `page` parameter and returns a PaginatedResponse.
-        """
-
-        @wraps(method)
-        def paginated_tool(
-            *args: Any, page: int = 0, **kwargs: Any
-        ) -> PaginatedResponse:
-            # Get all documents from the underlying function
-            all_documents: Sequence[Document] = method(*args, **kwargs)
-
-            # Calculate page slice boundaries
-            page_start = page * max_docs
-            page_end = page_start + max_docs
-            page_documents = all_documents[page_start:page_end]
-
-            # Apply token budget limit within the page
-            final_documents: List[Document] = []
-            total_tokens = 0
-
-            for document in page_documents:
-                doc_metadata = document.metadata or {}
-                doc_tokens = doc_metadata.get("token_count", 0)
-
-                if total_tokens + doc_tokens > max_tokens:
-                    break
-
-                final_documents.append(document)
-                total_tokens += doc_tokens
-
-            return PaginatedResponse(
-                documents=final_documents,
-                metadata=PageMetadata(
-                    page_number=page,
-                    has_next_page=page_end < len(all_documents),
-                    total_documents=len(all_documents),
-                    token_count=total_tokens,
-                ),
-            )
-
-        return paginated_tool
-
-    def _create_paginated_method_stub(
-        self, paginated_method: PaginatedToolFunction, name: str
-    ) -> PaginatedToolFunction:
-        """Create a method stub that preserves the paginated return type."""
-
-        @wraps(paginated_method)
-        def paginated_method_stub(*args: Any, **kwargs: Any) -> PaginatedResponse:
-            return paginated_method(*args, **kwargs)
-
-        paginated_method_stub.__name__ = name
-        return paginated_method_stub
 
     # ========================================================
     # ==========  Stateless‑tool decorator support  ==========
@@ -337,7 +295,7 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
     Check if a function returns Sequence[Document], List[Document], or PaginatedResponse.
 
     Since PaginatedResponse now implements Sequence[Document], this covers all valid
-    return types for retriever tools.
+    return types for retriever tools. Also accepts subclasses of Document.
     """
     try:
         type_hints = get_type_hints(tool_function)
@@ -358,8 +316,16 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
         # Handle both typing.Sequence and collections.abc.Sequence
         if origin_type in (Sequence, ABCSequence, list, List):
             type_args = get_args(return_annotation)
-            if len(type_args) == 1 and type_args[0] is Document:
-                return True
+            if len(type_args) == 1:
+                document_type = type_args[0]
+                # Check if it's Document or a subclass of Document
+                if document_type is Document:
+                    return True
+                # Check if it's a subclass of Document
+                if isinstance(document_type, type) and issubclass(
+                    document_type, Document
+                ):
+                    return True
 
         return False
     except Exception:
