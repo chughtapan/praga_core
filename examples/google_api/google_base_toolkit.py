@@ -39,15 +39,31 @@ class GoogleBaseToolkit(RetrieverToolkit):
             return person_identifier
 
         try:
-            # Search for the person in contacts using People API
             results = (
                 self.people_service.people()
                 .searchContacts(
-                    query=person_identifier, readMask="names,emailAddresses"
+                    query=person_identifier,
+                    readMask="names,emailAddresses",
+                    sources=[
+                        "READ_SOURCE_TYPE_PROFILE",
+                        "READ_SOURCE_TYPE_CONTACT",
+                        "READ_SOURCE_TYPE_DOMAIN_CONTACT",
+                    ],
                 )
                 .execute()
             )
+            contacts = results.get("results", [])
 
+            if not contacts:
+                results = (
+                    self.people_service.people()
+                    .searchDirectoryPeople(
+                        query=person_identifier,
+                        readMask="names,emailAddresses",
+                        sources=["DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT"],
+                    )
+                    .execute()
+                )
             contacts = results.get("results", [])
 
             # Look for a contact with matching name
@@ -86,7 +102,5 @@ class GoogleBaseToolkit(RetrieverToolkit):
         except Exception as e:
             print(f"Error resolving person identifier '{person_identifier}': {e}")
             raise e
-
-        raise RuntimeError(
-            f"Unable to find email address for person '{person_identifier}'"
-        )
+        print(f"Unable to find email address for person '{person_identifier}'")
+        return person_identifier
