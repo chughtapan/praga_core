@@ -2,7 +2,7 @@
 
 import pytest
 
-from praga_core import (
+from praga_core.retriever import (
     AgentResponse,
     ResponseCode,
     parse_agent_response,

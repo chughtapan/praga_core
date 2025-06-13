@@ -1,4 +1,4 @@
-"""Comprehensive pytest tests for the ReAct agent."""
+"""Comprehensive pytest tests for the RetrieverAgent."""
 
 import json
 from typing import List
@@ -8,7 +8,7 @@ import pytest
 from pydantic import Field
 
 from praga_core import (
-    ReActAgent,
+    RetrieverAgent,
     RetrieverToolkit,
 )
 from praga_core.types import Document
@@ -185,14 +185,14 @@ class MockCalendarToolkit(RetrieverToolkit):
         return None
 
 
-class TestReActAgentBasic:
-    """Test basic ReAct agent functionality."""
+class TestRetrieverAgentBasic:
+    """Test basic RetrieverAgent functionality."""
 
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_client = MockOpenAIClient()
         self.toolkit = MockRetrieverToolkit()
-        self.agent = ReActAgent(
+        self.agent = RetrieverAgent(
             toolkit=self.toolkit, openai_client=self.mock_client, max_iterations=3
         )
 
@@ -424,8 +424,8 @@ class TestReActAgentBasic:
         assert references[0].document is None
 
 
-class TestReActAgentMultipleToolkits:
-    """Test ReAct agent with multiple toolkits."""
+class TestRetrieverAgentMultipleToolkits:
+    """Test RetrieverAgent with multiple toolkits."""
 
     def setup_method(self):
         """Set up test fixtures with multiple toolkits."""
@@ -434,7 +434,7 @@ class TestReActAgentMultipleToolkits:
         self.calendar_toolkit = MockCalendarToolkit()
 
         # Test with multiple toolkits
-        self.agent = ReActAgent(
+        self.agent = RetrieverAgent(
             toolkit=[self.email_toolkit, self.calendar_toolkit],
             openai_client=self.mock_client,
             max_iterations=3,
@@ -520,7 +520,9 @@ class TestReActAgentMultipleToolkits:
 
         # Both have 'search_documents' tool
         with caplog.at_level("WARNING"):
-            _ = ReActAgent(toolkit=[toolkit1, toolkit2], openai_client=self.mock_client)
+            _ = RetrieverAgent(
+                toolkit=[toolkit1, toolkit2], openai_client=self.mock_client
+            )
 
         # Should have logged a warning about tool name conflict
         assert "Tool name conflict" in caplog.text
@@ -529,7 +531,7 @@ class TestReActAgentMultipleToolkits:
     def test_single_toolkit_compatibility(self):
         """Test that single toolkit still works (backwards compatibility)."""
         single_toolkit = MockRetrieverToolkit()
-        agent = ReActAgent(
+        agent = RetrieverAgent(
             toolkit=single_toolkit,  # Pass single toolkit
             openai_client=self.mock_client,
         )

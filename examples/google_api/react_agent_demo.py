@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-ReAct Agent Demo with Google API Integration
+RetrieverAgent Demo with Google API Integration
 
-This demo shows how to use the ReAct agent with OpenAI to intelligently search
+This demo shows how to use the RetrieverAgent with OpenAI to intelligently search
 through Gmail and Calendar data to find relevant document references.
 
 Requirements:
@@ -22,7 +22,7 @@ from calendar_toolkit import CalendarToolkit
 from dotenv import load_dotenv
 from gmail_toolkit import GmailToolkit
 
-from praga_core import ReActAgent
+from praga_core import RetrieverAgent
 
 # Configure logging with a professional format
 logging.basicConfig(
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 def demo_interactive_search():
     """Interactive demo where user can ask queries."""
     logger.info("=" * 80)
-    logger.info("[SYSTEM] ReAct Agent Interactive Demo")
+    logger.info("[SYSTEM] RetrieverAgent Interactive Demo")
     logger.info("=" * 80)
     logger.info("[SYSTEM] This demo uses OpenAI's GPT to intelligently search through")
     logger.info(
@@ -89,15 +89,15 @@ def demo_interactive_search():
             logger.error("[SYSTEM] Please check your Google API credentials")
             return
 
-        # Initialize the ReAct agent with multiple toolkits
-        logger.info("[SYSTEM] Initializing ReAct agent with OpenAI...")
-        agent = ReActAgent(
+        # Initialize the RetrieverAgent with multiple toolkits
+        logger.info("[SYSTEM] Initializing RetrieverAgent with OpenAI...")
+        agent = RetrieverAgent(
             toolkit=toolkits,  # Pass list of toolkits directly
             model="gpt-4o-mini",
             max_iterations=5,
             debug=True,  # Enable detailed logging
         )
-        logger.info("[SYSTEM] ReAct agent ready!")
+        logger.info("[SYSTEM] RetrieverAgent ready!")
         logger.info("")
 
         # Show available capabilities
@@ -165,7 +165,7 @@ def demo_interactive_search():
 def demo_predefined_queries():
     """Demo with predefined queries to show capabilities."""
     logger.info("=" * 80)
-    logger.info("[SYSTEM] ReAct Agent Predefined Queries Demo")
+    logger.info("[SYSTEM] RetrieverAgent Predefined Queries Demo")
     logger.info("=" * 80)
 
     # Check for OpenAI API key
@@ -196,7 +196,7 @@ def demo_predefined_queries():
             return
 
         # Initialize agent with multiple toolkits
-        agent = ReActAgent(
+        agent = RetrieverAgent(
             toolkit=toolkits,
             model="gpt-4o-mini",
             max_iterations=10,
