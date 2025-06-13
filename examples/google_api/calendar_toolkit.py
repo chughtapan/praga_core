@@ -3,10 +3,9 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from auth import GoogleAuthManager
+from google_base_toolkit import GoogleBaseToolkit
 from pydantic import Field
 
-from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document
 
 
@@ -38,14 +37,12 @@ class CalendarEventDocument(Document):
         self.metadata.token_count = content_length // 4
 
 
-class CalendarToolkit(RetrieverToolkit):
+class CalendarToolkit(GoogleBaseToolkit):
     """Toolkit for retrieving calendar events from Google Calendar using Google API."""
 
     def __init__(self, secrets_dir: Optional[str] = None):
         """Initialize the Calendar toolkit with authentication."""
-        super().__init__()
-
-        self.auth_manager = GoogleAuthManager(secrets_dir)
+        super().__init__(secrets_dir)
         self._service = None
 
         # Register all Calendar tools with caching and pagination
@@ -211,19 +208,20 @@ class CalendarToolkit(RetrieverToolkit):
 
     def get_calendar_entries_by_attendee(
         self,
-        attendee_email: str,
+        attendee: str,
         days_ahead: int = 30,
         calendar_id: str = "primary",
         max_results: int = 100,
     ) -> List[CalendarEventDocument]:
-        """Get calendar events where a specific email address is an attendee.
+        """Get calendar events where a specific person is an attendee.
 
         Args:
-            attendee_email: Email address of the attendee to search for
+            attendee: Email address or name of the attendee to search for
             days_ahead: Number of days ahead to search (default: 30)
             calendar_id: Calendar ID (default: 'primary')
             max_results: Maximum number of events to return
         """
+        attendee_email = self._resolve_person_to_email(attendee)
         # Calculate time range
         now = datetime.utcnow()
         time_min = now.isoformat() + "Z"
@@ -252,19 +250,20 @@ class CalendarToolkit(RetrieverToolkit):
 
     def get_calendar_entries_by_organizer(
         self,
-        organizer_email: str,
+        organizer: str,
         days_ahead: int = 30,
         calendar_id: str = "primary",
         max_results: int = 100,
     ) -> List[CalendarEventDocument]:
-        """Get calendar events organized by a specific email address.
+        """Get calendar events organized by a specific person.
 
         Args:
-            organizer_email: Email address of the organizer to search for
+            organizer: Email address or name of the organizer to search for
             days_ahead: Number of days ahead to search (default: 30)
             calendar_id: Calendar ID (default: 'primary')
             max_results: Maximum number of events to return
         """
+        organizer_email = self._resolve_person_to_email(organizer)
         # Calculate time range
         now = datetime.utcnow()
         time_min = now.isoformat() + "Z"

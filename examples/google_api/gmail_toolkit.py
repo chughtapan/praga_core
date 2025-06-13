@@ -4,10 +4,9 @@ import base64
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from auth import GoogleAuthManager
+from google_base_toolkit import GoogleBaseToolkit
 from pydantic import Field
 
-from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document
 
 
@@ -30,14 +29,12 @@ class EmailDocument(Document):
         self.metadata.token_count = len(self.body) // 4  # Rough token count estimation
 
 
-class GmailToolkit(RetrieverToolkit):
+class GmailToolkit(GoogleBaseToolkit):
     """Toolkit for retrieving emails from Gmail using Google API."""
 
     def __init__(self, secrets_dir: Optional[str] = None):
         """Initialize the Gmail toolkit with authentication."""
-        super().__init__()
-
-        self.auth_manager = GoogleAuthManager(secrets_dir)
+        super().__init__(secrets_dir)
         self._service = None
 
         # Register all Gmail tools with caching and pagination
@@ -211,25 +208,43 @@ class GmailToolkit(RetrieverToolkit):
         )
 
     def get_emails_by_sender(
-        self, sender_email: str, max_results: int = 50
+        self, sender: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails from a specific sender."""
+        """Get emails from a specific sender.
+
+        Args:
+            sender: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        sender_email = self._resolve_person_to_email(sender)
         query = f"from:{sender_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
 
     def get_emails_by_recipient(
-        self, recipient_email: str, max_results: int = 50
+        self, recipient: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails sent to a specific recipient."""
+        """Get emails sent to a specific recipient.
+
+        Args:
+            recipient: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        recipient_email = self._resolve_person_to_email(recipient)
         query = f"to:{recipient_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
 
     def get_emails_by_cc_participant(
-        self, cc_email: str, max_results: int = 50
+        self, cc_participant: str, max_results: int = 50
     ) -> List[EmailDocument]:
-        """Get emails where a specific email address was CC'd."""
+        """Get emails where a specific person was CC'd.
+
+        Args:
+            cc_participant: Either an email address or person's name
+            max_results: Maximum number of emails to return
+        """
+        cc_email = self._resolve_person_to_email(cc_participant)
         query = f"cc:{cc_email}"
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]

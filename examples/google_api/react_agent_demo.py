@@ -19,6 +19,7 @@ import os
 import sys
 
 from calendar_toolkit import CalendarToolkit
+from dotenv import load_dotenv
 from gmail_toolkit import GmailToolkit
 
 from praga_core import ReActAgent
@@ -52,9 +53,11 @@ def demo_interactive_search():
     # Check for OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
         logger.error(
-            "[SYSTEM] Error: Please set your OPENAI_API_KEY environment variable"
+            "[SYSTEM] Error: Please set your OPENAI_API_KEY environment variable or add it to a .env file"
         )
-        logger.error("[SYSTEM] Example: export OPENAI_API_KEY='your-api-key-here'")
+        logger.error(
+            "[SYSTEM] Example .env file entry: OPENAI_API_KEY='your-api-key-here'"
+        )
         return
 
     try:
@@ -168,7 +171,7 @@ def demo_predefined_queries():
     # Check for OpenAI API key
     if not os.getenv("OPENAI_API_KEY"):
         logger.error(
-            "[SYSTEM] Error: Please set your OPENAI_API_KEY environment variable"
+            "[SYSTEM] Error: Please set your OPENAI_API_KEY environment variable or add it to a .env file"
         )
         return
 
@@ -244,6 +247,8 @@ def demo_predefined_queries():
 
 def main():
     """Main function to run the demo."""
+    # Load environment variables from .env file
+    load_dotenv()
     print("🚀 Welcome to the ReAct Agent Google API Demo!")
     print()
     print("Choose a demo mode:")
