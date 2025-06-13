@@ -342,6 +342,87 @@ class TestReActAgentBasic:
         assert len(references) == 1
         assert references[0].id == "1"
 
+    def test_raw_document_retrieval(self):
+        """Test that documents are properly retrieved and included in results."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for documents about AI",
+                "action": "search_documents",
+                "action_input": {"query": "AI"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found relevant documents about AI",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "1", "explanation": "Contains AI research"},
+                        {"id": "4", "explanation": "Contains AI"},
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        # Execute search
+        references = self.agent.search("Find documents about AI")
+
+        # Verify results include documents
+        assert len(references) == 2
+
+        # Check first document
+        assert references[0].id == "1"
+        assert references[0].document is not None
+        assert references[0].document.id == "1"
+        assert references[0].document.content == "John works in AI research"
+
+        # Check second document
+        assert references[1].id == "4"
+        assert references[1].document is not None
+        assert references[1].document.id == "4"
+        assert references[1].document.content == "John likes Python and AI"
+
+    def test_raw_document_not_found(self):
+        """Test behavior when document ID is not found in any toolkit."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for documents",
+                "action": "search_documents",
+                "action_input": {"query": "test"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found a document",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "999", "explanation": "Non-existent document"},
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        # Execute search
+        references = self.agent.search("Find non-existent document")
+
+        # Verify that the reference is created but document is None
+        assert len(references) == 1
+        assert references[0].id == "999"
+        assert references[0].document is None
+
 
 class TestReActAgentMultipleToolkits:
     """Test ReAct agent with multiple toolkits."""
@@ -457,6 +538,78 @@ class TestReActAgentMultipleToolkits:
         assert len(agent.toolkits) == 1
         assert agent.toolkits[0] == single_toolkit
         assert "search_documents" in agent._tool_registry
+
+    def test_raw_document_retrieval_multiple_toolkits(self):
+        """Test that documents are retrieved from correct toolkit in multi-toolkit setup."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for emails about meetings",
+                "action": "search_emails",
+                "action_input": {"query": "meeting"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found email about meeting",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "email_1", "explanation": "Meeting about AI project"}
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find emails about meetings")
+
+        # Verify the email document is retrieved with document
+        assert len(references) == 1
+        assert references[0].id == "email_1"
+        assert references[0].document is not None
+        assert references[0].document.id == "email_1"
+        assert "Meeting about AI project from John" == references[0].document.content
+
+    def test_raw_document_cross_toolkit_fallback(self):
+        """Test that the system tries multiple toolkits to find a document."""
+        mock_response_1 = json.dumps(
+            {
+                "thought": "I should search for events",
+                "action": "search_events",
+                "action_input": {"query": "standup"},
+            }
+        )
+
+        mock_response_2 = json.dumps(
+            {
+                "thought": "Found standup meeting",
+                "action": "Final Answer",
+                "action_input": {
+                    "response_code": "success",
+                    "references": [
+                        {"id": "cal_1", "explanation": "Daily standup meeting"}
+                    ],
+                    "error_message": "",
+                },
+            }
+        )
+
+        self.mock_client.add_response(mock_response_1)
+        self.mock_client.add_response(mock_response_2)
+
+        references = self.agent.search("Find standup meetings")
+
+        # Verify the calendar document is retrieved with document
+        assert len(references) == 1
+        assert references[0].id == "cal_1"
+        assert references[0].document is not None
+        assert references[0].document.id == "cal_1"
+        assert "Daily standup meeting" == references[0].document.content
 
 
 if __name__ == "__main__":

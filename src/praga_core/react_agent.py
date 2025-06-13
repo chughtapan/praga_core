@@ -12,6 +12,7 @@ from .format_instructions import get_agent_format_instructions
 from .response import AgentResponse, ResponseCode, parse_agent_response
 from .retriever_toolkit import RetrieverToolkitMeta
 from .tool import Tool
+from .types import Document
 
 # Configure logger with a professional format
 logger = logging.getLogger(__name__)
@@ -89,25 +90,47 @@ class DocumentReference:
         document_type: str = "Document",
         score: float = 0.0,
         explanation: str = "",
+        document: Optional[Document] = None,
     ):
         self.id = id
         self.document_type = document_type
         self.score = score
         self.explanation = explanation
+        self.document = document
 
 
-def process_agent_response(response: AgentResponse) -> List[DocumentReference]:
+def process_agent_response(
+    response: AgentResponse, toolkits: Optional[List[RetrieverToolkitMeta]] = None
+) -> List[DocumentReference]:
     """Convert an AgentResponse to a list of DocumentReference objects."""
     if response.response_code == ResponseCode.SUCCESS:
-        return [
-            DocumentReference(
-                id=ref.id,
-                document_type=ref.document_type,
-                score=0.0,
-                explanation=ref.explanation,
+        document_refs = []
+        for ref in response.references:
+            document = None
+
+            # Try to fetch the document using get_document_by_id from toolkits
+            if toolkits:
+                for toolkit in toolkits:
+                    try:
+                        document = toolkit.get_document_by_id(ref.id)
+                        if document is not None:
+                            break  # Found the document, stop searching
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to fetch document {ref.id} from toolkit {toolkit.__class__.__name__}: {e}"
+                        )
+                        continue
+
+            document_refs.append(
+                DocumentReference(
+                    id=ref.id,
+                    document_type=ref.document_type,
+                    score=0.0,
+                    explanation=ref.explanation,
+                    document=document,
+                )
             )
-            for ref in response.references
-        ]
+        return document_refs
     return []
 
 
@@ -367,7 +390,7 @@ Begin! Remember to:
             if isinstance(parsed_output, AgentFinish):
                 # Agent has finished - extract and return results
                 agent_response = AgentResponse(**parsed_output.return_values)
-                final_results = process_agent_response(agent_response)
+                final_results = process_agent_response(agent_response, self.toolkits)
 
                 # Log completion
                 logger.info("=" * 80)
