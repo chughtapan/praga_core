@@ -469,7 +469,7 @@ Begin! Remember to:
                 )
 
         except Exception as e:
-            logger.error(f"❌ Failed to parse LLM output: {e}")
+            logger.error(f"Failed to parse LLM output: {e}")
             logger.error(f"Raw output was: {output}")
 
             return AgentFinish(

@@ -1,7 +1,6 @@
 """Gmail toolkit for retrieving and searching emails."""
 
 import base64
-import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -280,53 +279,6 @@ class GmailToolkit(GoogleBaseToolkit):
             query = ""
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
-
-    def _fallback_person_search(self, person_identifier: str) -> str:
-        """Gmail-specific fallback search for person resolution.
-
-        Searches through sent/received emails to find email addresses
-        associated with the person identifier.
-
-        Args:
-            person_identifier: The person identifier to search for
-
-        Returns:
-            Email address if found, otherwise returns the original identifier
-        """
-        try:
-            # Search in sent/received emails for the person identifier
-            query = f'from:"{person_identifier}" OR to:"{person_identifier}"'
-            messages = self._search_emails(query, max_results=5)
-
-            for message in messages:
-                headers = {
-                    h["name"]: h["value"] for h in message["payload"].get("headers", [])
-                }
-
-                # Check From header
-                from_header = headers.get("From", "")
-                if person_identifier.lower() in from_header.lower():
-                    # Extract email from "Name <email@domain.com>" format
-                    email_match = re.search(r"<([^>]+)>", from_header)
-                    if email_match:
-                        return email_match.group(1)
-                    # Or if it's just the email
-                    elif "@" in from_header:
-                        return from_header.strip()
-
-                # Check To header
-                to_header = headers.get("To", "")
-                if person_identifier.lower() in to_header.lower():
-                    email_match = re.search(r"<([^>]+)>", to_header)
-                    if email_match:
-                        return email_match.group(1)
-                    elif "@" in to_header:
-                        return to_header.strip()
-
-        except Exception as e:
-            print(f"Error in Gmail fallback search for '{person_identifier}': {e}")
-
-        return person_identifier
 
 
 # Stateless tools using decorator

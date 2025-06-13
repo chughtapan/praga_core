@@ -79,30 +79,14 @@ class GoogleBaseToolkit(RetrieverToolkit):
                         if primary_email:
                             return primary_email
                         elif emails:  # Return any email if no primary
-                            return emails[0]["value"]
-
-            # If not found in contacts, try searching using service-specific fallback
-            fallback_email = self._fallback_person_search(person_identifier)
-            if fallback_email != person_identifier:
-                return fallback_email
+                            raise NotImplementedError(
+                                "Multiple emails found for person. Please specify which email to use."
+                            )
 
         except Exception as e:
             print(f"Error resolving person identifier '{person_identifier}': {e}")
+            raise e
 
-        # If all else fails, return the original identifier
-        # This allows the method to still work even if resolution fails
-        return person_identifier
-
-    def _fallback_person_search(self, person_identifier: str) -> str:
-        """Service-specific fallback search for person resolution.
-
-        Subclasses should override this method to implement service-specific
-        person search functionality (e.g., searching emails, calendar events).
-
-        Args:
-            person_identifier: The person identifier to search for
-
-        Returns:
-            Email address if found, otherwise returns the original identifier
-        """
-        return person_identifier
+        raise RuntimeError(
+            f"Unable to find email address for person '{person_identifier}'"
+        )

@@ -93,59 +93,6 @@ class CalendarToolkit(GoogleBaseToolkit):
             self._service = self.auth_manager.get_calendar_service()
         return self._service
 
-    def _fallback_person_search(self, person_identifier: str) -> str:
-        """Calendar-specific fallback search for person resolution.
-
-        Searches through calendar events to find email addresses
-        associated with the person identifier.
-
-        Args:
-            person_identifier: The person identifier to search for
-
-        Returns:
-            Email address if found, otherwise returns the original identifier
-        """
-        try:
-            # Search in calendar events for the person identifier
-            now = datetime.utcnow()
-            time_min = (now - timedelta(days=365)).isoformat() + "Z"  # Search last year
-            time_max = (now + timedelta(days=365)).isoformat() + "Z"  # Search next year
-
-            events = self._get_events(
-                time_min=time_min, time_max=time_max, max_results=100
-            )
-
-            for event in events:
-                # Check organizer
-                organizer = event.get("organizer", {})
-                organizer_name = organizer.get("displayName", "")
-                organizer_email = organizer.get("email", "")
-
-                if (
-                    person_identifier.lower() in organizer_name.lower()
-                    and organizer_email
-                    and "@" in organizer_email
-                ):
-                    return organizer_email
-
-                # Check attendees
-                attendees = event.get("attendees", [])
-                for attendee in attendees:
-                    attendee_name = attendee.get("displayName", "")
-                    attendee_email = attendee.get("email", "")
-
-                    if (
-                        person_identifier.lower() in attendee_name.lower()
-                        and attendee_email
-                        and "@" in attendee_email
-                    ):
-                        return attendee_email
-
-        except Exception as e:
-            print(f"Error in Calendar fallback search for '{person_identifier}': {e}")
-
-        return person_identifier
-
     def _get_events(
         self,
         calendar_id: str = "primary",
