@@ -3,14 +3,14 @@
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from .format_instructions import get_agent_format_instructions
 from .response import AgentResponse, ResponseCode, parse_agent_response
-from .retriever_toolkit import RetrieverToolkitMeta
+from .retriever_toolkit import RetrieverToolkit
 from .templates.react_template import REACT_TEMPLATE
 from .tool import Tool
 from .types import Document
@@ -109,7 +109,7 @@ def _log_conversation_turn(
 
 
 def process_agent_response(
-    response: AgentResponse, toolkits: Optional[List[RetrieverToolkitMeta]] = None
+    response: AgentResponse, toolkits: Sequence[RetrieverToolkit]
 ) -> List[DocumentReference]:
     """Convert an AgentResponse to a list of DocumentReference objects."""
     if response.response_code == ResponseCode.SUCCESS:
@@ -158,7 +158,7 @@ class RetrieverAgent:
 
     def __init__(
         self,
-        toolkit: Union[RetrieverToolkitMeta, List[RetrieverToolkitMeta]],
+        toolkits: Sequence[RetrieverToolkit],
         openai_client: Optional[OpenAI] = None,
         model: str = "gpt-4o-mini",
         max_iterations: int = 10,
@@ -179,7 +179,7 @@ class RetrieverAgent:
             **openai_kwargs: Additional arguments for OpenAI client creation (api_key, etc.)
         """
         # Initialize toolkits
-        self.toolkits = self._initialize_toolkits(toolkit)
+        self.toolkits = toolkits
 
         # Create tool registry for easy lookup
         self._tool_registry, self._toolkit_for_tool = self._build_tool_registry()
@@ -220,20 +220,12 @@ class RetrieverAgent:
     # Private Initialization Methods
     # ========================================================================
 
-    def _initialize_toolkits(
-        self, toolkit: Union[RetrieverToolkitMeta, List[RetrieverToolkitMeta]]
-    ) -> List[RetrieverToolkitMeta]:
-        """Initialize and validate toolkits."""
-        if isinstance(toolkit, list):
-            return toolkit
-        return [toolkit]
-
     def _build_tool_registry(
         self,
-    ) -> tuple[Dict[str, Tool], Dict[str, RetrieverToolkitMeta]]:
+    ) -> tuple[Dict[str, Tool], Dict[str, RetrieverToolkit]]:
         """Build tool registry and toolkit mapping."""
         tool_registry: Dict[str, Tool] = {}
-        toolkit_for_tool: Dict[str, RetrieverToolkitMeta] = {}
+        toolkit_for_tool: Dict[str, RetrieverToolkit] = {}
 
         for tk in self.toolkits:
             for name, tool in tk.tools.items():
@@ -320,7 +312,7 @@ class RetrieverAgent:
         """Generate response from LLM."""
         try:
             response = self.client.chat.completions.create(
-                model=self.model, messages=messages, temperature=0.1
+                model=self.model, messages=messages
             )
             output = response.choices[0].message.content
 

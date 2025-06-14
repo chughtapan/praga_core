@@ -1,7 +1,7 @@
 """Tests for RetrieverToolkit integration with Tool class."""
 
 from datetime import timedelta
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pytest
 
@@ -45,6 +45,10 @@ class IntegrationTestToolkit(RetrieverToolkit):
 
         # Register stateless tool
         self.register_tool(get_test_docs, "get_test_docs", cache=True, paginate=False)
+
+    def get_document_by_id(self, document_id: str) -> Optional[Document]:
+        """Get document by ID - mock implementation returns None."""
+        return None
 
     def search_documents(self, query: str, limit: int = 10) -> List[SimpleDocument]:
         """Search for documents matching the query."""

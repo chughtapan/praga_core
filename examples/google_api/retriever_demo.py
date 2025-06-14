@@ -39,6 +39,32 @@ logging.getLogger("google").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+def display_documents(results):
+    """Display complete documents from DocumentReference results."""
+    if not results:
+        logger.info("[SYSTEM] No documents found.")
+        return
+
+    logger.info(f"[SYSTEM] Found {len(results)} document(s):")
+    logger.info("")
+
+    for i, doc_ref in enumerate(results, 1):
+        logger.info(f"[REFERENCE {i}] ID: {doc_ref.id}")
+        logger.info(f"[REFERENCE {i}] Type: {doc_ref.document_type}")
+        logger.info(f"[REFERENCE {i}] Score: {doc_ref.score}")
+        logger.info(f"[REFERENCE {i}] Explanation: {doc_ref.explanation}")
+        logger.info("")
+
+        # Display the complete document if available
+        if doc_ref.document:
+            logger.info(f"[DOCUMENT {i}] Document: {doc_ref.document}")
+        else:
+            logger.info(
+                f"[DOCUMENT {i}] No document content available (document is None)"
+            )
+            logger.info("")
+
+
 def demo_interactive_search():
     """Interactive demo where user can ask queries."""
     logger.info("=" * 80)
@@ -92,7 +118,7 @@ def demo_interactive_search():
         # Initialize the RetrieverAgent with multiple toolkits
         logger.info("[SYSTEM] Initializing RetrieverAgent with OpenAI...")
         agent = RetrieverAgent(
-            toolkit=toolkits,  # Pass list of toolkits directly
+            toolkits=toolkits,  # Pass list of toolkits directly
             model="gpt-4o-mini",
             max_iterations=5,
             debug=True,  # Enable detailed logging
@@ -133,14 +159,7 @@ def demo_interactive_search():
                     results = agent.search(query)
 
                     logger.info("─" * 80)
-                    if results:
-                        logger.info(f"[SYSTEM] Found {len(results)} results:")
-                        for i, ref in enumerate(results, 1):
-                            logger.info(
-                                f"[SYSTEM] {i}. {ref.document_type}: {ref.explanation}"
-                            )
-                    else:
-                        logger.info("[SYSTEM] No results found")
+                    display_documents(results)
                     logger.info("─" * 80)
                     logger.info("")
 
@@ -197,7 +216,7 @@ def demo_predefined_queries():
 
         # Initialize agent with multiple toolkits
         agent = RetrieverAgent(
-            toolkit=toolkits,
+            toolkits=toolkits,
             model="gpt-4o-mini",
             max_iterations=10,
             debug=True,  # Enable message logging
@@ -226,14 +245,12 @@ def demo_predefined_queries():
                 results = agent.search(query)
 
                 logger.info("─" * 80)
-                if results:
-                    logger.info(f"[SYSTEM] Found {len(results)} results:")
-                    for j, ref in enumerate(results[:3], 1):  # Show max 3 results
-                        logger.info(
-                            f"[SYSTEM] {j}. {ref.document_type}: {ref.explanation}"
-                        )
-                else:
-                    logger.info("[SYSTEM] No results found")
+                # Limit to first 2 results for predefined demo to avoid too much output
+                limited_results = results[:2] if results else []
+                display_documents(limited_results)
+
+                if results and len(results) > 2:
+                    logger.info(f"[SYSTEM] ... and {len(results) - 2} more results")
                 logger.info("─" * 80)
                 logger.info("")
 

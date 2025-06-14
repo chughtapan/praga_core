@@ -4,13 +4,14 @@ This module focuses on testing the core features of RetrieverToolkit,
 including tool registration, basic invocation, and toolkit management.
 """
 
-from typing import List
+from typing import List, Optional
 
 import pytest
 from conftest import MockRetrieverToolkit, SimpleTestDocument, create_test_documents
 
 from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.tool import Tool
+from praga_core.types import Document
 
 
 class TestRetrieverToolkitCore:
@@ -18,7 +19,7 @@ class TestRetrieverToolkitCore:
 
     def test_toolkit_initialization(self) -> None:
         """Test basic toolkit initialization."""
-        toolkit = RetrieverToolkit()
+        toolkit = MockRetrieverToolkit()
 
         assert toolkit is not None
         assert hasattr(toolkit, "tools")
@@ -160,7 +161,9 @@ class TestRetrieverToolkitDecorator:
         """Test basic decorator functionality."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         @TestToolkit.tool()
         def decorated_tool(query: str) -> List[SimpleTestDocument]:
@@ -176,7 +179,9 @@ class TestRetrieverToolkitDecorator:
         """Test decorator uses function docstring for description."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         @TestToolkit.tool()
         def described_tool() -> List[SimpleTestDocument]:
@@ -191,7 +196,9 @@ class TestRetrieverToolkitDecorator:
         """Test multiple tools decorated on the same toolkit."""
 
         class MultiToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         @MultiToolkit.tool()
         def tool_one() -> List[SimpleTestDocument]:
@@ -211,7 +218,9 @@ class TestRetrieverToolkitDecorator:
         """Test that decorated tools work with toolkit inheritance."""
 
         class BaseToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         @BaseToolkit.tool()
         def base_tool() -> List[SimpleTestDocument]:

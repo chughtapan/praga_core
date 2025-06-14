@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import pytest
 from pydantic import Field
@@ -16,6 +16,10 @@ from praga_core.types import Document, TextDocument
 class DemoToolkit(RetrieverToolkit):
     def __init__(self) -> None:
         super().__init__()
+
+    def get_document_by_id(self, document_id: str) -> Optional[Document]:
+        """Get document by ID - mock implementation returns None."""
+        return None
 
 
 @DemoToolkit.tool(cache=True, ttl=timedelta(minutes=5))
@@ -53,7 +57,9 @@ def test_invalid_return_type_registration() -> None:
     """Test that tools with invalid return types are rejected during registration."""
 
     class BadToolkit(RetrieverToolkit):
-        pass
+        def get_document_by_id(self, document_id: str) -> Optional[Document]:
+            """Get document by ID - mock implementation returns None."""
+            return None
 
     # This should fail because it doesn't have proper type annotation
     with pytest.raises(TypeError, match="must have return type annotation"):
@@ -86,6 +92,10 @@ def test_pagination_with_proper_types() -> None:
                 paginate=True,
                 max_docs=2,
             )
+
+        def get_document_by_id(self, document_id: str) -> Optional[Document]:
+            """Get document by ID - mock implementation returns None."""
+            return None
 
         def get_many_docs(self) -> List[Document]:
             docs: List[Document] = []
@@ -213,7 +223,9 @@ class TestPaginationPrevention:
         """Test that trying to paginate a tool that returns PaginatedResponse raises an error."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         def tool_returning_paginated_response() -> PaginatedResponse:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
@@ -232,7 +244,9 @@ class TestPaginationPrevention:
         """Test that we can paginate tools that return document sequences."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         def tool_returning_list() -> List[Document]:
             return [
@@ -284,7 +298,9 @@ class TestPaginationPrevention:
         """Test that we can register tools that return PaginatedResponse without pagination."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         def tool_returning_paginated_response() -> PaginatedResponse:
             docs = [TextDocument(id="1", content="Content 1")]
@@ -390,7 +406,9 @@ class SimpleTestDocumentSubclassTypeChecking:
         """Test that Document subclasses work with actual toolkit registration."""
 
         class TestToolkit(RetrieverToolkit):
-            pass
+            def get_document_by_id(self, document_id: str) -> Optional[Document]:
+                """Get document by ID - mock implementation returns None."""
+                return None
 
         def text_document_tool() -> List[TextDocument]:
             return [TextDocument(id="test", content="Test content")]
