@@ -1,6 +1,7 @@
 import json
 import math
 from abc import ABC
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
@@ -53,3 +54,14 @@ class TextDocument(Document):
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
         self._metadata.token_count = math.ceil(len(self.content.split()) * 4 / 3)
+
+
+@dataclass
+class DocumentReference:
+    """Document reference for agent results."""
+
+    id: str
+    type: str
+    score: float = 0.0
+    explanation: str = ""
+    document: Optional[Document] = None
