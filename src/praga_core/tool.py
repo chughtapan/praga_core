@@ -8,22 +8,27 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterator,
     List,
     Optional,
     Sequence,
+    TypeVar,
     Union,
     overload,
 )
 
 from .types import Document
 
+# Type variable bound to Document for generic pagination
+T = TypeVar("T", bound=Document)
+
 
 @dataclass(frozen=True)
-class PaginatedResponse(ABCSequence[Document]):
-    """Container for paginated tool responses that implements Sequence[Document]."""
+class PaginatedResponse(Generic[T], ABCSequence[T]):
+    """Container for paginated tool responses that implements Sequence[T]."""
 
-    documents: Sequence[Document]
+    documents: Sequence[T]
     page_number: int
     has_next_page: bool
     total_documents: Optional[int] = None
@@ -45,18 +50,16 @@ class PaginatedResponse(ABCSequence[Document]):
         return len(self.documents)
 
     @overload
-    def __getitem__(self, index: int) -> Document: ...
+    def __getitem__(self, index: int) -> T: ...
 
     @overload
-    def __getitem__(self, index: slice) -> Sequence[Document]: ...
+    def __getitem__(self, index: slice) -> Sequence[T]: ...
 
-    def __getitem__(
-        self, index: Union[int, slice]
-    ) -> Union[Document, Sequence[Document]]:
+    def __getitem__(self, index: Union[int, slice]) -> Union[T, Sequence[T]]:
         """Get a document by index or a sequence of documents by slice."""
         return self.documents[index]
 
-    def __iter__(self) -> Iterator[Document]:
+    def __iter__(self) -> Iterator[T]:
         """Iterate over the documents."""
         return iter(self.documents)
 
@@ -70,7 +73,7 @@ class PaginatedResponse(ABCSequence[Document]):
 
 
 # Now PaginatedResponse is defined, so we can reference it
-ToolFunction = Callable[..., Union[Sequence[Document], PaginatedResponse]]
+ToolFunction = Callable[..., Union[Sequence[Document], PaginatedResponse[Document]]]
 
 
 @dataclass
@@ -129,7 +132,7 @@ class Tool:
 
     def _serialize_result(
         self,
-        result: Union[Sequence[Document], PaginatedResponse],
+        result: Union[Sequence[Document], PaginatedResponse[Document]],
     ) -> Dict[str, Any]:
         """Serialize the tool result into a JSON-serializable format."""
         if isinstance(result, PaginatedResponse):
@@ -202,7 +205,7 @@ class Tool:
 
     def _paginate_results(
         self, results: List[Document], page: int
-    ) -> PaginatedResponse:
+    ) -> PaginatedResponse[Document]:
         """Paginate results with both document count and token limits."""
         if not self.page_size:
             raise RuntimeError("_paginate_results called on non-paginated tool")
@@ -253,7 +256,9 @@ class Tool:
             token_count=total_tokens,
         )
 
-    def __call__(self, **kwargs: Any) -> Union[Sequence[Document], PaginatedResponse]:
+    def __call__(
+        self, **kwargs: Any
+    ) -> Union[Sequence[Document], PaginatedResponse[Document]]:
         """Execute the tool with the given arguments."""
         if not self.page_size:
             # No pagination, call directly

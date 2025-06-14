@@ -11,7 +11,7 @@ from typing import List
 import pytest
 
 from praga_core.tool import PaginatedResponse
-from praga_core.types import Document, TextDocument
+from praga_core.types import TextDocument
 
 
 class SimpleTestDocumentBasics:
@@ -50,9 +50,9 @@ class TestPaginatedResponseSequenceProtocol:
     """Test that PaginatedResponse behaves like a Sequence."""
 
     @pytest.fixture
-    def sample_documents(self) -> List[Document]:
+    def sample_documents(self) -> List[TextDocument]:
         """Create sample documents for testing."""
-        docs: List[Document] = []
+        docs: List[TextDocument] = []
         for i in range(1, 4):
             doc = TextDocument(id=f"doc{i}", content=f"Content {i}")
             doc.metadata.index = i  # type: ignore[attr-defined]
@@ -60,7 +60,9 @@ class TestPaginatedResponseSequenceProtocol:
         return docs
 
     @pytest.fixture
-    def paginated_response(self, sample_documents: List[Document]) -> PaginatedResponse:
+    def paginated_response(
+        self, sample_documents: List[TextDocument]
+    ) -> PaginatedResponse[TextDocument]:
         """Create a sample PaginatedResponse for testing."""
         return PaginatedResponse(
             documents=sample_documents,
@@ -70,29 +72,31 @@ class TestPaginatedResponseSequenceProtocol:
         )
 
     @pytest.fixture
-    def empty_paginated_response(self) -> PaginatedResponse:
+    def empty_paginated_response(self) -> PaginatedResponse[TextDocument]:
         """Create an empty PaginatedResponse for testing."""
         return PaginatedResponse(
             documents=[], page_number=0, has_next_page=False, total_documents=0
         )
 
     def test_implements_sequence_protocol(
-        self, paginated_response: PaginatedResponse
+        self, paginated_response: PaginatedResponse[TextDocument]
     ) -> None:
         """Test that PaginatedResponse implements the Sequence protocol."""
         assert isinstance(paginated_response, Sequence)
 
     def test_length_operations(
         self,
-        paginated_response: PaginatedResponse,
-        empty_paginated_response: PaginatedResponse,
+        paginated_response: PaginatedResponse[TextDocument],
+        empty_paginated_response: PaginatedResponse[TextDocument],
     ) -> None:
         """Test __len__ method."""
         assert len(paginated_response) == 3
         assert len(empty_paginated_response) == 0
 
     def test_index_access(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+        self,
+        paginated_response: PaginatedResponse[TextDocument],
+        sample_documents: List[TextDocument],
     ) -> None:
         """Test __getitem__ method with integer indices."""
         # Test positive indices
@@ -106,7 +110,9 @@ class TestPaginatedResponseSequenceProtocol:
         assert paginated_response[-3] == sample_documents[0]
 
     def test_slice_access(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+        self,
+        paginated_response: PaginatedResponse[TextDocument],
+        sample_documents: List[TextDocument],
     ) -> None:
         """Test __getitem__ method with slice objects."""
         # Test basic slicing
@@ -119,8 +125,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_index_errors(
         self,
-        paginated_response: PaginatedResponse,
-        empty_paginated_response: PaginatedResponse,
+        paginated_response: PaginatedResponse[TextDocument],
+        empty_paginated_response: PaginatedResponse[TextDocument],
     ) -> None:
         """Test __getitem__ method raises IndexError for invalid indices."""
         with pytest.raises(IndexError):
@@ -133,7 +139,9 @@ class TestPaginatedResponseSequenceProtocol:
             empty_paginated_response[0]
 
     def test_iteration_behavior(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+        self,
+        paginated_response: PaginatedResponse[TextDocument],
+        sample_documents: List[TextDocument],
     ) -> None:
         """Test __iter__ method and iteration patterns."""
         # Test basic iteration
@@ -151,15 +159,17 @@ class TestPaginatedResponseSequenceProtocol:
         expected = list(reversed(sample_documents))
         assert reversed_docs == expected
 
-    def test_empty_iteration(self, empty_paginated_response: PaginatedResponse) -> None:
+    def test_empty_iteration(
+        self, empty_paginated_response: PaginatedResponse[TextDocument]
+    ) -> None:
         """Test iteration over empty response."""
         iterated_docs = list(empty_paginated_response)
         assert iterated_docs == []
 
     def test_boolean_conversion(
         self,
-        paginated_response: PaginatedResponse,
-        empty_paginated_response: PaginatedResponse,
+        paginated_response: PaginatedResponse[TextDocument],
+        empty_paginated_response: PaginatedResponse[TextDocument],
     ) -> None:
         """Test __bool__ method and truthiness."""
         assert bool(paginated_response) is True
@@ -177,7 +187,9 @@ class TestPaginatedResponseSequenceProtocol:
             assert True
 
     def test_membership_testing(
-        self, paginated_response: PaginatedResponse, sample_documents: List[Document]
+        self,
+        paginated_response: PaginatedResponse[TextDocument],
+        sample_documents: List[TextDocument],
     ) -> None:
         """Test __contains__ method."""
         # Test with documents that are in the response
@@ -190,7 +202,7 @@ class TestPaginatedResponseSequenceProtocol:
         assert other_doc not in paginated_response
 
     def test_membership_empty_response(
-        self, empty_paginated_response: PaginatedResponse
+        self, empty_paginated_response: PaginatedResponse[TextDocument]
     ) -> None:
         """Test __contains__ method with empty response."""
         doc = TextDocument(id="test", content="Test content")
@@ -229,7 +241,9 @@ class TestPaginatedResponseUtilityMethods:
         )
 
         # Test index-like functionality (finding position of document)
-        def find_index(response: PaginatedResponse, target_doc: Document) -> int:
+        def find_index(
+            response: PaginatedResponse[TextDocument], target_doc: TextDocument
+        ) -> int:
             for i, doc in enumerate(response):
                 if doc == target_doc:
                     return i
