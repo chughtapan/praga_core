@@ -5,7 +5,7 @@ that are used across multiple test files.
 """
 
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pytest
 
@@ -41,6 +41,10 @@ class MockRetrieverToolkit(RetrieverToolkit):
     def increment_call_count(self) -> None:
         """Increment the call counter."""
         self.call_count += 1
+
+    def get_document_by_id(self, document_id: str) -> Optional[Document]:
+        """Get document by ID - mock implementation returns None."""
+        return None
 
 
 # Test data factories

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 from praga_core.retriever_toolkit import RetrieverToolkit
 from praga_core.types import Document, TextDocument
@@ -17,6 +17,10 @@ class NullToolkit(RetrieverToolkit):
             ttl=timedelta(minutes=30),
             paginate=False,
         )
+
+    def get_document_by_id(self, document_id: str) -> Optional[Document]:
+        """Get document by ID - example implementation returns None."""
+        return None
 
     def echo(self, text: str) -> List[Document]:
         return [TextDocument(id="e", content=text)]

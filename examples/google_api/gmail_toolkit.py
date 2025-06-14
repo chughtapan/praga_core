@@ -280,6 +280,28 @@ class GmailToolkit(GoogleBaseToolkit):
         messages = self._search_emails(query, max_results)
         return [self._message_to_document(msg) for msg in messages]
 
+    def get_document_by_id(self, document_id: str) -> Optional[EmailDocument]:
+        """Get an email document by its message ID.
+
+        Args:
+            document_id: Gmail message ID
+
+        Returns:
+            EmailDocument if found, None otherwise
+        """
+        try:
+            # Get the full message by ID
+            message = (
+                self.service.users()
+                .messages()
+                .get(userId="me", id=document_id, format="full")
+                .execute()
+            )
+            return self._message_to_document(message)
+        except Exception as e:
+            print(f"Error retrieving email with ID {document_id}: {e}")
+            return None
+
 
 # Stateless tools using decorator
 @GmailToolkit.tool(cache=True, ttl=timedelta(hours=1))

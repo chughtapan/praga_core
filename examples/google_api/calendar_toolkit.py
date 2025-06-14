@@ -342,6 +342,27 @@ class CalendarToolkit(GoogleBaseToolkit):
         else:
             return []
 
+    def get_document_by_id(self, document_id: str) -> Optional[CalendarEventDocument]:
+        """Get a calendar event document by its event ID.
+
+        Args:
+            document_id: Google Calendar event ID
+
+        Returns:
+            CalendarEventDocument if found, None otherwise
+        """
+        try:
+            # Get the event by ID
+            event = (
+                self.service.events()
+                .get(calendarId="primary", eventId=document_id)
+                .execute()
+            )
+            return self._event_to_document(event)
+        except Exception as e:
+            print(f"Error retrieving calendar event with ID {document_id}: {e}")
+            return None
+
 
 # Stateless tools using decorator
 @CalendarToolkit.tool(cache=True, ttl=timedelta(hours=1))

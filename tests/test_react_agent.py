@@ -193,7 +193,7 @@ class TestRetrieverAgentBasic:
         self.mock_client = MockOpenAIClient()
         self.toolkit = MockRetrieverToolkit()
         self.agent = RetrieverAgent(
-            toolkit=self.toolkit, openai_client=self.mock_client, max_iterations=3
+            toolkits=[self.toolkit], openai_client=self.mock_client, max_iterations=3
         )
 
     def test_search_basic(self):
@@ -435,7 +435,7 @@ class TestRetrieverAgentMultipleToolkits:
 
         # Test with multiple toolkits
         self.agent = RetrieverAgent(
-            toolkit=[self.email_toolkit, self.calendar_toolkit],
+            toolkits=[self.email_toolkit, self.calendar_toolkit],
             openai_client=self.mock_client,
             max_iterations=3,
         )
@@ -521,7 +521,7 @@ class TestRetrieverAgentMultipleToolkits:
         # Both have 'search_documents' tool
         with caplog.at_level("WARNING"):
             _ = RetrieverAgent(
-                toolkit=[toolkit1, toolkit2], openai_client=self.mock_client
+                toolkits=[toolkit1, toolkit2], openai_client=self.mock_client
             )
 
         # Should have logged a warning about tool name conflict
@@ -532,7 +532,7 @@ class TestRetrieverAgentMultipleToolkits:
         """Test that single toolkit still works (backwards compatibility)."""
         single_toolkit = MockRetrieverToolkit()
         agent = RetrieverAgent(
-            toolkit=single_toolkit,  # Pass single toolkit
+            toolkits=[single_toolkit],  # Pass single toolkit as list
             openai_client=self.mock_client,
         )
 
