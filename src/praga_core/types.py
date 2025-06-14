@@ -37,7 +37,7 @@ class Document(BaseModel, ABC):
 
     @property
     def text(self) -> str:
-        return json.dumps(self.model_dump(), indent=2)
+        return json.dumps(self.model_dump(mode="json"), indent=2)
 
     def __str__(self) -> str:
         return self.text
