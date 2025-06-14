@@ -41,7 +41,7 @@ def simple_function(query: str, limit: int = 5) -> List[SimpleDocument]:
     return create_simple_documents(query, limit)
 
 
-def paginated_function(query: str, page: int = 0) -> PaginatedResponse:
+def paginated_function(query: str, page: int = 0) -> PaginatedResponse[SimpleDocument]:
     """Function that returns a paginated response."""
     all_docs = create_simple_documents(query, 10)
 

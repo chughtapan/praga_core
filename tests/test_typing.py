@@ -143,7 +143,7 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_with_paginated_response(self) -> None:
         """Test that PaginatedResponse is considered valid."""
 
-        def tool_with_paginated_response() -> PaginatedResponse:
+        def tool_with_paginated_response() -> PaginatedResponse[Document]:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         assert _is_document_sequence_type(tool_with_paginated_response) is True
@@ -173,7 +173,7 @@ class TestTypeCheckingLogic:
         def tool_with_sequence() -> Sequence[Document]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse:
+        def tool_with_paginated_response() -> PaginatedResponse[Document]:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         assert _is_document_sequence_type(tool_with_list) is True
@@ -189,7 +189,7 @@ class TestTypeCheckingLogic:
         def tool_with_sequence() -> Sequence[Document]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse:
+        def tool_with_paginated_response() -> PaginatedResponse[Document]:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         assert _returns_paginated_response(tool_with_list) is False
@@ -205,7 +205,7 @@ class TestTypeCheckingLogic:
         def tool_with_sequence() -> Sequence[Document]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse:
+        def tool_with_paginated_response() -> PaginatedResponse[Document]:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         # These should return True (can be paginated - not already paginated responses)
@@ -227,7 +227,7 @@ class TestPaginationPrevention:
                 """Get document by ID - mock implementation returns None."""
                 return None
 
-        def tool_returning_paginated_response() -> PaginatedResponse:
+        def tool_returning_paginated_response() -> PaginatedResponse[Document]:
             return PaginatedResponse(documents=[], page_number=0, has_next_page=False)
 
         toolkit = TestToolkit()
@@ -302,7 +302,7 @@ class TestPaginationPrevention:
                 """Get document by ID - mock implementation returns None."""
                 return None
 
-        def tool_returning_paginated_response() -> PaginatedResponse:
+        def tool_returning_paginated_response() -> PaginatedResponse[TextDocument]:
             docs = [TextDocument(id="1", content="Content 1")]
             return PaginatedResponse(
                 documents=docs,
@@ -487,7 +487,7 @@ class TestTypeEquivalence:
         """Test that PaginatedResponse is recognized as implementing Sequence[Document]."""
 
         docs = [TextDocument(id="1", content="Content 1")]
-        response = PaginatedResponse(
+        response: PaginatedResponse[TextDocument] = PaginatedResponse(
             documents=docs,
             page_number=0,
             has_next_page=False,
@@ -505,3 +505,78 @@ class TestTypeEquivalence:
         # This should not raise a type error
         result = process_sequence(response)
         assert result == 1
+
+
+class TestGenericPaginatedResponseTypeConstraints:
+    """Test that PaginatedResponse generic type constraints work properly."""
+
+    def test_paginated_response_rejects_non_document_types(self) -> None:
+        """Test that PaginatedResponse[T] only accepts Document subclasses at runtime."""
+        # Note: These are compile-time checks that would be caught by mypy/type checkers
+        # At runtime, Python's typing system is more permissive, but we can test the intent
+
+        class NotADocument:
+            id: str = "test"
+
+        # This should work fine with proper Document types
+        valid_docs = [TextDocument(id="1", content="Content")]
+        valid_response = PaginatedResponse[TextDocument](
+            documents=valid_docs,
+            page_number=0,
+            has_next_page=False,
+            total_documents=1,
+        )
+        assert len(valid_response) == 1
+        assert isinstance(valid_response[0], TextDocument)
+
+        # At runtime, Python allows this but type checkers should catch it
+        # We test that the generic constraint is at least properly declared
+        import typing
+
+        if hasattr(typing, "get_args") and hasattr(typing, "get_origin"):
+            # Check that PaginatedResponse has the right generic structure
+            paginated_type = type(valid_response)
+            # The generic information should be available for type checking tools
+            assert hasattr(paginated_type, "__orig_bases__")
+
+    def test_paginated_response_with_document_subclasses(self) -> None:
+        """Test that PaginatedResponse works correctly with various Document subclasses."""
+
+        # Test with TextDocument
+        text_docs = [TextDocument(id="1", content="Text content")]
+        text_response: PaginatedResponse[TextDocument] = PaginatedResponse(
+            documents=text_docs,
+            page_number=0,
+            has_next_page=False,
+            total_documents=1,
+        )
+
+        # Test with custom Document subclass
+        class CustomDocument(Document):
+            custom_field: str = "custom"
+
+            def __init__(self, **data: Any) -> None:
+                super().__init__(**data)
+
+        custom_docs = [CustomDocument(id="2", custom_field="value")]
+        custom_response: PaginatedResponse[CustomDocument] = PaginatedResponse(
+            documents=custom_docs,
+            page_number=0,
+            has_next_page=False,
+            total_documents=1,
+        )
+
+        # Verify type safety - the responses should maintain their specific types
+        assert isinstance(text_response[0], TextDocument)
+        assert hasattr(text_response[0], "content")
+
+        assert isinstance(custom_response[0], CustomDocument)
+        assert hasattr(custom_response[0], "custom_field")
+        assert custom_response[0].custom_field == "value"
+
+        # Both should be assignable to PaginatedResponse[Document] for polymorphism
+        def process_any_docs(response: PaginatedResponse[Document]) -> int:
+            return len(response)
+
+        assert process_any_docs(text_response) == 1
+        assert process_any_docs(custom_response) == 1

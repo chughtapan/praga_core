@@ -43,9 +43,9 @@ class FunctionInvocation(BaseModel):
         return json.dumps(payload, sort_keys=True, default=str)
 
 
-ToolReturnType = Union[Sequence[Document], PaginatedResponse]
+ToolReturnType = Union[Sequence[Document], PaginatedResponse[Document]]
 SequenceToolFunction = Callable[..., Sequence[Document]]
-PaginatedToolFunction = Callable[..., PaginatedResponse]
+PaginatedToolFunction = Callable[..., PaginatedResponse[Document]]
 ToolFunction = Union[SequenceToolFunction, PaginatedToolFunction]
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
@@ -309,13 +309,28 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
         if return_annotation is None:
             return False
 
-        # PaginatedResponse implements Sequence[Document]
+        # Handle non-generic PaginatedResponse (legacy)
         if return_annotation is PaginatedResponse:
             return True
 
-        # Check for explicit Sequence[Document] or List[Document] annotations
+        # Check for generic types
         origin_type = get_origin(return_annotation)
         if origin_type is None:
+            return False
+
+        # Handle generic PaginatedResponse[T] where T is bound to Document
+        if origin_type is PaginatedResponse:
+            type_args = get_args(return_annotation)
+            if len(type_args) == 1:
+                document_type = type_args[0]
+                # Check if it's Document or a subclass of Document
+                if document_type is Document:
+                    return True
+                # Check if it's a subclass of Document
+                if isinstance(document_type, type) and issubclass(
+                    document_type, Document
+                ):
+                    return True
             return False
 
         # Handle both typing.Sequence and collections.abc.Sequence
@@ -338,10 +353,23 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
 
 
 def _returns_paginated_response(tool_function: ToolFunction) -> bool:
-    """Check if a function specifically returns PaginatedResponse."""
+    """Check if a function specifically returns PaginatedResponse (generic or non-generic)."""
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
-        return return_annotation is PaginatedResponse
+
+        if return_annotation is None:
+            return False
+
+        # Handle non-generic PaginatedResponse
+        if return_annotation is PaginatedResponse:
+            return True
+
+        # Handle generic PaginatedResponse[T]
+        origin_type = get_origin(return_annotation)
+        if origin_type is PaginatedResponse:
+            return True
+
+        return False
     except Exception:
         return False
