@@ -13,7 +13,7 @@ from .response import AgentResponse, ResponseCode, parse_agent_response
 from .retriever_toolkit import RetrieverToolkit
 from .templates.react_template import REACT_TEMPLATE
 from .tool import Tool
-from .types import Document
+from .types import DocumentReference
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -62,24 +62,6 @@ class Observation:
     def to_json(self) -> str:
         """Convert observation to JSON string."""
         return json.dumps({"observation": self.result}, indent=2)
-
-
-class DocumentReference:
-    """Document reference for agent results."""
-
-    def __init__(
-        self,
-        id: str,
-        document_type: str = "Document",
-        score: float = 0.0,
-        explanation: str = "",
-        document: Optional[Document] = None,
-    ):
-        self.id = id
-        self.document_type = document_type
-        self.score = score
-        self.explanation = explanation
-        self.document = document
 
 
 # ============================================================================
@@ -133,7 +115,7 @@ def process_agent_response(
             document_refs.append(
                 DocumentReference(
                     id=ref.id,
-                    document_type=ref.document_type,
+                    type=ref.document_type,
                     score=0.0,
                     explanation=ref.explanation,
                     document=document,
