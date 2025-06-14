@@ -36,13 +36,19 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
-        return {
+        result = {
             "documents": [doc.model_dump(mode="json") for doc in self.documents],
             "page_number": self.page_number,
             "has_next_page": self.has_next_page,
-            "total_documents": self.total_documents,
-            "token_count": self.token_count,
         }
+
+        # Only include optional fields if they have meaningful values (not None or 0)
+        if self.total_documents is not None and self.total_documents > 0:
+            result["total_documents"] = self.total_documents
+        if self.token_count is not None and self.token_count > 0:
+            result["token_count"] = self.token_count
+
+        return result
 
     # Sequence[Document] protocol implementation
     def __len__(self) -> int:

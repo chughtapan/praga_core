@@ -309,3 +309,156 @@ class TestPaginatedResponseEdgeCases:
         assert response[0].metadata.tags == ["tag_0", "category_0"]  # type: ignore[attr-defined]
         assert response[1].metadata.score == 0.5  # type: ignore[attr-defined]
         assert response[2].metadata.nested["level"] == 2  # type: ignore[attr-defined]
+
+
+class TestPaginatedResponseSerialization:
+    """Test JSON serialization behavior of PaginatedResponse."""
+
+    def test_to_json_dict_with_all_fields(self) -> None:
+        """Test to_json_dict includes all fields when they have values."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=0,
+            has_next_page=True,
+            total_documents=10,
+            token_count=42,
+        )
+
+        result = response.to_json_dict()
+
+        # Should include all fields
+        expected_keys = {
+            "documents",
+            "page_number",
+            "has_next_page",
+            "total_documents",
+            "token_count",
+        }
+        assert set(result.keys()) == expected_keys
+        assert result["page_number"] == 0
+        assert result["has_next_page"] is True
+        assert result["total_documents"] == 10
+        assert result["token_count"] == 42
+        assert len(result["documents"]) == 1
+
+    def test_to_json_dict_without_total_documents(self) -> None:
+        """Test to_json_dict excludes total_documents when None."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=0,
+            has_next_page=False,
+            total_documents=None,  # Explicitly None
+            token_count=42,
+        )
+
+        result = response.to_json_dict()
+
+        # Should NOT include total_documents
+        expected_keys = {"documents", "page_number", "has_next_page", "token_count"}
+        assert set(result.keys()) == expected_keys
+        assert "total_documents" not in result
+        assert result["token_count"] == 42
+
+    def test_to_json_dict_without_token_count(self) -> None:
+        """Test to_json_dict excludes token_count when None."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=1,
+            has_next_page=True,
+            total_documents=100,
+            token_count=None,  # Explicitly None
+        )
+
+        result = response.to_json_dict()
+
+        # Should NOT include token_count
+        expected_keys = {"documents", "page_number", "has_next_page", "total_documents"}
+        assert set(result.keys()) == expected_keys
+        assert "token_count" not in result
+        assert result["total_documents"] == 100
+
+    def test_to_json_dict_minimal_fields(self) -> None:
+        """Test to_json_dict with only required fields."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=2,
+            has_next_page=False,
+            # Both optional fields are None by default
+        )
+
+        result = response.to_json_dict()
+
+        # Should only include required fields
+        expected_keys = {"documents", "page_number", "has_next_page"}
+        assert set(result.keys()) == expected_keys
+        assert "total_documents" not in result
+        assert "token_count" not in result
+        assert result["page_number"] == 2
+        assert result["has_next_page"] is False
+
+    def test_to_json_dict_excludes_zero_values(self) -> None:
+        """Test to_json_dict excludes zero values for optional fields."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=0,
+            has_next_page=False,
+            total_documents=0,  # Zero - should be excluded
+            token_count=0,  # Zero - should be excluded
+        )
+
+        result = response.to_json_dict()
+
+        # Should NOT include zero values for optional fields
+        expected_keys = {"documents", "page_number", "has_next_page"}
+        assert set(result.keys()) == expected_keys
+        assert "total_documents" not in result
+        assert "token_count" not in result
+
+    def test_to_json_dict_empty_documents(self) -> None:
+        """Test to_json_dict works with empty document list."""
+        response = PaginatedResponse(
+            documents=[],
+            page_number=0,
+            has_next_page=False,
+            total_documents=0,  # Zero - will be excluded
+            token_count=0,  # Zero - will be excluded
+        )
+
+        result = response.to_json_dict()
+
+        # Should only include core fields since optional fields are zero
+        expected_keys = {"documents", "page_number", "has_next_page"}
+        assert set(result.keys()) == expected_keys
+        assert result["documents"] == []
+        assert "total_documents" not in result
+        assert "token_count" not in result
+
+    def test_to_json_dict_includes_positive_values(self) -> None:
+        """Test to_json_dict includes positive values for optional fields."""
+        docs = [TextDocument(id="test", content="Test content")]
+        response = PaginatedResponse(
+            documents=docs,
+            page_number=0,
+            has_next_page=True,
+            total_documents=1,  # Positive - should be included
+            token_count=15,  # Positive - should be included
+        )
+
+        result = response.to_json_dict()
+
+        # Should include all fields since optional fields have positive values
+        expected_keys = {
+            "documents",
+            "page_number",
+            "has_next_page",
+            "total_documents",
+            "token_count",
+        }
+        assert set(result.keys()) == expected_keys
+        assert result["total_documents"] == 1
+        assert result["token_count"] == 15
