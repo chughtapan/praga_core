@@ -1,11 +1,10 @@
 import json
 import math
 from abc import ABC
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 
 class DocumentMetadata(BaseModel):
@@ -56,12 +55,27 @@ class TextDocument(Document):
         self._metadata.token_count = math.ceil(len(self.content.split()) * 4 / 3)
 
 
-@dataclass
-class DocumentReference:
+class DocumentReference(BaseModel):
     """Document reference for agent results."""
 
-    id: str
-    type: str
-    score: float = 0.0
-    explanation: str = ""
-    document: Optional[Document] = None
+    id: str = Field(description="Unique identifier for the document")
+    type: str = Field(description="Document type (schema name)", default="Document")
+    score: float = Field(description="Score of the document", default=0.0)
+    explanation: str = Field(description="Explanation of the document", default="")
+    _document: Optional[Document] = PrivateAttr(default=None)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_string(cls, v: Any) -> str:
+        """Coerce non-string IDs to strings."""
+        return str(v)
+
+    @property
+    def document(self) -> Document:
+        if self._document is None:
+            raise KeyError(f"No document associated with reference: {self.id}")
+        return self._document
+
+    @document.setter
+    def document(self, document: Document) -> None:
+        self._document = document

@@ -51,6 +51,15 @@ class TestRetrieverToolkitCore:
         tool = toolkit.get_tool("standalone_tool")
         assert tool.name == "standalone_tool"
 
+    def test_tool_registration_with_function_no_name(self) -> None:
+        """Test registering a standalone function as a tool without a name."""
+
+        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestDocument]:
+            return create_test_documents(limit, query)
+
+        toolkit = MockRetrieverToolkit()
+        toolkit.register_tool(standalone_function)
+
     def test_tool_registration_with_custom_description(self) -> None:
         """Test tool registration with custom description via docstring."""
 

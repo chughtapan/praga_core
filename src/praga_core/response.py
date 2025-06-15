@@ -3,7 +3,9 @@ import logging
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+from praga_core.types import DocumentReference
 
 logger = logging.getLogger(__name__)
 
@@ -17,31 +19,13 @@ class ResponseCode(str, Enum):
     INTERNAL_ERROR = "error_internal"
 
 
-class AgentDocumentReference(BaseModel):
-    """Document reference for agent output."""
-
-    id: str = Field(description="Unique identifier for the document")
-    document_type: str = Field(
-        description="Document type (schema name)", default="Document"
-    )
-    explanation: str = Field(
-        description="Explanation of why this document is relevant", default=""
-    )
-
-    @field_validator("id", mode="before")
-    @classmethod
-    def coerce_id_to_string(cls, v: Any) -> str:
-        """Coerce non-string IDs to strings."""
-        return str(v)
-
-
 class AgentResponse(BaseModel):
     """Structured output for agent responses."""
 
     response_code: ResponseCode = Field(
         description="Response code indicating success or specific error type"
     )
-    references: List[AgentDocumentReference] = Field(
+    references: List[DocumentReference] = Field(
         default_factory=list,
         description="List of document references with explanations",
     )

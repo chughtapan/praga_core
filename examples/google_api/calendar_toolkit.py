@@ -343,14 +343,7 @@ class CalendarToolkit(GoogleBaseToolkit):
             return []
 
     def get_document_by_id(self, document_id: str) -> Optional[CalendarEventDocument]:
-        """Get a calendar event document by its event ID.
-
-        Args:
-            document_id: Google Calendar event ID
-
-        Returns:
-            CalendarEventDocument if found, None otherwise
-        """
+        """Get a calendar event document by its event ID."""
         try:
             # Get the event by ID
             event = (

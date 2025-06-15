@@ -421,7 +421,9 @@ class TestRetrieverAgentBasic:
         # Verify that the reference is created but document is None
         assert len(references) == 1
         assert references[0].id == "999"
-        assert references[0].document is None
+        # Check that trying to access the document raises an error
+        with pytest.raises(KeyError):
+            references[0].document
 
 
 class TestRetrieverAgentMultipleToolkits:

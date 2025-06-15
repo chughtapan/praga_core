@@ -281,14 +281,7 @@ class GmailToolkit(GoogleBaseToolkit):
         return [self._message_to_document(msg) for msg in messages]
 
     def get_document_by_id(self, document_id: str) -> Optional[EmailDocument]:
-        """Get an email document by its message ID.
-
-        Args:
-            document_id: Gmail message ID
-
-        Returns:
-            EmailDocument if found, None otherwise
-        """
+        """Get an email document by its message ID."""
         try:
             # Get the full message by ID
             message = (
