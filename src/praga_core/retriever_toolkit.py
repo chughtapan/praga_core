@@ -143,6 +143,19 @@ class RetrieverToolkitMeta(abc.ABC):
     ) -> Dict[str, Any]:
         """Invoke a tool by name with pagination support."""
         tool = self.get_tool(name)
+        try:
+            import chainlit as cl  # type: ignore[import-not-found]
+
+            cl.user_session.get("id")
+            with cl.Step(
+                name=name, type="tool", show_input="python", language="python"
+            ) as step:
+                step.input = raw_input
+                response = tool.invoke(raw_input)
+                step.output = response
+                return response
+        except (ImportError, AttributeError):
+            pass
         return tool.invoke(raw_input)
 
     @property
