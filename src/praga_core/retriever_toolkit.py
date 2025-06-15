@@ -73,7 +73,7 @@ class RetrieverToolkitMeta(abc.ABC):
     def register_tool(
         self,
         method: ToolFunction,
-        name: str,
+        name: str | None = None,
         cache: bool = False,
         ttl: timedelta | None = None,
         invalidator: CacheInvalidator | None = None,
@@ -86,7 +86,7 @@ class RetrieverToolkitMeta(abc.ABC):
 
         Args:
             method: The tool function to register.
-            name: The name of the tool.
+            name: The name of the tool. If not provided, uses the function's __name__.
             cache: Whether to cache the tool.
             ttl: The time to live for the cache.
             invalidator: A function to invalidate the cache.
@@ -94,6 +94,9 @@ class RetrieverToolkitMeta(abc.ABC):
             max_docs: The maximum number of documents to return per page.
             max_tokens: The maximum number of tokens to return per page.
         """
+        # Use function name if no name is provided
+        if name is None:
+            name = method.__name__
         if not _is_document_sequence_type(method):
             raise TypeError(
                 f"""Tool "{name}" must have return type annotation of either 
@@ -248,7 +251,7 @@ class RetrieverToolkitMeta(abc.ABC):
         for fn, cfg in getattr(self.__class__, self._PENDING_TOOLS, []):
             self.register_tool(
                 method=fn,
-                name=fn.__name__,
+                name=cfg.get("name", None),
                 cache=cfg.get("cache", False),
                 ttl=cfg.get("ttl"),
                 invalidator=cfg.get("invalidator"),
