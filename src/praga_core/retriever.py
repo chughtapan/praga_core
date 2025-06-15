@@ -94,35 +94,17 @@ def process_agent_response(
     response: AgentResponse, toolkits: Sequence[RetrieverToolkit]
 ) -> List[DocumentReference]:
     """Convert an AgentResponse to a list of DocumentReference objects."""
-    if response.response_code == ResponseCode.SUCCESS:
-        document_refs = []
-        for ref in response.references:
-            document = None
+    if response.response_code != ResponseCode.SUCCESS:
+        return []
+    for ref in response.references:
+        for toolkit in toolkits:
+            document = toolkit.get_document_by_id(ref.id)
+            if document is None:
+                continue
+            ref.document = document
+            break
 
-            # Try to fetch the document using get_document_by_id from toolkits
-            if toolkits:
-                for toolkit in toolkits:
-                    try:
-                        document = toolkit.get_document_by_id(ref.id)
-                        if document is not None:
-                            break  # Found the document, stop searching
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to fetch document {ref.id} from toolkit {toolkit.__class__.__name__}: {e}"
-                        )
-                        continue
-
-            document_refs.append(
-                DocumentReference(
-                    id=ref.id,
-                    type=ref.document_type,
-                    score=0.0,
-                    explanation=ref.explanation,
-                    document=document,
-                )
-            )
-        return document_refs
-    return []
+    return response.references
 
 
 # ============================================================================
