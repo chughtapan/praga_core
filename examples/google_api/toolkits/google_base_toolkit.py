@@ -1,19 +1,24 @@
 """Base toolkit for Google API integrations with common person resolution functionality."""
 
+import os
 import re
+import sys
 from typing import Optional
 
-from auth import GoogleAuthManager
+from praga_core.agents.toolkit import RetrieverToolkit
+from praga_core.context import ServerContext
 
-from praga_core.retriever_toolkit import RetrieverToolkit
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from auth import GoogleAuthManager  # noqa: E402
 
 
 class GoogleBaseToolkit(RetrieverToolkit):
     """Base toolkit for Google API integrations with common functionality."""
 
-    def __init__(self, secrets_dir: Optional[str] = None):
+    def __init__(self, context: ServerContext, secrets_dir: Optional[str] = None):
         """Initialize the base Google toolkit with authentication."""
-        super().__init__()
+        super().__init__(context)
         self.auth_manager = GoogleAuthManager(secrets_dir)
 
     @property

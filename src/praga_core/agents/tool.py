@@ -18,33 +18,33 @@ from typing import (
     overload,
 )
 
-from .types import Document
+from praga_core.types import Page
 
 # Type variable bound to Document for generic pagination
-T = TypeVar("T", bound=Document)
+T = TypeVar("T", bound=Page)
 
 
 @dataclass(frozen=True)
 class PaginatedResponse(Generic[T], ABCSequence[T]):
     """Container for paginated tool responses that implements Sequence[T]."""
 
-    documents: Sequence[T]
+    results: Sequence[T]
     page_number: int
     has_next_page: bool
-    total_documents: Optional[int] = None
+    total_results: Optional[int] = None
     token_count: Optional[int] = None
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
         result = {
-            "documents": [doc.model_dump(mode="json") for doc in self.documents],
+            "documents": [doc.model_dump(mode="json") for doc in self.results],
             "page_number": self.page_number,
             "has_next_page": self.has_next_page,
         }
 
         # Only include optional fields if they have meaningful values (not None or 0)
-        if self.total_documents is not None and self.total_documents > 0:
-            result["total_documents"] = self.total_documents
+        if self.total_results is not None and self.total_results > 0:
+            result["total_documents"] = self.total_results
         if self.token_count is not None and self.token_count > 0:
             result["token_count"] = self.token_count
 
@@ -53,7 +53,7 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
     # Sequence[Document] protocol implementation
     def __len__(self) -> int:
         """Return the number of documents in this page."""
-        return len(self.documents)
+        return len(self.results)
 
     @overload
     def __getitem__(self, index: int) -> T: ...
@@ -63,23 +63,23 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
 
     def __getitem__(self, index: Union[int, slice]) -> Union[T, Sequence[T]]:
         """Get a document by index or a sequence of documents by slice."""
-        return self.documents[index]
+        return self.results[index]
 
     def __iter__(self) -> Iterator[T]:
         """Iterate over the documents."""
-        return iter(self.documents)
+        return iter(self.results)
 
     def __bool__(self) -> bool:
         """Return True if there are any documents."""
-        return len(self.documents) > 0
+        return len(self.results) > 0
 
     def __contains__(self, item: object) -> bool:
         """Check if a document is in this response."""
-        return item in self.documents
+        return item in self.results
 
 
 # Now PaginatedResponse is defined, so we can reference it
-ToolFunction = Callable[..., Union[Sequence[Document], PaginatedResponse[Document]]]
+ToolFunction = Callable[..., Union[Sequence[Page], PaginatedResponse[Page]]]
 
 
 @dataclass
@@ -138,7 +138,7 @@ class Tool:
 
     def _serialize_result(
         self,
-        result: Union[Sequence[Document], PaginatedResponse[Document]],
+        result: Union[Sequence[Page], PaginatedResponse[Page]],
     ) -> Dict[str, Any]:
         """Serialize the tool result into a JSON-serializable format."""
         if isinstance(result, PaginatedResponse):
@@ -210,8 +210,8 @@ class Tool:
         )
 
     def _paginate_results(
-        self, results: List[Document], page: int
-    ) -> PaginatedResponse[Document]:
+        self, results: List[Page], page: int
+    ) -> PaginatedResponse[Page]:
         """Paginate results with both document count and token limits."""
         if not self.page_size:
             raise RuntimeError("_paginate_results called on non-paginated tool")
@@ -227,7 +227,7 @@ class Tool:
         page_documents = results[page_start:page_end]
 
         # Apply token budget limit within the page if max_tokens is set
-        final_documents: List[Document] = []
+        final_documents: List[Page] = []
         total_tokens = 0
 
         if self.max_tokens is not None:
@@ -255,16 +255,14 @@ class Tool:
         has_next_page = documents_processed < total_results
 
         return PaginatedResponse(
-            documents=final_documents,
+            results=final_documents,
             page_number=page,
             has_next_page=has_next_page,
-            total_documents=total_results,
+            total_results=total_results,
             token_count=total_tokens,
         )
 
-    def __call__(
-        self, **kwargs: Any
-    ) -> Union[Sequence[Document], PaginatedResponse[Document]]:
+    def __call__(self, **kwargs: Any) -> Union[Sequence[Page], PaginatedResponse[Page]]:
         """Execute the tool with the given arguments."""
         if not self.page_size:
             # No pagination, call directly

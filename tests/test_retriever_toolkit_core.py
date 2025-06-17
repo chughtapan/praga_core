@@ -4,14 +4,13 @@ This module focuses on testing the core features of RetrieverToolkit,
 including tool registration, basic invocation, and toolkit management.
 """
 
-from typing import List, Optional
+from typing import List
 
 import pytest
-from conftest import MockRetrieverToolkit, SimpleTestDocument, create_test_documents
+from conftest import MockRetrieverToolkit, SimpleTestPage, create_test_pages
 
-from praga_core.retriever_toolkit import RetrieverToolkit
-from praga_core.tool import Tool
-from praga_core.types import Document
+from praga_core.retriever import RetrieverToolkit
+from praga_core.retriever.tool import Tool
 
 
 class TestRetrieverToolkitCore:
@@ -30,8 +29,8 @@ class TestRetrieverToolkitCore:
         """Test registering a method as a tool."""
         toolkit = MockRetrieverToolkit()
 
-        def test_method(query: str) -> List[SimpleTestDocument]:
-            return create_test_documents(3, query)
+        def test_method(query: str) -> List[SimpleTestPage]:
+            return create_test_pages(3, query)
 
         toolkit.register_tool(test_method, "test_tool")
 
@@ -41,8 +40,8 @@ class TestRetrieverToolkitCore:
     def test_tool_registration_with_function(self) -> None:
         """Test registering a standalone function as a tool."""
 
-        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestDocument]:
-            return create_test_documents(limit, query)
+        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestPage]:
+            return create_test_pages(limit, query)
 
         toolkit = MockRetrieverToolkit()
         toolkit.register_tool(standalone_function, "standalone_tool")
@@ -54,8 +53,8 @@ class TestRetrieverToolkitCore:
     def test_tool_registration_with_function_no_name(self) -> None:
         """Test registering a standalone function as a tool without a name."""
 
-        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestDocument]:
-            return create_test_documents(limit, query)
+        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestPage]:
+            return create_test_pages(limit, query)
 
         toolkit = MockRetrieverToolkit()
         toolkit.register_tool(standalone_function)
@@ -63,7 +62,7 @@ class TestRetrieverToolkitCore:
     def test_tool_registration_with_custom_description(self) -> None:
         """Test tool registration with custom description via docstring."""
 
-        def test_func() -> List[SimpleTestDocument]:
+        def test_func() -> List[SimpleTestPage]:
             """Custom description for this tool"""
             return []
 
@@ -77,8 +76,8 @@ class TestRetrieverToolkitCore:
         """Test successful tool retrieval."""
         toolkit = MockRetrieverToolkit()
 
-        def sample_tool() -> List[SimpleTestDocument]:
-            return create_test_documents(1)
+        def sample_tool() -> List[SimpleTestPage]:
+            return create_test_pages(1)
 
         toolkit.register_tool(sample_tool, "sample_tool")
         retrieved_tool = toolkit.get_tool("sample_tool")
@@ -97,10 +96,10 @@ class TestRetrieverToolkitCore:
         """Test the tools property returns correct tool mapping."""
         toolkit = MockRetrieverToolkit()
 
-        def tool1() -> List[SimpleTestDocument]:
+        def tool1() -> List[SimpleTestPage]:
             return []
 
-        def tool2() -> List[SimpleTestDocument]:
+        def tool2() -> List[SimpleTestPage]:
             return []
 
         toolkit.register_tool(tool1, "tool1")
@@ -117,8 +116,8 @@ class TestRetrieverToolkitCore:
         """Test basic tool invocation through invoke_tool method."""
         toolkit = MockRetrieverToolkit()
 
-        def simple_tool(query: str) -> List[SimpleTestDocument]:
-            return create_test_documents(2, query)
+        def simple_tool(query: str) -> List[SimpleTestPage]:
+            return create_test_pages(2, query)
 
         toolkit.register_tool(simple_tool, "simple_tool")
         result = toolkit.invoke_tool("simple_tool", "test_query")
@@ -131,8 +130,8 @@ class TestRetrieverToolkitCore:
         """Test tool invocation with dictionary arguments."""
         toolkit = MockRetrieverToolkit()
 
-        def parameterized_tool(query: str, limit: int = 5) -> List[SimpleTestDocument]:
-            return create_test_documents(limit, query)
+        def parameterized_tool(query: str, limit: int = 5) -> List[SimpleTestPage]:
+            return create_test_pages(limit, query)
 
         toolkit.register_tool(parameterized_tool, "param_tool")
         result = toolkit.invoke_tool("param_tool", {"query": "test", "limit": 3})
@@ -150,10 +149,8 @@ class TestRetrieverToolkitCore:
         """Test that registered tools are accessible as toolkit methods."""
         toolkit = MockRetrieverToolkit()
 
-        def accessible_tool(name: str) -> List[SimpleTestDocument]:
-            return [
-                SimpleTestDocument(id="test", title="Test", content=f"Hello {name}")
-            ]
+        def accessible_tool(name: str) -> List[SimpleTestPage]:
+            return [SimpleTestPage(id="test", title="Test", content=f"Hello {name}")]
 
         toolkit.register_tool(accessible_tool, "accessible_tool")
 
@@ -170,13 +167,13 @@ class TestRetrieverToolkitDecorator:
         """Test basic decorator functionality."""
 
         class TestToolkit(RetrieverToolkit):
-            def get_document_by_id(self, document_id: str) -> Optional[Document]:
-                """Get document by ID - mock implementation returns None."""
-                return None
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
 
         @TestToolkit.tool()
-        def decorated_tool(query: str) -> List[SimpleTestDocument]:
-            return create_test_documents(2, query)
+        def decorated_tool(query: str) -> List[SimpleTestPage]:
+            return create_test_pages(2, query)
 
         toolkit = TestToolkit()
 
@@ -188,12 +185,12 @@ class TestRetrieverToolkitDecorator:
         """Test decorator uses function docstring for description."""
 
         class TestToolkit(RetrieverToolkit):
-            def get_document_by_id(self, document_id: str) -> Optional[Document]:
-                """Get document by ID - mock implementation returns None."""
-                return None
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
 
         @TestToolkit.tool()
-        def described_tool() -> List[SimpleTestDocument]:
+        def described_tool() -> List[SimpleTestPage]:
             """Custom decorated tool description"""
             return []
 
@@ -205,17 +202,17 @@ class TestRetrieverToolkitDecorator:
         """Test multiple tools decorated on the same toolkit."""
 
         class MultiToolkit(RetrieverToolkit):
-            def get_document_by_id(self, document_id: str) -> Optional[Document]:
-                """Get document by ID - mock implementation returns None."""
-                return None
+            @property
+            def name(self) -> str:
+                return "MultiToolkit"
 
         @MultiToolkit.tool()
-        def tool_one() -> List[SimpleTestDocument]:
-            return create_test_documents(1, "one")
+        def tool_one() -> List[SimpleTestPage]:
+            return create_test_pages(1, "one")
 
         @MultiToolkit.tool()
-        def tool_two() -> List[SimpleTestDocument]:
-            return create_test_documents(2, "two")
+        def tool_two() -> List[SimpleTestPage]:
+            return create_test_pages(2, "two")
 
         toolkit = MultiToolkit()
 
@@ -227,20 +224,22 @@ class TestRetrieverToolkitDecorator:
         """Test that decorated tools work with toolkit inheritance."""
 
         class BaseToolkit(RetrieverToolkit):
-            def get_document_by_id(self, document_id: str) -> Optional[Document]:
-                """Get document by ID - mock implementation returns None."""
-                return None
+            @property
+            def name(self) -> str:
+                return "BaseToolkit"
 
         @BaseToolkit.tool()
-        def base_tool() -> List[SimpleTestDocument]:
-            return create_test_documents(1, "base")
+        def base_tool() -> List[SimpleTestPage]:
+            return create_test_pages(1, "base")
 
         class DerivedToolkit(BaseToolkit):
-            pass
+            @property
+            def name(self) -> str:
+                return "DerivedToolkit"
 
         @DerivedToolkit.tool()
-        def derived_tool() -> List[SimpleTestDocument]:
-            return create_test_documents(1, "derived")
+        def derived_tool() -> List[SimpleTestPage]:
+            return create_test_pages(1, "derived")
 
         # Note: Current implementation shares decorated tools across classes
         # This test verifies the actual behavior
@@ -278,13 +277,13 @@ class TestRetrieverToolkitErrorHandling:
             return "not a document list"
 
         with pytest.raises(TypeError, match="must have return type annotation"):
-            toolkit.register_tool(wrong_return_type, "wrong_tool")
+            toolkit.register_tool(wrong_return_type, "wrong_tool")  # type: ignore
 
     def test_tool_execution_error_handling(self) -> None:
         """Test error handling during tool execution."""
         toolkit = MockRetrieverToolkit()
 
-        def failing_tool(query: str) -> List[SimpleTestDocument]:
+        def failing_tool(query: str) -> List[SimpleTestPage]:
             if query == "no_results":
                 raise ValueError("No matching documents found")
             raise RuntimeError("General error")
@@ -304,11 +303,11 @@ class TestRetrieverToolkitErrorHandling:
         """Test behavior when registering tools with duplicate names."""
         toolkit = MockRetrieverToolkit()
 
-        def tool1() -> List[SimpleTestDocument]:
-            return create_test_documents(1, "first")
+        def tool1() -> List[SimpleTestPage]:
+            return create_test_pages(1, "first")
 
-        def tool2() -> List[SimpleTestDocument]:
-            return create_test_documents(1, "second")
+        def tool2() -> List[SimpleTestPage]:
+            return create_test_pages(1, "second")
 
         # Register first tool
         toolkit.register_tool(tool1, "duplicate_name")

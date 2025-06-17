@@ -7,11 +7,11 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import Field
 
-from praga_core import (
-    RetrieverAgent,
+from praga_core import Page
+from praga_core.retriever import (
+    RetrieverAgentBase,
     RetrieverToolkit,
 )
-from praga_core.types import Document
 
 
 class MockOpenAIClient:
@@ -70,7 +70,7 @@ class MockOpenAIClient:
         self.messages_history = []
 
 
-class MockDocument(Document):
+class MockDocument(Page):
     """A simple document class for testing."""
 
     content: str = Field(description="The content of the document")
@@ -97,18 +97,16 @@ class MockRetrieverToolkit(RetrieverToolkit):
         ]
 
         # Register mock tools
-        self.register_tool(method=self.search_documents, name="search_documents")
-        self.register_tool(
-            method=self.search_by_person_and_topic, name="search_by_person_and_topic"
-        )
+        self.register_tool(method=self.search_documents)
+        self.register_tool(method=self.search_by_person_and_topic)
 
-    def search_documents(self, query: str) -> List[Document]:
+    def search_documents(self, query: str) -> List[Page]:
         """Search through documents based on a query."""
         if not query:
             return []
         return [doc for doc in self.documents if query.lower() in doc.content.lower()]
 
-    def search_by_person_and_topic(self, person: str, topic: str) -> List[Document]:
+    def search_by_person_and_topic(self, person: str, topic: str) -> List[Page]:
         """Search documents by person name and topic."""
         if not person or not topic:
             return []
@@ -119,12 +117,9 @@ class MockRetrieverToolkit(RetrieverToolkit):
             and topic.lower() in doc.content.lower()
         ]
 
-    def get_document_by_id(self, document_id: str) -> Document | None:
-        """Get document by ID."""
-        for doc in self.documents:
-            if doc.id == document_id:
-                return doc
-        return None
+    @property
+    def name(self) -> str:
+        return "MockRetrieverToolkit"
 
 
 class MockEmailToolkit(RetrieverToolkit):
@@ -140,20 +135,17 @@ class MockEmailToolkit(RetrieverToolkit):
         ]
 
         # Register email-specific tools
-        self.register_tool(method=self.search_emails, name="search_emails")
+        self.register_tool(method=self.search_emails)
 
-    def search_emails(self, query: str) -> List[Document]:
+    def search_emails(self, query: str) -> List[Page]:
         """Search through emails."""
         if not query:
             return []
         return [doc for doc in self.emails if query.lower() in doc.content.lower()]
 
-    def get_document_by_id(self, document_id: str) -> Document | None:
-        """Get email by ID."""
-        for doc in self.emails:
-            if doc.id == document_id:
-                return doc
-        return None
+    @property
+    def name(self) -> str:
+        return "MockEmailToolkit"
 
 
 class MockCalendarToolkit(RetrieverToolkit):
@@ -171,18 +163,15 @@ class MockCalendarToolkit(RetrieverToolkit):
         # Register calendar-specific tools
         self.register_tool(method=self.search_events, name="search_events")
 
-    def search_events(self, query: str) -> List[Document]:
+    def search_events(self, query: str) -> List[Page]:
         """Search through calendar events."""
         if not query:
             return []
         return [doc for doc in self.events if query.lower() in doc.content.lower()]
 
-    def get_document_by_id(self, document_id: str) -> Document | None:
-        """Get event by ID."""
-        for doc in self.events:
-            if doc.id == document_id:
-                return doc
-        return None
+    @property
+    def name(self) -> str:
+        return "MockCalendarToolkit"
 
 
 class TestRetrieverAgentBasic:
@@ -192,7 +181,7 @@ class TestRetrieverAgentBasic:
         """Set up test fixtures."""
         self.mock_client = MockOpenAIClient()
         self.toolkit = MockRetrieverToolkit()
-        self.agent = RetrieverAgent(
+        self.agent = RetrieverAgentBase(
             toolkits=[self.toolkit], openai_client=self.mock_client, max_iterations=3
         )
 
@@ -378,15 +367,15 @@ class TestRetrieverAgentBasic:
 
         # Check first document
         assert references[0].id == "1"
-        assert references[0].document is not None
-        assert references[0].document.id == "1"
-        assert references[0].document.content == "John works in AI research"
+        assert references[0].page is not None
+        assert references[0].page.id == "1"
+        assert references[0].page.content == "John works in AI research"
 
         # Check second document
         assert references[1].id == "4"
-        assert references[1].document is not None
-        assert references[1].document.id == "4"
-        assert references[1].document.content == "John likes Python and AI"
+        assert references[1].page is not None
+        assert references[1].page.id == "4"
+        assert references[1].page.content == "John likes Python and AI"
 
     def test_raw_document_not_found(self):
         """Test behavior when document ID is not found in any toolkit."""
@@ -423,7 +412,7 @@ class TestRetrieverAgentBasic:
         assert references[0].id == "999"
         # Check that trying to access the document raises an error
         with pytest.raises(KeyError):
-            references[0].document
+            references[0].page
 
 
 class TestRetrieverAgentMultipleToolkits:
@@ -436,7 +425,7 @@ class TestRetrieverAgentMultipleToolkits:
         self.calendar_toolkit = MockCalendarToolkit()
 
         # Test with multiple toolkits
-        self.agent = RetrieverAgent(
+        self.agent = RetrieverAgentBase(
             toolkits=[self.email_toolkit, self.calendar_toolkit],
             openai_client=self.mock_client,
             max_iterations=3,
@@ -522,7 +511,7 @@ class TestRetrieverAgentMultipleToolkits:
 
         # Both have 'search_documents' tool
         with caplog.at_level("WARNING"):
-            _ = RetrieverAgent(
+            _ = RetrieverAgentBase(
                 toolkits=[toolkit1, toolkit2], openai_client=self.mock_client
             )
 
@@ -533,7 +522,7 @@ class TestRetrieverAgentMultipleToolkits:
     def test_single_toolkit_compatibility(self):
         """Test that single toolkit still works (backwards compatibility)."""
         single_toolkit = MockRetrieverToolkit()
-        agent = RetrieverAgent(
+        agent = RetrieverAgentBase(
             toolkits=[single_toolkit],  # Pass single toolkit as list
             openai_client=self.mock_client,
         )
@@ -575,9 +564,9 @@ class TestRetrieverAgentMultipleToolkits:
         # Verify the email document is retrieved with document
         assert len(references) == 1
         assert references[0].id == "email_1"
-        assert references[0].document is not None
-        assert references[0].document.id == "email_1"
-        assert "Meeting about AI project from John" == references[0].document.content
+        assert references[0].page is not None
+        assert references[0].page.id == "email_1"
+        assert "Meeting about AI project from John" == references[0].page.content
 
     def test_raw_document_cross_toolkit_fallback(self):
         """Test that the system tries multiple toolkits to find a document."""
@@ -611,9 +600,9 @@ class TestRetrieverAgentMultipleToolkits:
         # Verify the calendar document is retrieved with document
         assert len(references) == 1
         assert references[0].id == "cal_1"
-        assert references[0].document is not None
-        assert references[0].document.id == "cal_1"
-        assert "Daily standup meeting" == references[0].document.content
+        assert references[0].page is not None
+        assert references[0].page.id == "cal_1"
+        assert "Daily standup meeting" == references[0].page.content
 
 
 if __name__ == "__main__":

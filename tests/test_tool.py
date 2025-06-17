@@ -8,11 +8,11 @@ from typing import Any, List
 
 import pytest
 
-from praga_core.tool import PaginatedResponse, Tool
-from praga_core.types import Document
+from praga_core.retriever.tool import PaginatedResponse, Tool
+from praga_core.types import Page
 
 
-class SimpleDocument(Document):
+class SimpleDocument(Page):
     """Simple document implementation for testing."""
 
     title: str
@@ -51,10 +51,10 @@ def paginated_function(query: str, page: int = 0) -> PaginatedResponse[SimpleDoc
     page_docs = all_docs[start:end]
 
     return PaginatedResponse(
-        documents=page_docs,
+        results=page_docs,
         page_number=page,
         has_next_page=end < len(all_docs),
-        total_documents=len(all_docs),
+        total_results=len(all_docs),
         token_count=sum(doc.metadata.token_count or 0 for doc in page_docs),
     )
 

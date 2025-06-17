@@ -10,8 +10,8 @@ from typing import List
 
 import pytest
 
-from praga_core.tool import PaginatedResponse
-from praga_core.types import TextDocument
+from praga_core import Page, TextPage
+from praga_core.retriever import PaginatedResponse
 
 
 class SimpleTestDocumentBasics:
@@ -19,7 +19,7 @@ class SimpleTestDocumentBasics:
 
     def test_text_document_creation(self) -> None:
         """Test basic TextDocument creation and auto-calculated fields."""
-        doc = TextDocument(id="test_id", content="test content")
+        doc = TextPage(id="test_id", content="test content")
 
         assert doc.id == "test_id"
         assert doc.content == "test content"
@@ -28,7 +28,7 @@ class SimpleTestDocumentBasics:
 
     def test_text_document_with_custom_metadata(self) -> None:
         """Test TextDocument with additional metadata fields."""
-        doc = TextDocument(id="test_id", content="test content")
+        doc = TextPage(id="test_id", content="test content")
 
         # Add custom fields to metadata (thanks to Config.extra = "allow")
         doc.metadata.custom_field = "custom_value"  # type: ignore[attr-defined]
@@ -39,7 +39,7 @@ class SimpleTestDocumentBasics:
 
     def test_document_token_count_calculation(self) -> None:
         """Test that token count is calculated correctly."""
-        doc = TextDocument(id="test_id", content="hello world test")
+        doc = TextPage(id="test_id", content="hello world test")
 
         # Should be approximately 3 words * 4/3 = 4 tokens
         expected_tokens = math.ceil(3 * 4 / 3)
@@ -50,44 +50,44 @@ class TestPaginatedResponseSequenceProtocol:
     """Test that PaginatedResponse behaves like a Sequence."""
 
     @pytest.fixture
-    def sample_documents(self) -> List[TextDocument]:
+    def sample_documents(self) -> List[TextPage]:
         """Create sample documents for testing."""
-        docs: List[TextDocument] = []
+        docs: List[TextPage] = []
         for i in range(1, 4):
-            doc = TextDocument(id=f"doc{i}", content=f"Content {i}")
+            doc = TextPage(id=f"doc{i}", content=f"Content {i}")
             doc.metadata.index = i  # type: ignore[attr-defined]
             docs.append(doc)
         return docs
 
     @pytest.fixture
     def paginated_response(
-        self, sample_documents: List[TextDocument]
-    ) -> PaginatedResponse[TextDocument]:
+        self, sample_documents: List[TextPage]
+    ) -> PaginatedResponse[TextPage]:
         """Create a sample PaginatedResponse for testing."""
         return PaginatedResponse(
-            documents=sample_documents,
+            results=sample_documents,
             page_number=0,
             has_next_page=True,
-            total_documents=10,
+            total_results=10,
         )
 
     @pytest.fixture
-    def empty_paginated_response(self) -> PaginatedResponse[TextDocument]:
+    def empty_paginated_response(self) -> PaginatedResponse[TextPage]:
         """Create an empty PaginatedResponse for testing."""
         return PaginatedResponse(
-            documents=[], page_number=0, has_next_page=False, total_documents=0
+            results=[], page_number=0, has_next_page=False, total_results=0
         )
 
     def test_implements_sequence_protocol(
-        self, paginated_response: PaginatedResponse[TextDocument]
+        self, paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test that PaginatedResponse implements the Sequence protocol."""
         assert isinstance(paginated_response, Sequence)
 
     def test_length_operations(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __len__ method."""
         assert len(paginated_response) == 3
@@ -95,8 +95,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_index_access(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_documents: List[TextPage],
     ) -> None:
         """Test __getitem__ method with integer indices."""
         # Test positive indices
@@ -111,8 +111,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_slice_access(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_documents: List[TextPage],
     ) -> None:
         """Test __getitem__ method with slice objects."""
         # Test basic slicing
@@ -125,8 +125,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_index_errors(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __getitem__ method raises IndexError for invalid indices."""
         with pytest.raises(IndexError):
@@ -140,8 +140,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_iteration_behavior(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_documents: List[TextPage],
     ) -> None:
         """Test __iter__ method and iteration patterns."""
         # Test basic iteration
@@ -160,7 +160,7 @@ class TestPaginatedResponseSequenceProtocol:
         assert reversed_docs == expected
 
     def test_empty_iteration(
-        self, empty_paginated_response: PaginatedResponse[TextDocument]
+        self, empty_paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test iteration over empty response."""
         iterated_docs = list(empty_paginated_response)
@@ -168,8 +168,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_boolean_conversion(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __bool__ method and truthiness."""
         assert bool(paginated_response) is True
@@ -188,8 +188,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_membership_testing(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_documents: List[TextPage],
     ) -> None:
         """Test __contains__ method."""
         # Test with documents that are in the response
@@ -198,14 +198,14 @@ class TestPaginatedResponseSequenceProtocol:
         assert sample_documents[2] in paginated_response
 
         # Test with document that's not in the response
-        other_doc = TextDocument(id="other", content="Other content")
+        other_doc = TextPage(id="other", content="Other content")
         assert other_doc not in paginated_response
 
     def test_membership_empty_response(
-        self, empty_paginated_response: PaginatedResponse[TextDocument]
+        self, empty_paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test __contains__ method with empty response."""
-        doc = TextDocument(id="test", content="Test content")
+        doc = TextPage(id="test", content="Test content")
         assert doc not in empty_paginated_response
 
 
@@ -214,16 +214,16 @@ class TestPaginatedResponseUtilityMethods:
 
     def test_equality_comparison(self) -> None:
         """Test equality between PaginatedResponse instances."""
-        sample_docs = [TextDocument(id="1", content="Content 1")]
+        sample_docs = [TextPage(id="1", content="Content 1")]
 
         response1 = PaginatedResponse(
-            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+            results=sample_docs, page_number=0, has_next_page=True, total_results=5
         )
         response2 = PaginatedResponse(
-            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+            results=sample_docs, page_number=0, has_next_page=True, total_results=5
         )
         response3 = PaginatedResponse(
-            documents=sample_docs, page_number=1, has_next_page=True, total_documents=5
+            results=sample_docs, page_number=1, has_next_page=True, total_results=5
         )
 
         assert response1 == response2  # Same content
@@ -232,17 +232,17 @@ class TestPaginatedResponseUtilityMethods:
     def test_sequence_methods_simulation(self) -> None:
         """Test sequence-like methods that can be simulated."""
         docs = [
-            TextDocument(id="1", content="First"),
-            TextDocument(id="2", content="Second"),
-            TextDocument(id="1", content="First"),  # Duplicate for testing
+            TextPage(id="1", content="First"),
+            TextPage(id="2", content="Second"),
+            TextPage(id="1", content="First"),  # Duplicate for testing
         ]
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=False, total_documents=3
+            results=docs, page_number=0, has_next_page=False, total_results=3
         )
 
         # Test index-like functionality (finding position of document)
         def find_index(
-            response: PaginatedResponse[TextDocument], target_doc: TextDocument
+            response: PaginatedResponse[TextPage], target_doc: TextPage
         ) -> int:
             for i, doc in enumerate(response):
                 if doc == target_doc:
@@ -253,7 +253,7 @@ class TestPaginatedResponseUtilityMethods:
         assert find_index(response, docs[1]) == 1
 
         # Test with non-existent document
-        other_doc = TextDocument(id="other", content="Other")
+        other_doc = TextPage(id="other", content="Other")
         with pytest.raises(ValueError):
             find_index(response, other_doc)
 
@@ -263,9 +263,9 @@ class TestPaginatedResponseEdgeCases:
 
     def test_single_document_response(self) -> None:
         """Test PaginatedResponse with single document."""
-        doc = TextDocument(id="single", content="Single document")
+        doc = TextPage(id="single", content="Single document")
         response = PaginatedResponse(
-            documents=[doc], page_number=0, has_next_page=False, total_documents=1
+            results=[doc], page_number=0, has_next_page=False, total_results=1
         )
 
         assert len(response) == 1
@@ -276,9 +276,9 @@ class TestPaginatedResponseEdgeCases:
 
     def test_large_response_performance(self) -> None:
         """Test PaginatedResponse with many documents."""
-        docs = [TextDocument(id=f"doc_{i}", content=f"Content {i}") for i in range(100)]
+        docs = [TextPage(id=f"doc_{i}", content=f"Content {i}") for i in range(100)]
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=True, total_documents=1000
+            results=docs, page_number=0, has_next_page=True, total_results=1000
         )
 
         # Test that operations are efficient
@@ -295,16 +295,15 @@ class TestPaginatedResponseEdgeCases:
         """Test PaginatedResponse with documents containing complex metadata."""
         docs = []
         for i in range(3):
-            doc = TextDocument(id=f"complex_{i}", content=f"Complex content {i}")
+            doc = TextPage(id=f"complex_{i}", content=f"Complex content {i}")
             doc.metadata.tags = [f"tag_{i}", f"category_{i % 2}"]  # type: ignore[attr-defined]
             doc.metadata.score = i * 0.5  # type: ignore[attr-defined]
             doc.metadata.nested = {"level": i, "type": "test"}  # type: ignore[attr-defined]
             docs.append(doc)
 
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=False, total_documents=3
+            results=docs, page_number=0, has_next_page=False, total_results=3
         )
-
         # Verify complex metadata is preserved
         assert response[0].metadata.tags == ["tag_0", "category_0"]  # type: ignore[attr-defined]
         assert response[1].metadata.score == 0.5  # type: ignore[attr-defined]
@@ -316,12 +315,12 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_with_all_fields(self) -> None:
         """Test to_json_dict includes all fields when they have values."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=0,
             has_next_page=True,
-            total_documents=10,
+            total_results=10,
             token_count=42,
         )
 
@@ -344,12 +343,12 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_without_total_documents(self) -> None:
         """Test to_json_dict excludes total_documents when None."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=0,
             has_next_page=False,
-            total_documents=None,  # Explicitly None
+            total_results=None,  # Explicitly None
             token_count=42,
         )
 
@@ -363,12 +362,12 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_without_token_count(self) -> None:
         """Test to_json_dict excludes token_count when None."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=1,
             has_next_page=True,
-            total_documents=100,
+            total_results=100,
             token_count=None,  # Explicitly None
         )
 
@@ -382,9 +381,9 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_minimal_fields(self) -> None:
         """Test to_json_dict with only required fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=2,
             has_next_page=False,
             # Both optional fields are None by default
@@ -402,12 +401,12 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_excludes_zero_values(self) -> None:
         """Test to_json_dict excludes zero values for optional fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=0,
             has_next_page=False,
-            total_documents=0,  # Zero - should be excluded
+            total_results=0,  # Zero - should be excluded
             token_count=0,  # Zero - should be excluded
         )
 
@@ -421,11 +420,11 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_empty_documents(self) -> None:
         """Test to_json_dict works with empty document list."""
-        response = PaginatedResponse(
-            documents=[],
+        response: PaginatedResponse[Page] = PaginatedResponse(
+            results=[],
             page_number=0,
             has_next_page=False,
-            total_documents=0,  # Zero - will be excluded
+            total_results=0,  # Zero - will be excluded
             token_count=0,  # Zero - will be excluded
         )
 
@@ -440,12 +439,12 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_includes_positive_values(self) -> None:
         """Test to_json_dict includes positive values for optional fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        docs = [TextPage(id="test", content="Test content")]
         response = PaginatedResponse(
-            documents=docs,
+            results=docs,
             page_number=0,
             has_next_page=True,
-            total_documents=1,  # Positive - should be included
+            total_results=1,  # Positive - should be included
             token_count=15,  # Positive - should be included
         )
 

@@ -9,12 +9,12 @@ from typing import Any, List, Optional
 
 import pytest
 
-from praga_core.retriever_toolkit import RetrieverToolkit
-from praga_core.types import Document, TextDocument
+from praga_core.agents.toolkit import RetrieverToolkit
+from praga_core.types import Page, TextPage
 
 
-class SimpleTestDocument(Document):
-    """Test document implementation with customizable fields."""
+class SimpleTestPage(Page):
+    """Test page implementation with customizable fields."""
 
     title: str
     content: str
@@ -42,32 +42,37 @@ class MockRetrieverToolkit(RetrieverToolkit):
         """Increment the call counter."""
         self.call_count += 1
 
-    def get_document_by_id(self, document_id: str) -> Optional[Document]:
-        """Get document by ID - mock implementation returns None."""
+    def get_page_by_id(self, page_id: str) -> Optional[Page]:
+        """Get page by ID - mock implementation returns None."""
         return None
+
+    @property
+    def name(self) -> str:
+        """Return the name of the toolkit."""
+        return "MockRetrieverToolkit"
 
 
 # Test data factories
-def create_test_documents(
+def create_test_pages(
     count: int = 5, query: str = "test", content_prefix: str = "Content"
-) -> List[SimpleTestDocument]:
-    """Create a list of test documents."""
+) -> List[SimpleTestPage]:
+    """Create a list of test pages."""
     return [
-        SimpleTestDocument(
+        SimpleTestPage(
             id=f"doc_{i}",
-            title=f"Document {i} - {query}",
-            content=f"{content_prefix} about {query} in document {i}. " * 2,
+            title=f"page {i} - {query}",
+            content=f"{content_prefix} about {query} in page {i}. " * 2,
         )
         for i in range(count)
     ]
 
 
-def create_text_documents(count: int = 5, query: str = "test") -> List[TextDocument]:
-    """Create a list of TextDocument instances."""
-    docs: List[TextDocument] = []
+def create_text_pages(count: int = 5, query: str = "test") -> List[TextPage]:
+    """Create a list of Textpage instances."""
+    docs: List[TextPage] = []
     for i in range(count):
-        doc = TextDocument(
-            id=f"text_doc_{i}", content=f"Text content about {query} - document {i}"
+        doc = TextPage(
+            id=f"text_doc_{i}", content=f"Text content about {query} - page {i}"
         )
         # Add custom metadata for testing
         doc.metadata.index = i  # type: ignore[attr-defined]
@@ -78,15 +83,15 @@ def create_text_documents(count: int = 5, query: str = "test") -> List[TextDocum
 
 # Shared fixtures
 @pytest.fixture
-def sample_documents() -> List[SimpleTestDocument]:
-    """Provide sample test documents."""
-    return create_test_documents(10, "sample")
+def sample_pages() -> List[SimpleTestPage]:
+    """Provide sample test pages."""
+    return create_test_pages(10, "sample")
 
 
 @pytest.fixture
-def text_documents() -> List[TextDocument]:
-    """Provide sample TextDocument instances."""
-    return create_text_documents(5, "text_sample")
+def text_pages() -> List[TextPage]:
+    """Provide sample Textpage instances."""
+    return create_text_pages(5, "text_sample")
 
 
 @pytest.fixture
@@ -96,61 +101,39 @@ def mock_toolkit() -> MockRetrieverToolkit:
 
 
 @pytest.fixture
-def large_document_set() -> List[SimpleTestDocument]:
-    """Provide a large set of test documents for pagination testing."""
-    return create_test_documents(50, "large_set")
+def large_page_set() -> List[SimpleTestPage]:
+    """Provide a large set of test pages for pagination testing."""
+    return create_test_pages(50, "large_set")
 
 
 @pytest.fixture
-def empty_document_list() -> List[SimpleTestDocument]:
-    """Provide an empty document list for edge case testing."""
+def empty_page_list() -> List[SimpleTestPage]:
+    """Provide an empty page list for edge case testing."""
     return []
 
 
 # Test helper functions
-def create_timestamped_document(content: str = "test") -> List[TextDocument]:
-    """Create a document with timestamp for cache testing."""
+def create_timestamped_page(content: str = "test") -> List[TextPage]:
+    """Create a page with timestamp for cache testing."""
     return [
-        TextDocument(
+        TextPage(
             id="timestamp_doc", content=f"{content} at {datetime.now().isoformat()}"
         )
     ]
 
 
-def create_failing_function(error_type: str = "runtime"):
+def create_failing_function(error_type: str = "runtime") -> Any:
     """Create a function that raises specific errors for testing."""
 
-    def failing_func(query: str) -> List[SimpleTestDocument]:
+    def failing_func(query: str) -> List[SimpleTestPage]:
         if error_type == "no_results" or query == "no_results":
-            raise ValueError("No matching documents found")
+            raise ValueError("No matching pages found")
         elif error_type == "runtime":
             raise RuntimeError("Something went wrong")
         else:
             raise Exception("Generic error")
 
     return failing_func
-
-
-def assert_valid_pagination_response(result: dict) -> None:
-    """Assert that a result has valid pagination structure."""
-    required_fields = {"documents", "page_number", "has_next_page", "total_documents"}
-    assert all(field in result for field in required_fields)
-
-    assert isinstance(result["documents"], list)
-    assert isinstance(result["page_number"], int)
-    assert isinstance(result["has_next_page"], bool)
-    assert isinstance(result["total_documents"], int)
-    assert result["page_number"] >= 0
-    assert result["total_documents"] >= 0
-
-
-def assert_valid_document_structure(document: dict) -> None:
-    """Assert that a document has valid structure."""
-    required_fields = {"id"}
-    assert all(field in document for field in required_fields)
-
-    assert isinstance(document["id"], str)
-    assert len(document["id"]) > 0
 
 
 # Test data constants

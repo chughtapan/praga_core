@@ -1,16 +1,16 @@
 """Tests for RetrieverToolkit integration with Tool class."""
 
 from datetime import timedelta
-from typing import Any, List, Optional
+from typing import Any, List
 
 import pytest
 
-from praga_core.retriever_toolkit import RetrieverToolkit
-from praga_core.tool import Tool
-from praga_core.types import Document
+from praga_core.retriever import RetrieverToolkit
+from praga_core.retriever.tool import Tool
+from praga_core.types import Page
 
 
-class SimpleDocument(Document):
+class SimpleDocument(Page):
     """Simple document for testing."""
 
     title: str
@@ -46,9 +46,9 @@ class IntegrationTestToolkit(RetrieverToolkit):
         # Register stateless tool
         self.register_tool(get_test_docs, "get_test_docs", cache=True, paginate=False)
 
-    def get_document_by_id(self, document_id: str) -> Optional[Document]:
-        """Get document by ID - mock implementation returns None."""
-        return None
+    @property
+    def name(self) -> str:
+        return "IntegrationTestToolkit"
 
     def search_documents(self, query: str, limit: int = 10) -> List[SimpleDocument]:
         """Search for documents matching the query."""

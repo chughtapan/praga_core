@@ -1,22 +1,36 @@
-# Google API Toolkits
+# Google API Handler Architecture Example
 
-This directory contains two powerful toolkits for integrating with Google APIs: **GmailToolkit** and **CalendarToolkit**. These toolkits are built on top of the `praga_core.retriever_toolkit` framework and provide easy-to-use interfaces for retrieving emails and calendar events.
+This directory demonstrates the new **Handler-Based Architecture** for integrating with Google APIs. This architecture provides a clean separation where:
 
-## Features
+- **Handlers** do complete work: take minimal input (like email_id), make all API calls, parse data, and return full documents
+- **ServerContext** manages handlers and provides a centralized registry
+- **Toolkits** become simple: they just collect IDs and ask the context to create pages
 
-### Gmail Toolkit Features
-- Search emails by sender, recipient, CC participants
-- Search emails by date range
-- Search emails by keywords in body/subject
-- Get recent emails and unread emails
-- Extract email content from various formats (plain text, HTML)
+## Architecture Overview
 
-### Calendar Toolkit Features
-- Get calendar events by date range
-- Search events by attendee or organizer
-- Search events by topic/keywords
-- Get today's events, upcoming events, and weekly meetings
-- Support for multiple calendars
+### Key Components
+
+1. **ServerContext**: Central registry that manages page handlers and caching
+2. **Handlers**: Complete functions that take minimal input and return full documents  
+3. **Page Classes**: Structured document classes (EmailDocument, CalendarEventDocument)
+4. **Simplified Toolkits**: Just collect IDs and delegate to context
+
+### Handler Registration Patterns
+
+```python
+from praga_core.context import ServerContext
+
+ctx = ServerContext()
+
+# Pattern 1: Decorator (FastAPI-style)
+@ctx.handler(EmailDocument)
+def handle_email(email_id: str) -> EmailDocument:
+    # Make Gmail API calls, parse email, return complete document
+    return EmailDocument(...)
+
+# Pattern 2: Programmatic registration  
+ctx.register_handler(create_email_document, EmailDocument)
+```
 
 ## Installation
 
@@ -52,107 +66,135 @@ cp /path/to/your/downloaded/credentials.json ~/.praga_secrets/credentials.json
 
 ## Quick Start
 
-### Gmail Toolkit Example
+### Complete Handler Example
 
 ```python
-from gmail_toolkit import GmailToolkit
+from praga_core.context import ServerContext
+from handlers.email_handlers import EmailDocument, create_email_document
+from handlers.calendar_handlers import CalendarEventDocument, create_calendar_document
 
-# Initialize the toolkit
-gmail = GmailToolkit()
+# Create context and register handlers
+ctx = ServerContext()
 
-# Get emails from a specific sender
-emails = gmail.get_emails_by_sender("example@email.com", max_results=10)
+# Register handlers using decorator pattern
+@ctx.handler(EmailDocument)
+def handle_email_complete(email_id: str) -> EmailDocument:
+    """Complete email handler - does Gmail API calls and parsing."""
+    return create_email_document(email_id)
 
-# Search emails by keyword
-meeting_emails = gmail.get_emails_with_body_keyword("meeting")
+@ctx.handler(CalendarEventDocument)  
+def handle_calendar_complete(event_id: str, calendar_id: str = "primary") -> CalendarEventDocument:
+    """Complete calendar handler - does Calendar API calls and parsing."""
+    return create_calendar_document(event_id, calendar_id)
 
-# Get emails from date range
-emails = gmail.get_emails_by_date_range("2024-01-01", "2024-01-31")
-
-# Get recent emails (stateless tool)
-recent = gmail.get_recent_emails(days=7)
-
-# Pagination example
-paginated_result = gmail.get_emails_by_sender("sender@email.com", page=0)
-print(f"Found {len(paginated_result.documents)} emails on page 0")
-print(f"Has next page: {paginated_result.metadata.has_next_page}")
+# Now you can create pages with just IDs
+email_doc = ctx.create_page(EmailDocument, "email_123")
+event_doc = ctx.create_page(CalendarEventDocument, "event_456")
 ```
 
-### Calendar Toolkit Example
+### Simplified Toolkit Example
 
 ```python
-from calendar_toolkit import CalendarToolkit
-
-# Initialize the toolkit
-calendar = CalendarToolkit()
-
-# Get events for date range
-events = calendar.get_calendar_entries_by_date_range("2024-06-01", "2024-06-30")
-
-# Get events by attendee
-events = calendar.get_calendar_entries_by_attendee("attendee@email.com")
-
-# Search events by topic
-events = calendar.get_calendar_entries_by_topic("sprint planning")
-
-# Get today's events (stateless tool)
-today_events = calendar.get_todays_events()
-
-# Get upcoming events
-upcoming = calendar.get_upcoming_events(days=14)
+class SimplifiedGmailToolkit:
+    def __init__(self, context: ServerContext):
+        self.context = context
+        # Set up Gmail API service here
+    
+    def get_recent_emails(self, count: int = 5) -> list[EmailDocument]:
+        """Get recent emails - just collect IDs and delegate to context."""
+        # 1. Use Gmail API to search for recent message IDs
+        message_ids = self._search_recent_message_ids(count)
+        
+        # 2. For each ID, ask context to create the page
+        emails = []
+        for email_id in message_ids:
+            email = self.context.create_page(EmailDocument, email_id)
+            emails.append(email)
+        
+        return emails
+    
+    def _search_recent_message_ids(self, count: int) -> list[str]:
+        # Gmail API logic to get message IDs only
+        # Much simpler than before!
+        pass
 ```
 
-## Document Structure
+## Document Structure  
 
-Both toolkits return `Document` objects with the following structure:
+The new architecture returns structured page objects:
 
-### Email Document
+### EmailDocument
 ```python
-Document(
-    id="email_message_id",
-    content="Subject: ...\nFrom: ...\nDate: ...\n\nEmail body content...",
-    metadata={
-        'subject': 'Email Subject',
-        'from': 'sender@email.com',
-        'to': 'recipient@email.com',
-        'cc': 'cc@email.com',
-        'date': 'Mon, 1 Jan 2024 12:00:00 +0000',
-        'message_id': 'gmail_message_id',
-        'token_count': 150,
-        'labels': ['INBOX', 'UNREAD']
-    }
-)
+@dataclass
+class EmailDocument(Page):
+    id: str
+    subject: str
+    sender: str
+    recipient: str
+    cc: str
+    time: str
+    body: str
+    html_body: str
+    labels: list[str]
+    message_id: str
+    thread_id: str
 ```
 
-### Calendar Document
+### CalendarEventDocument
 ```python
-Document(
-    id="calendar_event_id",
-    content="Title: Meeting\nStart: 2024-01-01T10:00:00Z\nEnd: 2024-01-01T11:00:00Z\n...",
-    metadata={
-        'summary': 'Meeting Title',
-        'description': 'Meeting description',
-        'start_time': '2024-01-01T10:00:00Z',
-        'end_time': '2024-01-01T11:00:00Z',
-        'location': 'Conference Room A',
-        'organizer_email': 'organizer@email.com',
-        'organizer_name': 'John Doe',
-        'attendee_emails': ['attendee1@email.com', 'attendee2@email.com'],
-        'attendee_names': ['Jane Smith', 'Bob Johnson'],
-        'event_id': 'calendar_event_id',
-        'token_count': 75,
-        'status': 'confirmed',
-        'created': '2024-01-01T09:00:00Z',
-        'updated': '2024-01-01T09:30:00Z'
-    }
-)
+@dataclass  
+class CalendarEventDocument(Page):
+    id: str
+    summary: str
+    description: str
+    start_time: str
+    end_time: str
+    location: str
+    organizer_email: str
+    organizer_name: str
+    attendee_emails: list[str]
+    attendee_names: list[str]
+    status: str
 ```
 
-## Advanced Features
+## Architecture Benefits
 
-### Caching
-All tools support caching with configurable TTL:
-- Gmail tools: 15-minute cache TTL
-- Calendar tools: 15-minute cache TTL
-- Stateless tools: Custom TTL (1 hour for recent emails, 30 minutes for unread emails, etc.)
+✅ **Complete Handlers**: Each handler does ALL the work from ID to final document  
+✅ **Clean Separation**: Toolkits find IDs, handlers create documents, context coordinates  
+✅ **Easy Testing**: Test handlers independently with mock IDs  
+✅ **FastAPI-style DX**: Familiar decorator patterns for registration  
+✅ **Automatic Caching**: Context automatically caches created pages  
+✅ **No Circular Dependencies**: Clear dependency flow  
+
+## Running the Examples
+
+### Complete Handler Demo
+```bash
+python complete_handler_demo.py
+```
+Shows both registration patterns and simplified toolkit examples.
+
+### Integration Example  
+```bash
+python integration_example.py
+```
+Shows a realistic example with actual Gmail/Calendar integration.
+
+## File Structure
+
+```
+examples/google_api/
+├── handlers/           # Complete handler implementations
+│   ├── email_handlers.py      # Gmail API → EmailDocument
+│   └── calendar_handlers.py   # Calendar API → CalendarEventDocument
+├── pages/             # Document class definitions  
+│   ├── email_pages.py         # EmailDocument class
+│   └── calendar_pages.py      # CalendarEventDocument class
+├── toolkits/          # Simplified toolkits (just ID collection)
+│   ├── gmail_toolkit.py       # Gmail ID search + context delegation
+│   └── calendar_toolkit.py    # Calendar ID search + context delegation
+├── complete_handler_demo.py   # Architecture demonstration
+├── integration_example.py     # Realistic usage example
+└── auth.py           # Google OAuth helper
+```
 

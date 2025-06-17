@@ -23,7 +23,7 @@ class GoogleAuthManager:
 
     def __init__(self, secrets_dir: Optional[str] = None):
         """Initialize the auth manager with optional custom secrets directory."""
-        if secrets_dir is None:
+        if not secrets_dir:
             secrets_dir = os.path.expanduser("~/.praga_secrets")
 
         self.secrets_dir = Path(secrets_dir)
