@@ -19,6 +19,7 @@ dependencies = [
     "pytest>=8.4.0",
     "pydantic>=2.11.5",
     "openai>=1.0.0",
+    "fastmcp>=2.8.1",
 ]
 
 [build-system]
