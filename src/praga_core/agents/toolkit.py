@@ -11,6 +11,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Optional,
     Sequence,
     Tuple,
     Union,
@@ -272,8 +273,8 @@ class RetrieverToolkitMeta(abc.ABC):
 
 class RetrieverToolkit(RetrieverToolkitMeta):
 
-    def __init__(self, context: ServerContext) -> None:
-        self.context = context
+    def __init__(self, context: Optional[ServerContext] = None) -> None:
+        self._context = context
         super().__init__()
 
     def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
@@ -284,6 +285,12 @@ class RetrieverToolkit(RetrieverToolkitMeta):
     @abc.abstractmethod
     def name(self) -> str:
         pass
+
+    @property
+    def context(self) -> ServerContext:
+        if self._context is None:
+            raise RuntimeError(f"Context not set for toolkit: {self.name}")
+        return self._context
 
 
 # ========================================================

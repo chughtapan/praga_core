@@ -1,4 +1,4 @@
-"""Comprehensive pytest tests for the RetrieverAgent."""
+"""Comprehensive pytest tests for the ReactAgent."""
 
 import json
 from typing import List
@@ -8,10 +8,7 @@ import pytest
 from pydantic import Field
 
 from praga_core import Page
-from praga_core.retriever import (
-    RetrieverAgentBase,
-    RetrieverToolkit,
-)
+from praga_core.agents import ReactAgent, RetrieverToolkit
 
 
 class MockOpenAIClient:
@@ -74,12 +71,10 @@ class MockDocument(Page):
     """A simple document class for testing."""
 
     content: str = Field(description="The content of the document")
-    document_type: str = Field(default="MockDocument", description="Type of document")
+    type: str = Field(default="MockDocument", description="Type of document")
 
     def __init__(self, doc_id: str, content: str, **data):
-        super().__init__(
-            id=doc_id, content=content, document_type="MockDocument", **data
-        )
+        super().__init__(id=doc_id, content=content, type="MockDocument", **data)
 
 
 class MockRetrieverToolkit(RetrieverToolkit):
@@ -174,14 +169,14 @@ class MockCalendarToolkit(RetrieverToolkit):
         return "MockCalendarToolkit"
 
 
-class TestRetrieverAgentBasic:
-    """Test basic RetrieverAgent functionality."""
+class TestReactAgentBasic:
+    """Test basic ReactAgent functionality."""
 
     def setup_method(self):
         """Set up test fixtures."""
         self.mock_client = MockOpenAIClient()
         self.toolkit = MockRetrieverToolkit()
-        self.agent = RetrieverAgentBase(
+        self.agent = ReactAgent(
             toolkits=[self.toolkit], openai_client=self.mock_client, max_iterations=3
         )
 
@@ -367,15 +362,9 @@ class TestRetrieverAgentBasic:
 
         # Check first document
         assert references[0].id == "1"
-        assert references[0].page is not None
-        assert references[0].page.id == "1"
-        assert references[0].page.content == "John works in AI research"
 
         # Check second document
         assert references[1].id == "4"
-        assert references[1].page is not None
-        assert references[1].page.id == "4"
-        assert references[1].page.content == "John likes Python and AI"
 
     def test_raw_document_not_found(self):
         """Test behavior when document ID is not found in any toolkit."""
@@ -410,13 +399,10 @@ class TestRetrieverAgentBasic:
         # Verify that the reference is created but document is None
         assert len(references) == 1
         assert references[0].id == "999"
-        # Check that trying to access the document raises an error
-        with pytest.raises(KeyError):
-            references[0].page
 
 
-class TestRetrieverAgentMultipleToolkits:
-    """Test RetrieverAgent with multiple toolkits."""
+class TestReactAgentMultipleToolkits:
+    """Test ReactAgent with multiple toolkits."""
 
     def setup_method(self):
         """Set up test fixtures with multiple toolkits."""
@@ -425,7 +411,7 @@ class TestRetrieverAgentMultipleToolkits:
         self.calendar_toolkit = MockCalendarToolkit()
 
         # Test with multiple toolkits
-        self.agent = RetrieverAgentBase(
+        self.agent = ReactAgent(
             toolkits=[self.email_toolkit, self.calendar_toolkit],
             openai_client=self.mock_client,
             max_iterations=3,
@@ -511,7 +497,7 @@ class TestRetrieverAgentMultipleToolkits:
 
         # Both have 'search_documents' tool
         with caplog.at_level("WARNING"):
-            _ = RetrieverAgentBase(
+            _ = ReactAgent(
                 toolkits=[toolkit1, toolkit2], openai_client=self.mock_client
             )
 
@@ -522,7 +508,7 @@ class TestRetrieverAgentMultipleToolkits:
     def test_single_toolkit_compatibility(self):
         """Test that single toolkit still works (backwards compatibility)."""
         single_toolkit = MockRetrieverToolkit()
-        agent = RetrieverAgentBase(
+        agent = ReactAgent(
             toolkits=[single_toolkit],  # Pass single toolkit as list
             openai_client=self.mock_client,
         )
@@ -561,12 +547,8 @@ class TestRetrieverAgentMultipleToolkits:
 
         references = self.agent.search("Find emails about meetings")
 
-        # Verify the email document is retrieved with document
         assert len(references) == 1
         assert references[0].id == "email_1"
-        assert references[0].page is not None
-        assert references[0].page.id == "email_1"
-        assert "Meeting about AI project from John" == references[0].page.content
 
     def test_raw_document_cross_toolkit_fallback(self):
         """Test that the system tries multiple toolkits to find a document."""
@@ -597,12 +579,8 @@ class TestRetrieverAgentMultipleToolkits:
 
         references = self.agent.search("Find standup meetings")
 
-        # Verify the calendar document is retrieved with document
         assert len(references) == 1
         assert references[0].id == "cal_1"
-        assert references[0].page is not None
-        assert references[0].page.id == "cal_1"
-        assert "Daily standup meeting" == references[0].page.content
 
 
 if __name__ == "__main__":

@@ -1,13 +1,11 @@
 import json
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from praga_core.types import PageReference
-
-from .toolkit import RetrieverToolkit
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +99,3 @@ def parse_agent_response(text: str | Dict[str, Any]) -> AgentResponse:
             ResponseCode.INTERNAL_ERROR,
             f"Failed to parse response: {str(e)}",
         )
-
-
-def process_agent_response(
-    response: AgentResponse, toolkits: Sequence[RetrieverToolkit]
-) -> List[PageReference]:
-    """Convert an AgentResponse to a list of DocumentReference objects."""
-    return response.references

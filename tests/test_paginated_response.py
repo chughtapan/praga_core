@@ -11,7 +11,7 @@ from typing import List
 import pytest
 
 from praga_core import Page, TextPage
-from praga_core.retriever import PaginatedResponse
+from praga_core.agents import PaginatedResponse
 
 
 class SimpleTestDocumentBasics:

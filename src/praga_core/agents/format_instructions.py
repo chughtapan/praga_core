@@ -34,7 +34,7 @@ def get_agent_format_instructions(include_examples: bool = True) -> str:
         references=[
             {
                 "id": "doc_id",
-                "document_type": "DocumentClassName",
+                "type": "DocumentClassName",
                 "explanation": "explanation of why this document is relevant",
             }
         ],
@@ -47,7 +47,7 @@ Your final answer should follow this format:
 Follow these guidelines:
 1. Return document IDs, types, and explanations, not complete documents
 2. Return all relevant document references, not just one
-3. Always include the document type in the "document_type" field
+3. Always include the document type in the "type" field
 4. Use "success" response_code when documents are found
 5. Use "error_no_documents_found" when no matches exist
 6. Use "error_internal" for any other errors
@@ -61,12 +61,12 @@ Follow these guidelines:
             references=[
                 {
                     "id": "doc1",
-                    "document_type": "Email",
+                    "type": "Email",
                     "explanation": "email contains AI and machine learning",
                 },
                 {
                     "id": "doc2",
-                    "document_type": "SlackMessage",
+                    "type": "SlackMessage",
                     "explanation": "slack message contains machine learning examples",
                 },
             ],

@@ -8,7 +8,7 @@ from typing import Any, List
 
 import pytest
 
-from praga_core.retriever.tool import PaginatedResponse, Tool
+from praga_core.agents import PaginatedResponse, Tool
 from praga_core.types import Page
 
 

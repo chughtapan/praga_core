@@ -9,8 +9,8 @@ from typing import List
 import pytest
 from conftest import MockRetrieverToolkit, SimpleTestPage, create_test_pages
 
-from praga_core.retriever import RetrieverToolkit
-from praga_core.retriever.tool import Tool
+from praga_core.agents import RetrieverToolkit
+from praga_core.agents.tool import Tool
 
 
 class TestRetrieverToolkitCore:

@@ -37,13 +37,13 @@ def setup_context() -> ServerContext:
 
     ctx = ServerContext()
 
-    # Method 1: Decorator pattern registration
-    @ctx.handler(EmailPage)
+    # Method 1: Decorator pattern registration with aliases
+    @ctx.handler(EmailPage, aliases=["Email", "EmailMessage"])
     def handle_email_complete(email_id: str) -> EmailPage:
         """Complete email handler using decorator pattern."""
         return create_email_document(email_id)
 
-    @ctx.handler(CalendarEventPage)
+    @ctx.handler(CalendarEventPage, aliases=["CalendarEvent", "Event"])
     def handle_calendar_complete(
         event_id: str, calendar_id: str = "primary"
     ) -> CalendarEventPage:

@@ -12,8 +12,8 @@ class TestPackageInitialization:
 
     def test_main_classes_are_accessible(self) -> None:
         """Test that main classes can be imported from the package."""
-        from praga_core.retriever import RetrieverToolkit
-        from praga_core.retriever.tool import PaginatedResponse, Tool
+        from praga_core.agents import RetrieverToolkit, Tool
+        from praga_core.agents.tool import PaginatedResponse
         from praga_core.types import Page, TextPage
 
         # Verify classes are properly imported

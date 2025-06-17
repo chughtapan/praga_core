@@ -5,8 +5,8 @@ from typing import Any, List
 
 import pytest
 
-from praga_core.retriever import RetrieverToolkit
-from praga_core.retriever.tool import Tool
+from praga_core.agents import RetrieverToolkit
+from praga_core.agents.tool import Tool
 from praga_core.types import Page
 
 

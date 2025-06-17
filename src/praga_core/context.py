@@ -18,11 +18,18 @@ class ServerContext:
         self._retriever: Optional[RetrieverAgentBase] = None
         self._page_handlers: Dict[Type[Page], PageHandler] = {}
         self._page_cache: Dict[str, Page] = {}
+        self._type_aliases: Dict[str, Type[Page]] = (
+            {}
+        )  # New: alias -> actual type mapping
 
     def _resolve_page_type(self, page_type: Union[Type[Page], str]) -> Type[Page]:
         """Resolve a page type from either a Type or string to the actual Type."""
         if isinstance(page_type, str):
-            # Find the actual type from registered handlers
+            # First check aliases
+            if page_type in self._type_aliases:
+                return self._type_aliases[page_type]
+
+            # Then check registered handlers by class name
             for registered_type in self._page_handlers:
                 if registered_type.__name__ == page_type:
                     return registered_type
@@ -55,7 +62,7 @@ class ServerContext:
             return f"{resolved_type.__name__}:{page_ref_or_id}"
 
     def handler(
-        self, page_type: Type[T]
+        self, page_type: Type[T], aliases: Optional[List[str]] = None
     ) -> Callable[[Callable[..., T]], Callable[..., T]]:
         """Decorator to register a page handler function for a specific page type.
 
@@ -64,10 +71,15 @@ class ServerContext:
             def handle_email(email_id: str) -> EmailDocument:
                 # Make API calls, parse, return document
                 return EmailDocument(...)
+
+            # With aliases:
+            @ctx.handler(EmailPage, aliases=["Email", "EmailMessage"])
+            def handle_email(email_id: str) -> EmailPage:
+                return EmailPage(...)
         """
 
         def decorator(func: Callable[..., T]) -> Callable[..., T]:
-            self.register_handler(func, page_type)
+            self.register_handler(func, page_type, aliases)
             return func
 
         return decorator
@@ -138,7 +150,10 @@ class ServerContext:
         return results
 
     def register_handler(
-        self, handler_func: Callable[..., T], page_type: Type[T]
+        self,
+        handler_func: Callable[..., T],
+        page_type: Type[T],
+        aliases: Optional[List[str]] = None,
     ) -> None:
         """
         Programmatically register a page handler function.
@@ -146,13 +161,14 @@ class ServerContext:
         Args:
             handler_func: Function that takes minimal input and returns a complete Page
             page_type: The page type this handler creates
+            aliases: Optional list of alternative type names that can be used to reference this page type
 
         Usage:
             def handle_email(email_id: str) -> EmailDocument:
                 # Make API calls, parse, return document
                 return EmailDocument(...)
 
-            ctx.register_handler(handle_email, EmailDocument)
+            ctx.register_handler(handle_email, EmailDocument, aliases=["Email", "EmailMessage"])
         """
         if not issubclass(page_type, Page):
             raise RuntimeError(
@@ -162,7 +178,15 @@ class ServerContext:
             raise RuntimeError(
                 f"Page handler already registered for type: {page_type.__name__}"
             )
+
         self._page_handlers[page_type] = handler_func
+
+        # Register aliases
+        if aliases:
+            for alias in aliases:
+                if alias in self._type_aliases:
+                    raise RuntimeError(f"Type alias '{alias}' already registered")
+                self._type_aliases[alias] = page_type
 
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:

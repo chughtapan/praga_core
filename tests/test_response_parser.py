@@ -2,7 +2,7 @@
 
 import pytest
 
-from praga_core.retriever.response import (
+from praga_core.agents.response import (
     AgentResponse,
     ResponseCode,
     parse_agent_response,
@@ -170,8 +170,8 @@ class TestResponseParser:
         response = AgentResponse(
             response_code=ResponseCode.SUCCESS,
             references=[
-                {"id": 42, "document_type": "Email", "explanation": "test"},
-                {"id": 7.5, "document_type": "Email", "explanation": "test"},
+                {"id": 42, "type": "Email", "explanation": "test"},
+                {"id": 7.5, "type": "Email", "explanation": "test"},
             ],
             error_message="",
         )

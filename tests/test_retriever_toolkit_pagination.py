@@ -14,7 +14,7 @@ from conftest import (
     create_test_pages,
 )
 
-from praga_core.retriever import PaginatedResponse
+from praga_core.agents import PaginatedResponse
 
 
 class TestRetrieverToolkitPagination:

@@ -519,3 +519,79 @@ class TestIntegration:
         assert isinstance(results[0].page, DocumentPage)
         assert isinstance(results[1].page, AlternateTestPage)
         assert isinstance(results[2].page, DocumentPage)
+
+
+class TestTypeAliases:
+    """Test type aliases functionality."""
+
+    def test_register_handler_with_aliases(self, context: ServerContext) -> None:
+        """Test registering a handler with type aliases."""
+
+        def create_document_page(page_id: str) -> DocumentPage:
+            return DocumentPage(id=page_id, title="Test Doc", content="test content")
+
+        # Register with aliases
+        context.register_handler(
+            create_document_page, DocumentPage, aliases=["Document", "Doc"]
+        )
+
+        # Should be able to resolve using the class name
+        resolved_type = context._resolve_page_type("DocumentPage")
+        assert resolved_type == DocumentPage
+
+        # Should be able to resolve using aliases
+        resolved_type = context._resolve_page_type("Document")
+        assert resolved_type == DocumentPage
+
+        resolved_type = context._resolve_page_type("Doc")
+        assert resolved_type == DocumentPage
+
+    def test_register_handler_with_aliases_decorator(
+        self, context: ServerContext
+    ) -> None:
+        """Test registering a handler with aliases using decorator."""
+
+        @context.handler(DocumentPage, aliases=["Document", "Doc"])
+        def create_document_page(page_id: str) -> DocumentPage:
+            return DocumentPage(id=page_id, title="Test Doc", content="test content")
+
+        # Should resolve all aliases
+        assert context._resolve_page_type("DocumentPage") == DocumentPage
+        assert context._resolve_page_type("Document") == DocumentPage
+        assert context._resolve_page_type("Doc") == DocumentPage
+
+    def test_duplicate_alias_error(self, context: ServerContext) -> None:
+        """Test that duplicate aliases raise an error."""
+
+        def create_document_page(page_id: str) -> DocumentPage:
+            return DocumentPage(id=page_id, title="Test Doc", content="test content")
+
+        def create_alt_page(page_id: str) -> AlternateTestPage:
+            return AlternateTestPage(id=page_id, name="test", data="test content")
+
+        # Register first handler with alias
+        context.register_handler(
+            create_document_page, DocumentPage, aliases=["Document"]
+        )
+
+        # Try to register another handler with the same alias - should fail
+        with pytest.raises(
+            RuntimeError, match="Type alias 'Document' already registered"
+        ):
+            context.register_handler(
+                create_alt_page, AlternateTestPage, aliases=["Document"]
+            )
+
+    def test_get_page_with_alias_type(self, context: ServerContext) -> None:
+        """Test getting a page using an alias type name in URI."""
+
+        @context.handler(DocumentPage, aliases=["Document"])
+        def create_document_page(page_id: str) -> DocumentPage:
+            return DocumentPage(id=page_id, title="Test Doc", content="test content")
+
+        # Create a page using the alias in the URI
+        page = context.get_page("Document:test123")
+
+        assert isinstance(page, DocumentPage)
+        assert page.id == "test123"
+        assert page.title == "Test Doc"

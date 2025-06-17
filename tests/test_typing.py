@@ -4,8 +4,8 @@ from typing import Any, Dict, List, Sequence, Union
 import pytest
 from pydantic import Field
 
-from praga_core.retriever import PaginatedResponse
-from praga_core.retriever.toolkit import (
+from praga_core.agents import PaginatedResponse
+from praga_core.agents.toolkit import (
     RetrieverToolkit,
     _is_page_sequence_type,
     _returns_paginated_response,
