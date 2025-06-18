@@ -76,18 +76,18 @@ class CalendarToolkit(RetrieverToolkit):
         )
 
     def get_events_by_date_range(
-        self, start_date: str, end_date: str, page: int = 0
+        self, start_date: str, num_days: int, page: int = 0
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events within a date range.
 
         Args:
             start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format
+            num_days: Number of days to search
             page: Page number for pagination (0-based)
         """
         # Convert dates to RFC3339 timestamps
         start_dt = datetime.fromisoformat(start_date)
-        end_dt = datetime.fromisoformat(end_date)
+        end_dt = start_dt + timedelta(days=num_days)
 
         query_params = {
             "calendarId": "primary",

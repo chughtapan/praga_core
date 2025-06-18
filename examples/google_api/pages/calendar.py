@@ -11,8 +11,8 @@ from praga_core.types import Page
 class CalendarEventPage(Page):
     """A page representing a calendar event with all event-specific fields."""
 
-    event_id: str = Field(description="Calendar event ID")
-    calendar_id: str = Field(description="Calendar ID")
+    event_id: str = Field(description="Calendar event ID", exclude=True)
+    calendar_id: str = Field(description="Calendar ID", exclude=True)
     summary: str = Field(description="Event summary/title")
     description: Optional[str] = Field(None, description="Event description")
     location: Optional[str] = Field(None, description="Event location")
