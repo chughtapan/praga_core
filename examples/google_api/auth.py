@@ -1,82 +1,91 @@
-"""Google API authentication utilities."""
+"""Google API authentication using singleton pattern."""
 
 import os
 import pickle
-from pathlib import Path
 from typing import Optional
 
 from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/contacts.readonly",  # For People API
+    "https://www.googleapis.com/auth/directory.readonly",
+]
+
 
 class GoogleAuthManager:
-    """Manages Google API authentication and service creation."""
+    """Singleton Google API authentication manager."""
 
-    SCOPES = [
-        "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/contacts.readonly",  # For People API
-        "https://www.googleapis.com/auth/directory.readonly",
-    ]
+    _instance: Optional["GoogleAuthManager"] = None
+    _initialized = False
 
-    def __init__(self, secrets_dir: Optional[str] = None):
-        """Initialize the auth manager with optional custom secrets directory."""
-        if not secrets_dir:
-            secrets_dir = os.path.expanduser("~/.praga_secrets")
+    def __new__(cls, secrets_dir: str = ""):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-        self.secrets_dir = Path(secrets_dir)
-        self.secrets_dir.mkdir(exist_ok=True)
+    def __init__(self, secrets_dir: str = ""):
+        if self._initialized:
+            return
 
-        self.credentials_file = self.secrets_dir / "credentials.json"
-        self.token_file = self.secrets_dir / "token.pickle"
+        self.secrets_dir = secrets_dir
+        self._creds = None
+        self._gmail_service = None
+        self._calendar_service = None
+        self._authenticate()
+        self._initialized = True
 
-    def get_credentials(self) -> Credentials:
-        """Get valid Google API credentials, performing OAuth flow if needed."""
-        creds = None
+    def _get_credentials_path(self) -> str:
+        """Get path to credentials file."""
+        if self.secrets_dir:
+            return os.path.join(self.secrets_dir, "credentials.json")
+        return "credentials.json"
 
-        # Load existing token if available
-        if self.token_file.exists():
-            with open(self.token_file, "rb") as token:
-                creds = pickle.load(token)
+    def _get_token_path(self) -> str:
+        """Get path to token file."""
+        if self.secrets_dir:
+            return os.path.join(self.secrets_dir, "token.pickle")
+        return "token.pickle"
 
-        # If there are no (valid) credentials available, let the user log in
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+    def _authenticate(self) -> None:
+        """Authenticate with Google APIs."""
+        token_path = self._get_token_path()
+
+        # Load existing token
+        if os.path.exists(token_path):
+            with open(token_path, "rb") as token:
+                self._creds = pickle.load(token)
+
+        # If no valid credentials, get new ones
+        if not self._creds or not self._creds.valid:
+            if self._creds and self._creds.expired and self._creds.refresh_token:
+                self._creds.refresh(Request())
             else:
-                if not self.credentials_file.exists():
-                    raise FileNotFoundError(
-                        f"Google OAuth credentials file not found at {self.credentials_file}. "
-                        f"Please download your OAuth client credentials from the Google Cloud Console "
-                        f"and save them as 'credentials.json' in {self.secrets_dir}"
-                    )
-
+                credentials_path = self._get_credentials_path()
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    str(self.credentials_file), self.SCOPES
+                    credentials_path, _SCOPES
                 )
-                creds = flow.run_local_server(port=0)
+                self._creds = flow.run_local_server(port=0)
 
-            # Save the credentials for the next run
-            with open(self.token_file, "wb") as token:
-                pickle.dump(creds, token)
-
-        return creds
-
-    def get_service(self, service_name: str, version: str):
-        """Create and return a Google API service."""
-        creds = self.get_credentials()
-        return build(service_name, version, credentials=creds)
+            # Save credentials for next run
+            with open(token_path, "wb") as token:
+                pickle.dump(self._creds, token)
 
     def get_gmail_service(self):
-        """Get Gmail API service."""
-        return self.get_service("gmail", "v1")
+        """Get Gmail service (cached)."""
+        if self._gmail_service is None:
+            self._gmail_service = build("gmail", "v1", credentials=self._creds)
+        return self._gmail_service
 
     def get_calendar_service(self):
-        """Get Calendar API service."""
-        return self.get_service("calendar", "v3")
+        """Get Calendar service (cached)."""
+        if self._calendar_service is None:
+            self._calendar_service = build("calendar", "v3", credentials=self._creds)
+        return self._calendar_service
 
     def get_people_service(self):
         """Get People API service."""
-        return self.get_service("people", "v1")
+        return build("people", "v1", credentials=self._creds)

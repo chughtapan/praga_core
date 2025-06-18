@@ -10,7 +10,7 @@ from praga_core.agents.toolkit import (
     _is_page_sequence_type,
     _returns_paginated_response,
 )
-from praga_core.types import Page, TextPage
+from praga_core.types import Page, PageURI, TextPage
 
 
 class DemoToolkit(RetrieverToolkit):
@@ -24,12 +24,18 @@ class DemoToolkit(RetrieverToolkit):
 
 @DemoToolkit.tool(cache=True, ttl=timedelta(minutes=5))
 def get_timestamp() -> List[Page]:
-    return [TextPage(id="ts", content=datetime.now().isoformat())]
+    return [
+        TextPage(
+            uri=PageURI.parse("test/TextPage:ts@1"), content=datetime.now().isoformat()
+        )
+    ]
 
 
 @DemoToolkit.tool(cache=False)
 def get_greeting(name: str) -> List[Page]:
-    doc = TextPage(id="greet", content=f"Hello, {name}!")
+    doc = TextPage(
+        uri=PageURI.parse("test/TextPage:greet@1"), content=f"Hello, {name}!"
+    )
     doc.metadata.name = name  # type: ignore[attr-defined] # Add custom field to metadata
     return [doc]
 
@@ -100,7 +106,10 @@ def test_pagination_with_proper_types() -> None:
         def get_many_docs(self) -> List[Page]:
             docs: List[Page] = []
             for i in range(5):
-                doc = TextPage(id=f"doc_{i}", content=f"Content {i}")
+                doc = TextPage(
+                    uri=PageURI.parse(f"test/TextPage:doc_{i}@1"),
+                    content=f"Content {i}",
+                )
                 doc.metadata.index = i  # type: ignore[attr-defined] # Add custom field
                 docs.append(doc)
             return docs
@@ -109,10 +118,10 @@ def test_pagination_with_proper_types() -> None:
 
     # Test pagination using invoke method
     result = tk.invoke_tool("get_many_docs", {})
-    assert "documents" in result
+    assert "results" in result
     assert "page_number" in result
     assert "has_next_page" in result
-    assert len(result["documents"]) == 2
+    assert len(result["results"]) == 2
     assert result["page_number"] == 0
     assert result["has_next_page"] is True
 
@@ -250,15 +259,15 @@ class TestPaginationPrevention:
 
         def tool_returning_list() -> List[Page]:
             return [
-                TextPage(id="1", content="Content 1"),
-                TextPage(id="2", content="Content 2"),
-                TextPage(id="3", content="Content 3"),
+                TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1"),
+                TextPage(uri=PageURI.parse("test/TextPage:2@1"), content="Content 2"),
+                TextPage(uri=PageURI.parse("test/TextPage:3@1"), content="Content 3"),
             ]
 
         def tool_returning_sequence() -> Sequence[Page]:
             return [
-                TextPage(id="1", content="Content 1"),
-                TextPage(id="2", content="Content 2"),
+                TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1"),
+                TextPage(uri=PageURI.parse("test/TextPage:2@1"), content="Content 2"),
             ]
 
         toolkit = TestToolkit()
@@ -289,16 +298,18 @@ class TestPaginationPrevention:
         invoke_result1 = toolkit.invoke_tool("list_tool", {})
         invoke_result2 = toolkit.invoke_tool("sequence_tool", {})
 
-        assert "documents" in invoke_result1
+        assert "results" in invoke_result1
         assert "page_number" in invoke_result1
-        assert "documents" in invoke_result2
+        assert "results" in invoke_result2
         assert "page_number" in invoke_result2
 
     def test_toolkit_allows_non_paginated_paginated_response(self) -> None:
         """Test that we can register tools that return PaginatedResponse without pagination."""
 
         def tool_returning_paginated_response() -> PaginatedResponse[TextPage]:
-            docs = [TextPage(id="1", content="Content 1")]
+            docs = [
+                TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1")
+            ]
             return PaginatedResponse(
                 results=docs,
                 page_number=0,
@@ -328,7 +339,7 @@ class TestPaginationPrevention:
         result = toolkit.paginated_tool()
         assert isinstance(result, PaginatedResponse)
         assert len(result.results) == 1
-        assert result.results[0].id == "1"
+        assert result.results[0].uri == PageURI.parse("test/TextPage:1@1")
 
 
 class SimpleTestDocumentSubclassTypeChecking:
@@ -338,7 +349,9 @@ class SimpleTestDocumentSubclassTypeChecking:
         """Test that functions returning List[TextDocument] are accepted."""
 
         def tool_with_text_document() -> List[TextPage]:
-            return [TextPage(id="1", content="Test content")]
+            return [
+                TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Text content")
+            ]
 
         assert _is_page_sequence_type(tool_with_text_document) is True
 
@@ -346,7 +359,9 @@ class SimpleTestDocumentSubclassTypeChecking:
         """Test that functions returning Sequence[TextDocument] are accepted."""
 
         def tool_with_text_document_sequence() -> Sequence[TextPage]:
-            return [TextPage(id="1", content="Test content")]
+            return [
+                TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Test content")
+            ]
 
         assert _is_page_sequence_type(tool_with_text_document_sequence) is True
 
@@ -361,7 +376,11 @@ class SimpleTestDocumentSubclassTypeChecking:
                 super().__init__(**data)
 
         def tool_with_custom_document() -> List[CustomDocument]:
-            return [CustomDocument(id="1", custom_field="test")]
+            return [
+                CustomDocument(
+                    uri=PageURI.parse("test/CustomDocument:1@1"), custom_field="test"
+                )
+            ]
 
         assert _is_page_sequence_type(tool_with_custom_document) is True
 
@@ -377,7 +396,11 @@ class SimpleTestDocumentSubclassTypeChecking:
 
         def tool_with_special_document() -> List[SpecialTextDocument]:
             return [
-                SpecialTextDocument(id="1", content="test", special_field="special")
+                SpecialTextDocument(
+                    uri=PageURI.parse("test/SpecialTextDocument:1@1"),
+                    content="test",
+                    special_field="special",
+                )
             ]
 
         assert _is_page_sequence_type(tool_with_special_document) is True
@@ -386,7 +409,7 @@ class SimpleTestDocumentSubclassTypeChecking:
         """Test that classes that don't inherit from Document are rejected."""
 
         class NotADocument:
-            id: str
+            uri: str
 
         def tool_with_non_document() -> List[NotADocument]:
             return [NotADocument()]
@@ -411,7 +434,11 @@ class SimpleTestDocumentSubclassTypeChecking:
                 return "TestToolkit"
 
         def text_document_tool() -> List[TextPage]:
-            return [TextPage(id="test", content="Test content")]
+            return [
+                TextPage(
+                    uri=PageURI.parse("test/TextPage:test@1"), content="Test content"
+                )
+            ]
 
         toolkit = TestToolkit()
 
@@ -442,7 +469,13 @@ class SimpleTestDocumentSubclassTypeChecking:
                 return "TestToolkit"
 
         def many_text_documents() -> List[TextPage]:
-            return [TextPage(id=f"doc_{i}", content=f"Content {i}") for i in range(5)]
+            return [
+                TextPage(
+                    uri=PageURI.parse(f"test/TextPage:doc_{i}@1"),
+                    content=f"Content {i}",
+                )
+                for i in range(5)
+            ]
 
         toolkit = TestToolkit()
 
@@ -465,18 +498,18 @@ class SimpleTestDocumentSubclassTypeChecking:
 
         # Test invoke call applies pagination
         invoke_result = toolkit.invoke_tool("paginated_text_tool", {})
-        assert "documents" in invoke_result
+        assert "results" in invoke_result
         assert "page_number" in invoke_result
-        assert len(invoke_result["documents"]) == 2
+        assert len(invoke_result["results"]) == 2
         assert invoke_result["page_number"] == 0
         assert invoke_result["has_next_page"] is True
 
         # Test we can get the next page via invoke
         invoke_result_page2 = toolkit.invoke_tool("paginated_text_tool", {"page": 1})
-        assert len(invoke_result_page2["documents"]) == 2
+        assert len(invoke_result_page2["results"]) == 2
         assert (
-            invoke_result_page2["documents"][0]["id"]
-            != invoke_result["documents"][0]["id"]
+            invoke_result_page2["results"][0]["uri"]
+            != invoke_result["results"][0]["uri"]
         )
 
 
@@ -486,7 +519,7 @@ class TestTypeEquivalence:
     def test_paginated_response_implements_sequence_protocol(self) -> None:
         """Test that PaginatedResponse is recognized as implementing Sequence[Document]."""
 
-        docs = [TextPage(id="1", content="Content 1")]
+        docs = [TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1")]
         response: PaginatedResponse[TextPage] = PaginatedResponse(
             results=docs,
             page_number=0,
@@ -516,10 +549,12 @@ class TestGenericPaginatedResponseTypeConstraints:
         # At runtime, Python's typing system is more permissive, but we can test the intent
 
         class NotADocument:
-            id: str = "test"
+            uri: str = "test"
 
         # This should work fine with proper Document types
-        valid_docs = [TextPage(id="1", content="Content")]
+        valid_docs = [
+            TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content")
+        ]
         valid_response = PaginatedResponse[TextPage](
             results=valid_docs,
             page_number=0,
@@ -543,7 +578,9 @@ class TestGenericPaginatedResponseTypeConstraints:
         """Test that PaginatedResponse works correctly with various Document subclasses."""
 
         # Test with TextDocument
-        text_docs = [TextPage(id="1", content="Text content")]
+        text_docs = [
+            TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Text content")
+        ]
         text_response: PaginatedResponse[TextPage] = PaginatedResponse(
             results=text_docs,
             page_number=0,
@@ -558,7 +595,11 @@ class TestGenericPaginatedResponseTypeConstraints:
             def __init__(self, **data: Any) -> None:
                 super().__init__(**data)
 
-        custom_docs = [CustomDocument(id="2", custom_field="value")]
+        custom_docs = [
+            CustomDocument(
+                uri=PageURI.parse("test/CustomDocument:2@1"), custom_field="value"
+            )
+        ]
         custom_response: PaginatedResponse[CustomDocument] = PaginatedResponse(
             results=custom_docs,
             page_number=0,

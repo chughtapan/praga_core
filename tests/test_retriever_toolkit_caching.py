@@ -29,7 +29,7 @@ class TestRetrieverToolkitCaching:
             return create_test_pages(1, f"call_{toolkit.call_count}")
 
         # Register with caching enabled
-        toolkit.register_tool(get_docs, "get_docs", cache=True)
+        toolkit.register_tool(get_docs, cache=True)
 
         # First call should execute function
         result1 = toolkit.get_docs()
@@ -53,7 +53,7 @@ class TestRetrieverToolkitCaching:
             return create_test_pages(1, f"call_{toolkit.call_count}")
 
         # Register with caching disabled
-        toolkit.register_tool(get_docs, "get_docs", cache=False)
+        toolkit.register_tool(get_docs, cache=False)
 
         # Each call should execute the function
         result1 = toolkit.get_docs()
@@ -71,7 +71,7 @@ class TestRetrieverToolkitCaching:
             toolkit.increment_call_count()
             return create_test_pages(1, f"{name}_{toolkit.call_count}")
 
-        toolkit.register_tool(get_docs_with_arg, "get_docs_with_arg", cache=True)
+        toolkit.register_tool(get_docs_with_arg, cache=True)
 
         # Different arguments should result in different cache entries
         result1 = toolkit.get_docs_with_arg("arg1")
@@ -93,7 +93,7 @@ class TestRetrieverToolkitCaching:
             toolkit.increment_call_count()
             return create_test_pages(limit, f"{query}_{toolkit.call_count}")
 
-        toolkit.register_tool(complex_tool, "complex_tool", cache=True)
+        toolkit.register_tool(complex_tool, cache=True)
 
         # Same args should hit cache
         result1 = toolkit.complex_tool("test", limit=3, flag=True)
@@ -115,9 +115,7 @@ class TestRetrieverToolkitCaching:
             return create_test_pages(1, f"call_{toolkit.call_count}")
 
         # Register with very short TTL
-        toolkit.register_tool(
-            get_docs, "get_docs", cache=True, ttl=timedelta(milliseconds=100)
-        )
+        toolkit.register_tool(get_docs, cache=True, ttl=timedelta(milliseconds=100))
 
         # First call
         result1 = toolkit.get_docs()
@@ -146,22 +144,18 @@ class TestRetrieverToolkitCaching:
         def get_long_ttl() -> List[SimpleTestPage]:
             return create_timestamped_page("long")
 
-        toolkit.register_tool(
-            get_short_ttl, "short_ttl", cache=True, ttl=timedelta(milliseconds=50)
-        )
-        toolkit.register_tool(
-            get_long_ttl, "long_ttl", cache=True, ttl=timedelta(seconds=10)
-        )
+        toolkit.register_tool(get_short_ttl, cache=True, ttl=timedelta(milliseconds=50))
+        toolkit.register_tool(get_long_ttl, cache=True, ttl=timedelta(seconds=10))
 
         # Get initial results
-        short_result1 = toolkit.short_ttl()
-        long_result1 = toolkit.long_ttl()
+        short_result1 = toolkit.get_short_ttl()
+        long_result1 = toolkit.get_long_ttl()
 
         # Wait for short TTL to expire but not long TTL
         time.sleep(0.08)  # 80ms
 
-        short_result2 = toolkit.short_ttl()  # Should be different (new call)
-        long_result2 = toolkit.long_ttl()  # Should be same (cached)
+        short_result2 = toolkit.get_short_ttl()  # Should be different (new call)
+        long_result2 = toolkit.get_long_ttl()  # Should be same (cached)
 
         assert short_result1 != short_result2  # Different timestamps
         assert long_result1 == long_result2  # Same cached result
@@ -178,9 +172,7 @@ class TestRetrieverToolkitCaching:
         def always_invalidate(cache_key: str, cached_value: Dict[str, Any]) -> bool:
             return False  # Always invalidate
 
-        toolkit.register_tool(
-            get_docs, "get_docs", cache=True, invalidator=always_invalidate
-        )
+        toolkit.register_tool(get_docs, cache=True, invalidator=always_invalidate)
 
         # Each call should execute the function due to invalidation
         result1 = toolkit.get_docs()
@@ -213,7 +205,7 @@ class TestRetrieverToolkitCaching:
             toolkit.increment_call_count()
             return create_test_pages(1, f"{query}_{toolkit.call_count}")
 
-        toolkit.register_tool(cached_tool, "cached_tool", cache=True)
+        toolkit.register_tool(cached_tool, cache=True)
 
         # First invoke should execute function
         result1 = toolkit.invoke_tool("cached_tool", "test")
@@ -236,7 +228,7 @@ class TestCachingEdgeCases:
             toolkit.increment_call_count()
             return []
 
-        toolkit.register_tool(empty_tool, "empty_tool", cache=True)
+        toolkit.register_tool(empty_tool, cache=True)
 
         # Empty results should still be cached
         result1 = toolkit.empty_tool()
@@ -255,7 +247,7 @@ class TestCachingEdgeCases:
                 raise ValueError("Tool failed")
             return create_test_pages(1, f"success_{toolkit.call_count}")
 
-        toolkit.register_tool(failing_tool, "failing_tool", cache=True)
+        toolkit.register_tool(failing_tool, cache=True)
 
         # First call fails - should not be cached
         with pytest.raises(ValueError):
@@ -280,15 +272,15 @@ class TestCachingEdgeCases:
         def get_large_docs(size: int) -> List[SimpleTestPage]:
             return create_test_pages(size, "large")
 
-        toolkit.register_tool(get_large_docs, "large_tool", cache=True)
+        toolkit.register_tool(get_large_docs, cache=True)
 
         # Create and cache a large result
-        large_result = toolkit.large_tool(100)
-        small_result = toolkit.large_tool(2)
+        large_result = toolkit.get_large_docs(100)
+        small_result = toolkit.get_large_docs(2)
 
         # Verify both are cached (different args)
-        large_result2 = toolkit.large_tool(100)
-        small_result2 = toolkit.large_tool(2)
+        large_result2 = toolkit.get_large_docs(100)
+        small_result2 = toolkit.get_large_docs(2)
 
         assert large_result == large_result2
         assert small_result == small_result2

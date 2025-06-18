@@ -10,7 +10,7 @@ import pytest
 
 from praga_core.context import ServerContext
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import Page, PageReference
+from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 
 class DocumentPage(Page):
@@ -52,7 +52,7 @@ class MockRetrieverAgent(RetrieverAgentBase):
 @pytest.fixture
 def context() -> ServerContext:
     """Provide a fresh ServerContext for each test."""
-    return ServerContext()
+    return ServerContext(root="test")
 
 
 @pytest.fixture
@@ -65,17 +65,20 @@ def mock_retriever() -> MockRetrieverAgent:
 def sample_page_references() -> List[PageReference]:
     """Provide sample page references for testing."""
     return [
-        PageReference(id="page1", type="DocumentPage"),
-        PageReference(id="page2", type="DocumentPage"),
-        PageReference(id="page3", type="AlternateTestPage"),
+        PageReference(uri=PageURI(root="test", type="document", id="page1", version=1)),
+        PageReference(uri=PageURI(root="test", type="document", id="page2", version=1)),
+        PageReference(
+            uri=PageURI(root="test", type="alternate", id="page3", version=1)
+        ),
     ]
 
 
 # Handler functions for testing
 def document_page_handler(page_id: str) -> DocumentPage:
     """Test handler for DocumentPage."""
+    uri = PageURI(root="test", type="document", id=page_id, version=1)
     return DocumentPage(
-        id=page_id,
+        uri=uri,
         title=f"Test Page {page_id}",
         content=f"Content for page {page_id}",
     )
@@ -83,62 +86,91 @@ def document_page_handler(page_id: str) -> DocumentPage:
 
 def alternate_page_handler(page_id: str) -> AlternateTestPage:
     """Test handler for AlternateTestPage."""
+    uri = PageURI(root="test", type="alternate", id=page_id, version=1)
     return AlternateTestPage(
-        id=page_id,
+        uri=uri,
         name=f"Alternate Page {page_id}",
         data=f"Data for page {page_id}",
     )
 
 
 class TestPageURI:
-    """Test page URI generation functionality."""
+    """Test PageURI functionality."""
 
-    def test_get_page_uri_with_page_reference(self, context: ServerContext) -> None:
-        """Test URI generation from PageReference."""
-        ref = PageReference(id="test_id", type="DocumentPage")
-        uri = context.get_page_uri(ref)
-        assert uri == "DocumentPage:test_id"
+    def test_page_uri_creation(self) -> None:
+        """Test creating a PageURI."""
+        uri = PageURI(root="test", type="Email", id="123", version=1)
+        assert uri.root == "test"
+        assert uri.type == "Email"
+        assert uri.id == "123"
+        assert uri.version == 1
 
-    def test_get_page_uri_with_id_and_type_class(self, context: ServerContext) -> None:
-        """Test URI generation from page ID and type class."""
-        context.register_handler(document_page_handler, DocumentPage)
-        uri = context.get_page_uri("test_id", DocumentPage)
-        assert uri == "DocumentPage:test_id"
+    def test_page_uri_creation_default_version(self) -> None:
+        """Test creating a PageURI with default version."""
+        uri = PageURI(root="test", type="Email", id="123")
+        assert uri.version == 1
 
-    def test_get_page_uri_with_id_and_type_string(self, context: ServerContext) -> None:
-        """Test URI generation from page ID and type string."""
-        context.register_handler(document_page_handler, DocumentPage)
-        uri = context.get_page_uri("test_id", "DocumentPage")
-        assert uri == "DocumentPage:test_id"
+    def test_page_uri_string_representation(self) -> None:
+        """Test PageURI string representation."""
+        uri = PageURI(root="myserver", type="Document", id="abc", version=2)
+        assert str(uri) == "myserver/Document:abc@2"
 
-    def test_get_page_uri_special_characters(self, context: ServerContext) -> None:
-        """Test URI generation with special characters."""
-        ref = PageReference(id="test:id", type="Test:Page")
-        uri = context.get_page_uri(ref)
-        assert uri == "Test:Page:test:id"
+    def test_page_uri_parsing(self) -> None:
+        """Test parsing URI from string."""
+        uri_str = "server/Email:msg123@5"
+        uri = PageURI.parse(uri_str)
+        assert uri.root == "server"
+        assert uri.type == "Email"
+        assert uri.id == "msg123"
+        assert uri.version == 5
 
+    def test_page_uri_parsing_with_empty_root(self) -> None:
+        """Test parsing URI with empty root."""
+        uri_str = "/Email:msg123@1"
+        uri = PageURI.parse(uri_str)
+        assert uri.root == ""
+        assert uri.type == "Email"
+        assert uri.id == "msg123"
+        assert uri.version == 1
 
-class TestTypeResolution:
-    """Test type resolution helper methods."""
+    def test_page_uri_validation_invalid_type(self) -> None:
+        """Test validation of type field."""
+        with pytest.raises(ValueError, match="Type cannot contain"):
+            PageURI(root="test", type="Email:Bad", id="123", version=1)
 
-    def test_resolve_page_type_from_string(self, context: ServerContext) -> None:
-        """Test resolving page type from string."""
-        context.register_handler(document_page_handler, DocumentPage)
+    def test_page_uri_validation_invalid_id(self) -> None:
+        """Test validation of id field."""
+        with pytest.raises(ValueError, match="ID cannot contain"):
+            PageURI(root="test", type="Email", id="123@bad", version=1)
 
-        resolved_type = context._resolve_page_type("DocumentPage")
-        assert resolved_type == DocumentPage
+    def test_page_uri_validation_invalid_version(self) -> None:
+        """Test validation of version field."""
+        with pytest.raises(ValueError, match="Version must be non-negative"):
+            PageURI(root="test", type="Email", id="123", version=-1)
 
-    def test_resolve_page_type_from_class(self, context: ServerContext) -> None:
-        """Test resolving page type from class."""
-        resolved_type = context._resolve_page_type(DocumentPage)
-        assert resolved_type == DocumentPage
+    def test_page_uri_parsing_invalid_format(self) -> None:
+        """Test parsing invalid URI format."""
+        with pytest.raises(ValueError, match="Invalid URI format"):
+            PageURI.parse("invalid-format")
 
-    def test_resolve_page_type_unregistered_error(self, context: ServerContext) -> None:
-        """Test error when resolving unregistered page type."""
-        with pytest.raises(
-            RuntimeError, match="No page handler registered for type: UnknownPage"
-        ):
-            context._resolve_page_type("UnknownPage")
+    def test_page_uri_hashable(self) -> None:
+        """Test that PageURI is hashable."""
+        uri1 = PageURI(root="test", type="Email", id="123", version=1)
+        uri2 = PageURI(root="test", type="Email", id="123", version=1)
+        uri3 = PageURI(root="test", type="Email", id="124", version=1)
+
+        uri_set = {uri1, uri2, uri3}
+        assert len(uri_set) == 2  # uri1 and uri2 should be the same
+
+    def test_page_uri_equality(self) -> None:
+        """Test PageURI equality comparison."""
+        uri1 = PageURI(root="test", type="Email", id="123", version=1)
+        uri2 = PageURI(root="test", type="Email", id="123", version=1)
+        uri3 = PageURI(root="test", type="Email", id="124", version=1)
+
+        assert uri1 == uri2
+        assert uri1 != uri3
+        assert uri1 != "not_a_uri"
 
 
 class TestServerContextInitialization:
@@ -156,49 +188,26 @@ class TestPageHandlerRegistration:
 
     def test_register_handler_programmatically(self, context: ServerContext) -> None:
         """Test programmatic handler registration."""
-        context.register_handler(document_page_handler, DocumentPage)
+        context.register_handler("document", document_page_handler)
 
-        assert DocumentPage in context._page_handlers
-        assert context._page_handlers[DocumentPage] == document_page_handler
-
-    def test_register_handler_with_decorator(self, context: ServerContext) -> None:
-        """Test handler registration using decorator."""
-
-        @context.handler(DocumentPage)
-        def handler(page_id: str) -> DocumentPage:
-            return DocumentPage(
-                id=page_id,
-                title="Decorated Handler",
-                content="Created by decorator",
-            )
-
-        assert DocumentPage in context._page_handlers
-        assert context._page_handlers[DocumentPage] == handler
+        assert "document" in context._page_handlers
+        assert context._page_handlers["document"] == document_page_handler
 
     def test_register_multiple_handlers(self, context: ServerContext) -> None:
         """Test registering handlers for multiple page types."""
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
 
         assert len(context._page_handlers) == 2
-        assert DocumentPage in context._page_handlers
-        assert AlternateTestPage in context._page_handlers
+        assert "document" in context._page_handlers
+        assert "alternate" in context._page_handlers
 
     def test_register_handler_duplicate_error(self, context: ServerContext) -> None:
         """Test error when registering duplicate handler."""
-        context.register_handler(document_page_handler, DocumentPage)
+        context.register_handler("document", document_page_handler)
 
         with pytest.raises(RuntimeError, match="already registered"):
-            context.register_handler(document_page_handler, DocumentPage)
-
-    def test_register_handler_invalid_type_error(self, context: ServerContext) -> None:
-        """Test error when registering handler for non-Page type."""
-
-        def invalid_handler(page_id: str) -> str:
-            return "not a page"
-
-        with pytest.raises(RuntimeError, match="not a subclass of Page"):
-            context.register_handler(invalid_handler, str)  # type: ignore
+            context.register_handler("document", document_page_handler)
 
 
 class TestPageCreation:
@@ -206,137 +215,140 @@ class TestPageCreation:
 
     def test_create_page_success(self, context: ServerContext) -> None:
         """Test successful page creation."""
-        context.register_handler(document_page_handler, DocumentPage)
+        context.register_handler("document", document_page_handler)
 
-        page = context._create_page("test123", DocumentPage)
+        uri = PageURI(root="test", type="document", id="123", version=1)
+        page = context._create_page(uri)
 
         assert isinstance(page, DocumentPage)
-        assert page.id == "test123"
-        assert page.title == "Test Page test123"
-        assert page.content == "Content for page test123"
+        assert page.title == "Test Page 123"
+        assert page.content == "Content for page 123"
 
     def test_create_page_no_handler_error(self, context: ServerContext) -> None:
-        """Test error when no handler is registered."""
+        """Test error when creating page with no registered handler."""
+        uri = PageURI(root="test", type="nonexistent", id="123", version=1)
 
         with pytest.raises(RuntimeError, match="No page handler registered"):
-            context._create_page("test123", DocumentPage)
+            context._create_page(uri)
 
 
 class TestPageCaching:
     """Test page caching functionality."""
 
     def test_cache_set_and_get_page(self, context: ServerContext) -> None:
-        """Test setting and getting pages from cache using URIs."""
-        context.register_handler(document_page_handler, DocumentPage)
+        """Test setting and getting pages from cache."""
+        context.register_handler("document", document_page_handler)
+
+        uri = PageURI(root="test", type="document", id="cached_page", version=1)
         page = DocumentPage(
-            id="cache_test", title="Cached Page", content="Cached content"
+            uri=uri,
+            title="Cached Page",
+            content="This page was cached",
         )
 
-        # Cache the page
         context._cache_set_page(page)
-
-        # Retrieve from cache using URI
-        uri = context.get_page_uri("cache_test", "DocumentPage")
         cached_page = context._cache_get_page(uri)
 
-        assert cached_page is page
-        assert cached_page.id == "cache_test"
+        assert cached_page is not None
+        assert cached_page.title == "Cached Page"
+        assert cached_page.content == "This page was cached"
 
     def test_cache_get_page_not_found(self, context: ServerContext) -> None:
-        """Test getting non-existent page from cache."""
-        context.register_handler(document_page_handler, DocumentPage)
-        uri = context.get_page_uri("nonexistent", "DocumentPage")
-        result = context._cache_get_page(uri)
-        assert result is None
-
-    def test_cache_different_page_types(self, context: ServerContext) -> None:
-        """Test caching pages of different types using URIs."""
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
-
-        test_page = DocumentPage(id="same_id", title="Test", content="Test content")
-        alt_page = AlternateTestPage(id="same_id", name="Alt", data="Alt data")
-
-        context._cache_set_page(test_page)
-        context._cache_set_page(alt_page)
-
-        # Should be able to retrieve both using same ID but different types
-        test_uri = context.get_page_uri("same_id", "DocumentPage")
-        alt_uri = context.get_page_uri("same_id", "AlternateTestPage")
-
-        cached_test = context._cache_get_page(test_uri)
-        cached_alt = context._cache_get_page(alt_uri)
-
-        assert cached_test is test_page
-        assert cached_alt is alt_page
-
-    def test_cache_uri_consistency(self, context: ServerContext) -> None:
-        """Test that caching and retrieval use consistent URIs."""
-        context.register_handler(document_page_handler, DocumentPage)
-        page = DocumentPage(id="test_id", title="Test", content="Test content")
-
-        # Cache the page (should use URI internally)
-        context._cache_set_page(page)
-
-        # Generate URI manually and retrieve
-        uri = context.get_page_uri("test_id", DocumentPage)
+        """Test getting page from cache when not found."""
+        uri = PageURI(root="test", type="document", id="not_found", version=1)
         cached_page = context._cache_get_page(uri)
 
-        assert cached_page is page
+        assert cached_page is None
+
+    def test_cache_different_page_types(self, context: ServerContext) -> None:
+        """Test caching different page types."""
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
+
+        doc_uri = PageURI(root="test", type="document", id="doc1", version=1)
+        alt_uri = PageURI(root="test", type="alternate", id="alt1", version=1)
+
+        doc_page = DocumentPage(uri=doc_uri, title="Doc", content="Content")
+        alt_page = AlternateTestPage(uri=alt_uri, name="Alt", data="Data")
+
+        context._cache_set_page(doc_page)
+        context._cache_set_page(alt_page)
+
+        cached_doc = context._cache_get_page(doc_uri)
+        cached_alt = context._cache_get_page(alt_uri)
+
+        assert isinstance(cached_doc, DocumentPage)
+        assert isinstance(cached_alt, AlternateTestPage)
+        assert cached_doc.title == "Doc"
+        assert cached_alt.name == "Alt"
+
+    def test_cache_uri_consistency(self, context: ServerContext) -> None:
+        """Test cache consistency with string and PageURI access."""
+        uri = PageURI(root="test", type="document", id="consistent", version=1)
+        uri_str = str(uri)
+        page = DocumentPage(uri=uri, title="Consistent", content="Content")
+
+        context._cache_set_page(page)
+
+        cached_by_uri = context._cache_get_page(uri)
+        cached_by_str = context._cache_get_page(uri_str)
+
+        assert cached_by_uri is cached_by_str
+        assert cached_by_uri.title == "Consistent"
 
 
 class TestGetPage:
-    """Test the get_page functionality with URIs."""
+    """Test get_page functionality."""
 
     def test_get_page_from_cache(self, context: ServerContext) -> None:
         """Test getting page from cache when available."""
-        context.register_handler(document_page_handler, DocumentPage)
+        context.register_handler("document", document_page_handler)
 
-        # Pre-populate cache
-        page = DocumentPage(id="cached", title="Cached", content="From cache")
-        context._cache_set_page(page)
+        uri = PageURI(root="test", type="document", id="cached", version=1)
+        original_page = DocumentPage(uri=uri, title="Original", content="Content")
+        context._cache_set_page(original_page)
 
-        # Get page using URI - should come from cache
-        uri = context.get_page_uri("cached", DocumentPage)
-        result = context.get_page(uri)
+        retrieved_page = context.get_page(uri)
 
-        assert result is page
+        assert retrieved_page is original_page
+        assert retrieved_page.title == "Original"
 
     def test_get_page_create_and_cache(self, context: ServerContext) -> None:
-        """Test getting page creates new one and caches it."""
-        context.register_handler(document_page_handler, DocumentPage)
+        """Test creating and caching page when not in cache."""
+        context.register_handler("document", document_page_handler)
 
-        # Get page using URI - should create new one
-        uri = context.get_page_uri("new_page", DocumentPage)
-        result = context.get_page(uri)
+        uri = PageURI(root="test", type="document", id="new_page", version=1)
+        page = context.get_page(uri)
 
-        assert isinstance(result, DocumentPage)
-        assert result.id == "new_page"
+        assert isinstance(page, DocumentPage)
+        assert page.title == "Test Page new_page"
 
-        # Should now be in cache
-        cached = context._cache_get_page(uri)
-        assert cached is result
+        # Verify it was cached
+        cached_page = context._cache_get_page(uri)
+        assert cached_page is page
 
     def test_get_page_with_uri_from_reference(self, context: ServerContext) -> None:
-        """Test getting page with URI generated from PageReference."""
-        context.register_handler(document_page_handler, DocumentPage)
+        """Test getting page using URI from PageReference."""
+        context.register_handler("document", document_page_handler)
 
-        ref = PageReference(id="ref_test", type="DocumentPage")
-        uri = context.get_page_uri(ref)
-        result = context.get_page(uri)
+        reference = PageReference(
+            uri=PageURI(root="test", type="document", id="ref_page", version=1)
+        )
+        page = context.get_page(reference.uri)
 
-        assert isinstance(result, DocumentPage)
-        assert result.id == "ref_test"
+        assert isinstance(page, DocumentPage)
+        assert page.title == "Test Page ref_page"
 
     def test_get_page_invalid_uri_error(self, context: ServerContext) -> None:
-        """Test error with invalid URI format."""
+        """Test error when getting page with invalid URI string."""
         with pytest.raises(ValueError):
-            context.get_page("invalid_uri_without_colon")
+            context.get_page("invalid-uri-format")
 
     def test_get_page_unregistered_type_error(self, context: ServerContext) -> None:
-        """Test error when page type is not registered."""
+        """Test error when getting page for unregistered type."""
+        uri = PageURI(root="test", type="unregistered", id="123", version=1)
         with pytest.raises(RuntimeError, match="No page handler registered"):
-            context.get_page("UnknownType:test_id")
+            context.get_page(uri)
 
 
 class TestRetrieverProperty:
@@ -351,10 +363,12 @@ class TestRetrieverProperty:
 
     def test_retriever_set_twice_error(self, context: ServerContext) -> None:
         """Test error when setting retriever twice."""
-        context.retriever = MockRetrieverAgent()
+        mock1 = MockRetrieverAgent()
+        mock2 = MockRetrieverAgent()
 
+        context.retriever = mock1
         with pytest.raises(RuntimeError, match="already set"):
-            context.retriever = MockRetrieverAgent()
+            context.retriever = mock2
 
 
 class TestSearch:
@@ -364,36 +378,38 @@ class TestSearch:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using context's retriever."""
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
+
         mock_retriever = MockRetrieverAgent(sample_page_references)
         context.retriever = mock_retriever
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
 
-        results = context.search("test query")
+        result = context.search("test query")
 
-        assert len(results) == 3
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 3
         assert mock_retriever.search_calls == ["test query"]
 
-        # Check that references were resolved
-        for ref in results:
-            assert ref.page is not None
+        # Verify pages were resolved
+        for ref in result.results:
+            assert ref._page is not None
 
     def test_search_with_parameter_retriever(
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using retriever parameter."""
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
+
         mock_retriever = MockRetrieverAgent(sample_page_references)
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
+        result = context.search("test query", retriever=mock_retriever)
 
-        results = context.search("test query", retriever=mock_retriever)
-
-        assert len(results) == 3
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 3
         assert mock_retriever.search_calls == ["test query"]
 
     def test_search_no_retriever_error(self, context: ServerContext) -> None:
         """Test error when no retriever is available."""
-
         with pytest.raises(RuntimeError, match="No RetrieverAgent available"):
             context.search("test query")
 
@@ -404,30 +420,32 @@ class TestSearch:
         mock_retriever = MockRetrieverAgent(sample_page_references)
         context.retriever = mock_retriever
 
-        results = context.search("test query", resolve_references=False)
+        result = context.search("test query", resolve_references=False)
 
-        assert len(results) == 3
-        # References should not be resolved
-        for ref in results:
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 3
+        # Verify pages were NOT resolved
+        for ref in result.results:
             assert ref._page is None
 
     def test_search_parameter_retriever_overrides_context(
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test that parameter retriever overrides context retriever."""
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
+
         context_retriever = MockRetrieverAgent([])
         param_retriever = MockRetrieverAgent(sample_page_references)
 
         context.retriever = context_retriever
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
 
-        results = context.search("test query", retriever=param_retriever)
+        result = context.search("test query", retriever=param_retriever)
 
-        # Should use parameter retriever, not context retriever
-        assert len(results) == 3
-        assert param_retriever.search_calls == ["test query"]
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 3
         assert context_retriever.search_calls == []
+        assert param_retriever.search_calls == ["test query"]
 
 
 class TestReferenceResolution:
@@ -437,161 +455,92 @@ class TestReferenceResolution:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test resolving page references."""
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
 
-        resolved = context._resolve_references(sample_page_references)
+        resolved_refs = context._resolve_references(sample_page_references)
 
-        assert len(resolved) == 3
-        for ref in resolved:
-            assert ref.page is not None
-            assert ref.page.id == ref.id
+        assert len(resolved_refs) == 3
+        for ref in resolved_refs:
+            assert ref._page is not None
 
     def test_resolve_references_caches_pages(
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
-        """Test that resolving references caches the created pages."""
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
+        """Test that resolving references caches the pages."""
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
 
         context._resolve_references(sample_page_references)
 
-        # Pages should now be cached
+        # Verify pages were cached
         for ref in sample_page_references:
-            uri = context.get_page_uri(ref)
-            cached_page = context._cache_get_page(uri)
+            cached_page = context._cache_get_page(ref.uri)
             assert cached_page is not None
-            assert cached_page.id == ref.id
 
 
 class TestIntegration:
-    """Integration tests for ServerContext."""
+    """Test integration scenarios."""
 
     def test_full_workflow_with_decorator(self, context: ServerContext) -> None:
-        """Test complete workflow using decorator pattern."""
+        """Test full workflow using decorator registration."""
 
-        @context.handler(DocumentPage)
         def handle_test_page(page_id: str) -> DocumentPage:
+            uri = PageURI(root="test", type="testdoc", id=page_id, version=1)
             return DocumentPage(
-                id=page_id,
-                title=f"Integration Test {page_id}",
-                content=f"Full workflow content for {page_id}",
+                uri=uri,
+                title=f"Decorated Page {page_id}",
+                content=f"Content for {page_id}",
             )
 
-        # Create references
-        references = [
-            PageReference(id="int1", type="DocumentPage"),
-            PageReference(id="int2", type="DocumentPage"),
+        # Register handler
+        context.register_handler("testdoc", handle_test_page)
+
+        # Create test data
+        test_refs = [
+            PageReference(
+                uri=PageURI(root="test", type="testdoc", id="test1", version=1)
+            ),
+            PageReference(
+                uri=PageURI(root="test", type="testdoc", id="test2", version=1)
+            ),
         ]
 
-        # Set up retriever
-        mock_retriever = MockRetrieverAgent(references)
+        # Set up retriever and search
+        mock_retriever = MockRetrieverAgent(test_refs)
         context.retriever = mock_retriever
 
-        # Perform search
-        results = context.search("integration test")
+        result = context.search("find test pages")
 
         # Verify results
-        assert len(results) == 2
-        assert all(ref.page is not None for ref in results)
-        assert results[0].page.title == "Integration Test int1"
-        assert results[1].page.title == "Integration Test int2"
-
-        # Verify caching worked - second call should use cache
-        results2 = context.search("integration test")
-        assert results2[0].page is results[0].page  # Same object from cache
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 2
+        assert all(isinstance(ref.page, DocumentPage) for ref in result.results)
+        assert result.results[0].page.title == "Decorated Page test1"
+        assert result.results[1].page.title == "Decorated Page test2"
 
     def test_mixed_page_types_workflow(self, context: ServerContext) -> None:
         """Test workflow with mixed page types."""
-        context.register_handler(document_page_handler, DocumentPage)
-        context.register_handler(alternate_page_handler, AlternateTestPage)
+        context.register_handler("document", document_page_handler)
+        context.register_handler("alternate", alternate_page_handler)
 
-        references = [
-            PageReference(id="mixed1", type="DocumentPage"),
-            PageReference(id="mixed2", type="AlternateTestPage"),
-            PageReference(id="mixed3", type="DocumentPage"),
+        mixed_refs = [
+            PageReference(
+                uri=PageURI(root="test", type="document", id="doc1", version=1)
+            ),
+            PageReference(
+                uri=PageURI(root="test", type="alternate", id="alt1", version=1)
+            ),
+            PageReference(
+                uri=PageURI(root="test", type="document", id="doc2", version=1)
+            ),
         ]
 
-        mock_retriever = MockRetrieverAgent(references)
-        results = context.search("mixed types", retriever=mock_retriever)
+        mock_retriever = MockRetrieverAgent(mixed_refs)
+        result = context.search("mixed search", retriever=mock_retriever)
 
-        assert len(results) == 3
-        assert isinstance(results[0].page, DocumentPage)
-        assert isinstance(results[1].page, AlternateTestPage)
-        assert isinstance(results[2].page, DocumentPage)
-
-
-class TestTypeAliases:
-    """Test type aliases functionality."""
-
-    def test_register_handler_with_aliases(self, context: ServerContext) -> None:
-        """Test registering a handler with type aliases."""
-
-        def create_document_page(page_id: str) -> DocumentPage:
-            return DocumentPage(id=page_id, title="Test Doc", content="test content")
-
-        # Register with aliases
-        context.register_handler(
-            create_document_page, DocumentPage, aliases=["Document", "Doc"]
-        )
-
-        # Should be able to resolve using the class name
-        resolved_type = context._resolve_page_type("DocumentPage")
-        assert resolved_type == DocumentPage
-
-        # Should be able to resolve using aliases
-        resolved_type = context._resolve_page_type("Document")
-        assert resolved_type == DocumentPage
-
-        resolved_type = context._resolve_page_type("Doc")
-        assert resolved_type == DocumentPage
-
-    def test_register_handler_with_aliases_decorator(
-        self, context: ServerContext
-    ) -> None:
-        """Test registering a handler with aliases using decorator."""
-
-        @context.handler(DocumentPage, aliases=["Document", "Doc"])
-        def create_document_page(page_id: str) -> DocumentPage:
-            return DocumentPage(id=page_id, title="Test Doc", content="test content")
-
-        # Should resolve all aliases
-        assert context._resolve_page_type("DocumentPage") == DocumentPage
-        assert context._resolve_page_type("Document") == DocumentPage
-        assert context._resolve_page_type("Doc") == DocumentPage
-
-    def test_duplicate_alias_error(self, context: ServerContext) -> None:
-        """Test that duplicate aliases raise an error."""
-
-        def create_document_page(page_id: str) -> DocumentPage:
-            return DocumentPage(id=page_id, title="Test Doc", content="test content")
-
-        def create_alt_page(page_id: str) -> AlternateTestPage:
-            return AlternateTestPage(id=page_id, name="test", data="test content")
-
-        # Register first handler with alias
-        context.register_handler(
-            create_document_page, DocumentPage, aliases=["Document"]
-        )
-
-        # Try to register another handler with the same alias - should fail
-        with pytest.raises(
-            RuntimeError, match="Type alias 'Document' already registered"
-        ):
-            context.register_handler(
-                create_alt_page, AlternateTestPage, aliases=["Document"]
-            )
-
-    def test_get_page_with_alias_type(self, context: ServerContext) -> None:
-        """Test getting a page using an alias type name in URI."""
-
-        @context.handler(DocumentPage, aliases=["Document"])
-        def create_document_page(page_id: str) -> DocumentPage:
-            return DocumentPage(id=page_id, title="Test Doc", content="test content")
-
-        # Create a page using the alias in the URI
-        page = context.get_page("Document:test123")
-
-        assert isinstance(page, DocumentPage)
-        assert page.id == "test123"
-        assert page.title == "Test Doc"
+        assert isinstance(result, SearchResponse)
+        assert len(result.results) == 3
+        assert isinstance(result.results[0].page, DocumentPage)
+        assert isinstance(result.results[1].page, AlternateTestPage)
+        assert isinstance(result.results[2].page, DocumentPage)

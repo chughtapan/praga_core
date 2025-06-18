@@ -7,7 +7,7 @@ import pytest
 
 from praga_core.agents import RetrieverToolkit
 from praga_core.agents.tool import Tool
-from praga_core.types import Page
+from praga_core.types import Page, PageURI
 
 
 class SimpleDocument(Page):
@@ -30,7 +30,6 @@ class IntegrationTestToolkit(RetrieverToolkit):
         # Register tool with pagination
         self.register_tool(
             self.search_documents,
-            "search_documents",
             cache=True,
             ttl=timedelta(minutes=5),
             paginate=True,
@@ -39,12 +38,10 @@ class IntegrationTestToolkit(RetrieverToolkit):
         )
 
         # Register tool without pagination
-        self.register_tool(
-            self.count_documents, "count_documents", cache=False, paginate=False
-        )
+        self.register_tool(self.count_documents, cache=False, paginate=False)
 
         # Register stateless tool
-        self.register_tool(get_test_docs, "get_test_docs", cache=True, paginate=False)
+        self.register_tool(get_test_docs, cache=True, paginate=False)
 
     @property
     def name(self) -> str:
@@ -54,7 +51,7 @@ class IntegrationTestToolkit(RetrieverToolkit):
         """Search for documents matching the query."""
         return [
             SimpleDocument(
-                id=f"doc_{i}",
+                uri=PageURI.parse(f"test/SimpleDocument:doc_{i}@1"),
                 title=f"Document {i} - {query}",
                 content=f"This is content about {query} in document {i}. " * 3,
             )
@@ -65,7 +62,7 @@ class IntegrationTestToolkit(RetrieverToolkit):
         """Get a count document."""
         return [
             SimpleDocument(
-                id="count_doc",
+                uri=PageURI.parse("test/SimpleDocument:count_doc@1"),
                 title="Document Count",
                 content=f"Found documents for query: {query}",
             )
@@ -76,7 +73,7 @@ def get_test_docs(category: str = "general") -> List[SimpleDocument]:
     """Stateless function for testing decorator."""
     return [
         SimpleDocument(
-            id=f"test_{i}",
+            uri=PageURI.parse(f"test/SimpleDocument:test_{i}@1"),
             title=f"Test Document {i}",
             content=f"Test content for {category} category",
         )
@@ -92,7 +89,7 @@ def get_cached_docs(topic: str) -> List[SimpleDocument]:
     """Get cached documents."""
     return [
         SimpleDocument(
-            id=f"cached_{i}",
+            uri=PageURI.parse(f"test/SimpleDocument:cached_{i}@1"),
             title=f"Cached Doc {i}",
             content=f"Cached content about {topic}",
         )
@@ -135,16 +132,16 @@ class TestRetrieverToolkitIntegration:
             "search_documents", {"query": "python", "limit": 8}
         )
 
-        assert "documents" in result
+        assert "results" in result
         assert "page_number" in result
         assert "has_next_page" in result
-        assert "total_documents" in result
+        assert "total_results" in result
 
         # Should be paginated to max_docs=3
-        assert len(result["documents"]) <= 3
+        assert len(result["results"]) <= 3
         assert result["page_number"] == 0
         assert result["has_next_page"] is True
-        assert result["total_documents"] == 8
+        assert result["total_results"] == 8
 
     def test_invoke_method_pagination_second_page(self) -> None:
         """Test invoke method can get second page."""
@@ -155,7 +152,7 @@ class TestRetrieverToolkitIntegration:
         )
 
         assert result["page_number"] == 1
-        assert len(result["documents"]) <= 3
+        assert len(result["results"]) <= 3
         assert result["has_next_page"] is True
 
     def test_invoke_method_without_pagination(self) -> None:
@@ -169,8 +166,8 @@ class TestRetrieverToolkitIntegration:
         # Invoke call should behave the same for non-paginated tools
         result_invoke = toolkit.invoke_tool("count_documents", "test")
 
-        assert "documents" in result_invoke
-        assert len(result_invoke["documents"]) == 1
+        assert "results" in result_invoke
+        assert len(result_invoke["results"]) == 1
         assert "page_number" not in result_invoke  # No pagination metadata
 
     def test_string_input_for_invoke(self) -> None:
@@ -179,9 +176,9 @@ class TestRetrieverToolkitIntegration:
 
         result = toolkit.invoke_tool("search_documents", "javascript")
 
-        assert "documents" in result
-        assert len(result["documents"]) <= 3  # Paginated
-        doc_content = result["documents"][0]["content"]
+        assert "results" in result
+        assert len(result["results"]) <= 3  # Paginated
+        doc_content = result["results"][0]["content"]
         assert "javascript" in doc_content
 
     def test_tool_inspection(self) -> None:
@@ -214,9 +211,9 @@ class TestRetrieverToolkitIntegration:
         # Invoke call (should be paginated with max_docs=2)
         result_invoke = toolkit.invoke_tool("get_cached_docs", "AI")
 
-        assert len(result_invoke["documents"]) <= 2
+        assert len(result_invoke["results"]) <= 2
         assert result_invoke["has_next_page"] is True
-        assert result_invoke["total_documents"] == 5
+        assert result_invoke["total_results"] == 5
 
     def test_caching_behavior(self) -> None:
         """Test that caching still works with the new Tool integration."""
@@ -234,7 +231,7 @@ class TestRetrieverToolkitIntegration:
 
         # Results should be identical (cached)
         assert result1 == result2
-        assert result1["total_documents"] == 5
+        assert result1["total_results"] == 5
 
     def test_different_pages_same_cache(self) -> None:
         """Test that different pages use the same cached underlying data."""
@@ -251,13 +248,13 @@ class TestRetrieverToolkitIntegration:
         )
 
         # Both should have same total_documents (cached underlying data)
-        assert page0["total_documents"] == page1["total_documents"] == 8
+        assert page0["total_results"] == page1["total_results"] == 8
         assert page0["page_number"] == 0
         assert page1["page_number"] == 1
 
         # Documents should be different (different pages)
-        page0_ids = [doc["id"] for doc in page0["documents"]]
-        page1_ids = [doc["id"] for doc in page1["documents"]]
+        page0_ids = [doc["uri"] for doc in page0["results"]]
+        page1_ids = [doc["uri"] for doc in page1["results"]]
         assert page0_ids != page1_ids
 
     def test_error_handling_no_documents(self) -> None:
@@ -298,9 +295,9 @@ class TestRetrieverToolkitIntegration:
         assert len(docs_direct) == 6
 
         # Invoke call returns paginated result
-        assert len(result_invoke["documents"]) <= 3
-        assert result_invoke["total_documents"] == 6
+        assert len(result_invoke["results"]) <= 3
+        assert result_invoke["total_results"] == 6
 
         # Both should have documents about the same query
         assert "mixed_test" in docs_direct[0].title
-        assert "mixed_test" in result_invoke["documents"][0]["title"]
+        assert "mixed_test" in result_invoke["results"][0]["title"]

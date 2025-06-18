@@ -9,7 +9,7 @@ from typing import Any, List
 import pytest
 
 from praga_core.agents import PaginatedResponse, Tool
-from praga_core.types import Page
+from praga_core.types import Page, PageURI
 
 
 class SimpleDocument(Page):
@@ -28,17 +28,12 @@ def create_simple_documents(query: str, limit: int = 5) -> List[SimpleDocument]:
     """Create a list of simple documents for testing."""
     return [
         SimpleDocument(
-            id=f"doc_{i}",
+            uri=PageURI.parse(f"test/SimpleDocument:doc_{i}@1"),
             title=f"Document {i}",
             content=f"Content about {query} - document {i}",
         )
         for i in range(limit)
     ]
-
-
-def simple_function(query: str, limit: int = 5) -> List[SimpleDocument]:
-    """Simple function that returns a list of documents."""
-    return create_simple_documents(query, limit)
 
 
 def paginated_function(query: str, page: int = 0) -> PaginatedResponse[SimpleDocument]:
@@ -71,22 +66,24 @@ class TestToolInitialization:
 
     def test_initialization_with_explicit_description(self) -> None:
         """Test Tool initialization with explicit description."""
-        tool = Tool(simple_function, "test_tool", "A test tool")
+        tool = Tool(create_simple_documents, "test_tool", "A test tool")
 
         assert tool.name == "test_tool"
         assert tool.description == "A test tool"
-        assert tool.func == simple_function
+        assert tool.func == create_simple_documents
 
     def test_initialization_with_docstring_description(self) -> None:
         """Test Tool initialization using function docstring as description."""
-        tool = Tool(simple_function, "test_tool")
+        tool = Tool(create_simple_documents, "test_tool")
 
         assert tool.name == "test_tool"
-        assert tool.description == "Simple function that returns a list of documents."
+        assert tool.description == "Create a list of simple documents for testing."
 
     def test_initialization_with_pagination_settings(self) -> None:
         """Test Tool initialization with pagination parameters."""
-        tool = Tool(simple_function, "paginated_tool", page_size=3, max_tokens=100)
+        tool = Tool(
+            create_simple_documents, "paginated_tool", page_size=3, max_tokens=100
+        )
 
         assert tool.name == "paginated_tool"
         assert tool.page_size == 3
@@ -98,24 +95,24 @@ class TestToolInvocation:
 
     def test_invoke_with_dictionary_input(self) -> None:
         """Test invoking tool with dictionary input."""
-        tool = Tool(simple_function, "test_tool")
+        tool = Tool(create_simple_documents, "test_tool")
 
         result = tool.invoke({"query": "python", "limit": 3})
 
-        assert "documents" in result
-        assert len(result["documents"]) == 3
-        assert result["documents"][0]["title"] == "Document 0"
-        assert result["documents"][0]["content"] == "Content about python - document 0"
+        assert "results" in result
+        assert len(result["results"]) == 3
+        assert result["results"][0]["title"] == "Document 0"
+        assert result["results"][0]["content"] == "Content about python - document 0"
 
     def test_invoke_with_string_input(self) -> None:
         """Test invoking tool with string input (maps to first parameter)."""
-        tool = Tool(simple_function, "test_tool")
+        tool = Tool(create_simple_documents, "test_tool")
 
         result = tool.invoke("javascript")
 
-        assert "documents" in result
-        assert len(result["documents"]) == 5  # default limit
-        assert "javascript" in result["documents"][0]["content"]
+        assert "results" in result
+        assert len(result["results"]) == 5  # default limit
+        assert "javascript" in result["results"][0]["content"]
 
     def test_invoke_with_paginated_response_function(self) -> None:
         """Test invoking tool that returns PaginatedResponse."""
@@ -125,10 +122,10 @@ class TestToolInvocation:
 
         # Verify all expected pagination fields are present
         expected_fields = {
-            "documents",
+            "results",
             "page_number",
             "has_next_page",
-            "total_documents",
+            "total_results",
             "token_count",
         }
         assert set(result.keys()) == expected_fields
@@ -136,8 +133,8 @@ class TestToolInvocation:
         # Verify pagination values
         assert result["page_number"] == 0
         assert result["has_next_page"] is True
-        assert result["total_documents"] == 10
-        assert len(result["documents"]) == 3
+        assert result["total_results"] == 10
+        assert len(result["results"]) == 3
 
     def test_invoke_paginated_response_last_page(self) -> None:
         """Test invoking paginated tool on the last page."""
@@ -148,22 +145,22 @@ class TestToolInvocation:
         assert result["page_number"] == 3
         assert result["has_next_page"] is False
         assert (
-            len(result["documents"]) == 1
+            len(result["results"]) == 1
         )  # 10 total docs, page size 3, last page has 1
 
     def test_end_to_end_workflow(self) -> None:
         """Test complete workflow from tool creation to result."""
-        tool = Tool(simple_function, "search_tool", "Search for documents")
+        tool = Tool(create_simple_documents, "search_tool", "Search for documents")
 
         # Test with string input
         result1 = tool.invoke("machine learning")
-        assert len(result1["documents"]) == 5
-        assert "machine learning" in result1["documents"][0]["content"]
+        assert len(result1["results"]) == 5
+        assert "machine learning" in result1["results"][0]["content"]
 
         # Test with dict input
         result2 = tool.invoke({"query": "AI", "limit": 2})
-        assert len(result2["documents"]) == 2
-        assert "AI" in result2["documents"][0]["content"]
+        assert len(result2["results"]) == 2
+        assert "AI" in result2["results"][0]["content"]
 
         # Verify tool properties
         assert tool.name == "search_tool"
@@ -196,7 +193,7 @@ class TestToolArgumentProcessing:
 
     def test_prepare_arguments_string_input(self) -> None:
         """Test argument preparation with string input."""
-        tool = Tool(simple_function, "test_tool")
+        tool = Tool(create_simple_documents, "test_tool")
 
         result = tool._prepare_arguments("test_query")
 
@@ -204,7 +201,7 @@ class TestToolArgumentProcessing:
 
     def test_prepare_arguments_dictionary_input(self) -> None:
         """Test argument preparation with dictionary input."""
-        tool = Tool(simple_function, "test_tool")
+        tool = Tool(create_simple_documents, "test_tool")
 
         input_dict = {"query": "test", "limit": 10}
         result = tool._prepare_arguments(input_dict)
@@ -216,15 +213,17 @@ class TestToolResultSerialization:
     """Test Tool result serialization functionality."""
 
     def test_serialize_document_list(self) -> None:
-        """Test serialization of document list results."""
-        tool = Tool(simple_function, "test_tool")
-        docs = simple_function("test", 2)
+        """Test serializing a list of documents."""
+        tool = Tool(create_simple_documents, "test_tool")
+        docs = create_simple_documents("test", 2)
 
         result = tool._serialize_result(docs)
 
-        assert "documents" in result
-        assert len(result["documents"]) == 2
-        assert result["documents"][0]["id"] == "doc_0"
+        assert "results" in result
+        assert len(result["results"]) == 2
+        assert result["results"][0]["uri"] == "test/SimpleDocument:doc_0@1"
+        assert result["results"][0]["title"] == "Document 0"
+        assert result["results"][0]["content"] == "Content about test - document 0"
 
     def test_serialize_paginated_response(self) -> None:
         """Test serialization of PaginatedResponse results."""
@@ -234,13 +233,16 @@ class TestToolResultSerialization:
         result = tool._serialize_result(paginated)
 
         expected_keys = {
-            "documents",
+            "results",
             "page_number",
             "has_next_page",
-            "total_documents",
+            "total_results",
             "token_count",
         }
         assert set(result.keys()) == expected_keys
+        assert result["results"][0]["uri"] == "test/SimpleDocument:doc_0@1"
+        assert result["results"][0]["title"] == "Document 0"
+        assert result["results"][0]["content"] == "Content about test - document 0"
 
 
 class TestToolPagination:
@@ -248,7 +250,7 @@ class TestToolPagination:
 
     def test_basic_pagination(self) -> None:
         """Test Tool with basic pagination settings."""
-        tool = Tool(simple_function, "paginated_tool", page_size=3)
+        tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
         result = tool.invoke({"query": "python", "limit": 10, "page": 0})
 
@@ -256,50 +258,52 @@ class TestToolPagination:
         pagination_fields = {
             "page_number",
             "has_next_page",
-            "total_documents",
+            "total_results",
             "token_count",
         }
         assert pagination_fields.issubset(set(result.keys()))
 
         assert result["page_number"] == 0
         assert result["has_next_page"] is True
-        assert result["total_documents"] == 10
-        assert len(result["documents"]) == 3
+        assert result["total_results"] == 10
+        assert len(result["results"]) == 3
 
     def test_pagination_last_page(self) -> None:
         """Test pagination behavior on the last page."""
-        tool = Tool(simple_function, "paginated_tool", page_size=3)
+        tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
         result = tool.invoke({"query": "python", "limit": 10, "page": 3})
 
         assert result["page_number"] == 3
         assert result["has_next_page"] is False
-        assert result["total_documents"] == 10
-        assert len(result["documents"]) == 1
+        assert result["total_results"] == 10
+        assert len(result["results"]) == 1
 
     def test_pagination_with_token_limits(self) -> None:
         """Test Tool with both pagination and token limits."""
         # Each document has roughly 5-6 tokens, so max_tokens=10 should limit to ~2 docs
-        tool = Tool(simple_function, "token_limited_tool", page_size=5, max_tokens=10)
+        tool = Tool(
+            create_simple_documents, "token_limited_tool", page_size=5, max_tokens=10
+        )
 
         result = tool.invoke({"query": "python", "limit": 10})
 
         # Should be limited by token count, not page size
-        assert len(result["documents"]) <= 3  # Token-limited
+        assert len(result["results"]) <= 3  # Token-limited
         assert result["token_count"] <= 10
 
     def test_pagination_always_includes_one_document(self) -> None:
         """Test that pagination always includes at least one document."""
-        tool = Tool(simple_function, "min_doc_tool", page_size=1, max_tokens=1)
+        tool = Tool(create_simple_documents, "min_doc_tool", page_size=1, max_tokens=1)
 
         result = tool.invoke({"query": "python", "limit": 10})
 
         # Should include at least 1 document even with very restrictive token limit
-        assert len(result["documents"]) >= 1
+        assert len(result["results"]) >= 1
 
     def test_pagination_page_parameter_injection(self) -> None:
         """Test that page parameter is properly injected for pagination."""
-        tool = Tool(simple_function, "paginated_tool", page_size=3)
+        tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
         # Invoke without page parameter - should default to page 0
         result1 = tool.invoke({"query": "test", "limit": 10})
@@ -311,7 +315,7 @@ class TestToolPagination:
 
     def test_direct_call_bypasses_pagination(self) -> None:
         """Test that direct tool calls bypass pagination."""
-        tool = Tool(simple_function, "paginated_tool", page_size=3)
+        tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
         # Direct call to the underlying function should return all results
         direct_result = tool.func("test", 10)
@@ -319,7 +323,7 @@ class TestToolPagination:
 
         # Invoke call should apply pagination
         invoke_result = tool.invoke({"query": "test", "limit": 10})
-        assert len(invoke_result["documents"]) == 3
+        assert len(invoke_result["results"]) == 3
 
 
 class TestToolDocumentation:
@@ -334,7 +338,9 @@ class TestToolDocumentation:
 
     def test_formatted_description_with_pagination(self) -> None:
         """Test that pagination info is added to tool description."""
-        tool = Tool(simple_function, "paginated_tool", page_size=5, max_tokens=100)
+        tool = Tool(
+            create_simple_documents, "paginated_tool", page_size=5, max_tokens=100
+        )
 
         # Should include pagination information in formatted description
         formatted_desc = tool.formatted_description

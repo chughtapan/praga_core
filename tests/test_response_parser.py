@@ -7,14 +7,14 @@ from praga_core.agents.response import (
     ResponseCode,
     parse_agent_response,
 )
-from praga_core.types import TextPage
+from praga_core.types import PageURI, TextPage
 
 
 class MockDocument(TextPage):
     """Mock document for testing."""
 
-    def __init__(self, id: str, title: str = "", content: str = "Mock content"):
-        super().__init__(id=id, content=content)
+    def __init__(self, uri: PageURI, title: str = "", content: str = "Mock content"):
+        super().__init__(uri=uri, content=content)
         # Add custom fields to metadata
         self.metadata.title = title  # type: ignore[attr-defined]
 
@@ -28,7 +28,7 @@ class TestResponseParser:
             "response_code": "success",
             "references": [
                 {
-                    "id": "7",
+                    "uri": "test/TextPage:7@1",
                     "explanation": "document contains 'client feedback' in the subject",
                 }
             ],
@@ -39,7 +39,7 @@ class TestResponseParser:
         assert isinstance(result, AgentResponse)
         assert result.response_code == ResponseCode.SUCCESS
         assert len(result.references) == 1
-        assert result.references[0].id == "7"
+        assert result.references[0].uri.id == "7"
         assert "client feedback" in result.references[0].explanation
 
     def test_parse_json_string_response(self):
@@ -49,7 +49,7 @@ class TestResponseParser:
             "response_code": "success",
             "references": [
                 {
-                    "id": "doc2",
+                    "uri": "test/TextPage:doc2@1",
                     "explanation": "contains requested terms"
                 }
             ],
@@ -61,7 +61,7 @@ class TestResponseParser:
         assert isinstance(result, AgentResponse)
         assert result.response_code == ResponseCode.SUCCESS
         assert len(result.references) == 1
-        assert result.references[0].id == "doc2"
+        assert result.references[0].uri.id == "doc2"
 
     def test_parse_code_block_response(self):
         """Test parsing a response wrapped in code blocks."""
@@ -72,7 +72,7 @@ class TestResponseParser:
             "response_code": "success",
             "references": [
                 {
-                    "id": "doc3",
+                    "uri": "test/TextPage:doc3@1",
                     "explanation": "matches criteria"
                 }
             ],
@@ -85,7 +85,7 @@ class TestResponseParser:
         assert isinstance(result, AgentResponse)
         assert result.response_code == ResponseCode.SUCCESS
         assert len(result.references) == 1
-        assert result.references[0].id == "doc3"
+        assert result.references[0].uri.id == "doc3"
 
     def test_parse_markdown_json_block(self):
         """Test parsing a response wrapped in markdown JSON blocks."""
@@ -95,7 +95,7 @@ class TestResponseParser:
             "response_code": "success",
             "references": [
                 {
-                    "id": "doc4",
+                    "uri": "test/TextPage:doc4@1",
                     "explanation": "found in markdown"
                 }
             ],
@@ -108,7 +108,7 @@ class TestResponseParser:
         assert isinstance(result, AgentResponse)
         assert result.response_code == ResponseCode.SUCCESS
         assert len(result.references) == 1
-        assert result.references[0].id == "doc4"
+        assert result.references[0].uri.id == "doc4"
 
     def test_parse_error_response(self):
         """Test parsing an error response."""
@@ -136,7 +136,7 @@ class TestResponseParser:
     def test_parse_missing_response_code(self):
         """Test handling of response missing response_code."""
         missing_code = {
-            "references": [{"id": "doc1", "explanation": "test"}],
+            "references": [{"uri": "test/TextPage:doc1@1", "explanation": "test"}],
             "error_message": "",
         }
 
@@ -153,7 +153,10 @@ class TestResponseParser:
             "action_input": {
                 "response_code": "success",
                 "references": [
-                    {"id": "doc5", "explanation": "wrapped in action format"}
+                    {
+                        "uri": "test/TextPage:doc5@1",
+                        "explanation": "wrapped in action format",
+                    }
                 ],
                 "error_message": "",
             },
@@ -163,22 +166,22 @@ class TestResponseParser:
         assert isinstance(result, AgentResponse)
         assert result.response_code == ResponseCode.SUCCESS
         assert len(result.references) == 1
-        assert result.references[0].id == "doc5"
+        assert result.references[0].uri.id == "doc5"
 
     def test_numeric_id_coercion(self):
         """Test that numeric IDs are coerced to strings."""
         response = AgentResponse(
             response_code=ResponseCode.SUCCESS,
             references=[
-                {"id": 42, "type": "Email", "explanation": "test"},
-                {"id": 7.5, "type": "Email", "explanation": "test"},
+                {"uri": "test/TextPage:42@1", "type": "Email", "explanation": "test"},
+                {"uri": "test/TextPage:7@1", "type": "Email", "explanation": "test"},
             ],
             error_message="",
         )
 
         assert len(response.references) == 2
-        assert response.references[0].id == "42"
-        assert response.references[1].id == "7.5"
+        assert response.references[0].uri.id == "42"
+        assert response.references[1].uri.id == "7"
 
     def test_response_code_mapping(self):
         """Test that various response codes are properly mapped."""

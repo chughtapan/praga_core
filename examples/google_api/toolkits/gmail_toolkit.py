@@ -1,27 +1,28 @@
 """Gmail toolkit for retrieving and searching emails."""
 
+import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional
 
-from praga_core.agents.tool import PaginatedResponse
+from praga_core.agents import PaginatedResponse, RetrieverToolkit
 from praga_core.context import ServerContext
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pages.gmail import EmailPage  # noqa: E402
-from toolkits.google_base_toolkit import GoogleBaseToolkit  # noqa: E402
+from services.gmail_service import GmailService  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
-class GmailToolkit(GoogleBaseToolkit):
-    """Toolkit for retrieving emails from Gmail using Google API."""
+class GmailToolkit(RetrieverToolkit):
+    """Toolkit for retrieving emails from Gmail using Gmail service."""
 
-    def __init__(
-        self, context: ServerContext, secrets_dir: Optional[str] = None
-    ) -> None:
-        """Initialize the Gmail toolkit with authentication."""
-        super().__init__(context, secrets_dir)
-        self._service = None
+    def __init__(self, context: ServerContext, gmail_service: GmailService):
+        super().__init__(context)
+        self.gmail_service = gmail_service
+
+        # Register all email search tools
         self.register_tool(self.get_emails_by_sender)
         self.register_tool(self.get_emails_by_recipient)
         self.register_tool(self.get_emails_by_cc_participant)
@@ -30,132 +31,48 @@ class GmailToolkit(GoogleBaseToolkit):
         self.register_tool(self.get_recent_emails)
         self.register_tool(self.get_unread_emails)
 
+        logger.info("Gmail toolkit initialized")
+
     @property
     def name(self) -> str:
         return "GmailToolkit"
 
-    @property
-    def service(self) -> Any:
-        """Lazy initialization of Gmail service."""
-        if self._service is None:
-            self._service = self.auth_manager.get_gmail_service()
-        return self._service
-
-    def _search_emails_paginated(
-        self, query: str, page_token: Optional[str] = None, page_size: int = 20
-    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search emails with pagination support using Gmail API cursors.
-
-        Returns:
-            Tuple of (messages, next_page_token)
-        """
-        try:
-            print(
-                f"Gmail search query: '{query}', page_token: {page_token}"
-            )  # Debug output
-
-            # Search for messages with pagination
-            list_params = {"userId": "me", "q": query, "maxResults": page_size}
-            if page_token:
-                list_params["pageToken"] = page_token
-
-            results = self.service.users().messages().list(**list_params).execute()
-
-            messages = results.get("messages", [])
-            next_page_token = results.get("nextPageToken")
-            print(
-                f"Gmail API returned {len(messages)} message IDs, next_token: {bool(next_page_token)}"
-            )  # Debug output
-
-            # Get full message details for each message
-            full_messages: List[Dict[str, Any]] = []
-            if messages:
-                for message in messages:
-                    full_msg = (
-                        self.service.users()
-                        .messages()
-                        .get(userId="me", id=message["id"], format="full")
-                        .execute()
-                    )
-                    full_messages.append(full_msg)
-
-            return full_messages, next_page_token
-
-        except Exception as e:
-            print(f"Error searching emails: {e}")
-            return [], None
-
     def _search_emails_paginated_response(
         self, query: str, page: int = 0, page_size: int = 10
     ) -> PaginatedResponse[EmailPage]:
-        """Search elogger = logging.getLogger(__name__)
-        mails and return a paginated response.
-
-                Args:
-                    query: Gmail search query
-                    page: Page number (0-based)
-                    page_size: Number of emails per page
-
-                Returns:
-                    PaginatedResponse with email documents
-        """
-        try:
-            # Add in:inbox by default if not already present to exclude archived/spam emails
-            if "in:inbox" not in query.lower() and "in:" not in query.lower():
-                query = f"{query} in:inbox" if query.strip() else "in:inbox"
-
-            print(f"Gmail search query: '{query}', page: {page}")  # Debug output
-
-            # Calculate page token - for now, we'll use a simple approach
-            # In a real implementation, you'd want to cache page tokens
-            page_token = None
-
-            # If not the first page, we need to get to the right page
-            # This is a simplified approach - in production you'd cache tokens
-            if page > 0:
-                # Skip to the desired page by fetching previous pages
-                current_token = None
-                for _ in range(page):
-                    _, current_token = self._search_emails_paginated(
-                        query, current_token, page_size
+        """Search emails and return a paginated response."""
+        # Calculate page token by iterating through pages
+        page_token = None
+        if page > 0:
+            current_token = None
+            for _ in range(page):
+                _, current_token = self.gmail_service.search_emails(
+                    query, current_token, page_size
+                )
+                if not current_token:
+                    # No more pages available
+                    logger.debug(f"No more pages available at page {page}")
+                    return PaginatedResponse(
+                        results=[],
+                        page_number=page,
+                        has_next_page=False,
                     )
-                    if not current_token:
-                        # No more pages available
-                        return PaginatedResponse(
-                            results=[],
-                            page_number=page,
-                            has_next_page=False,
-                            total_results=0,
-                            token_count=0,
-                        )
-                page_token = current_token
+            page_token = current_token
 
-            # Get the actual page data
-            messages, next_page_token = self._search_emails_paginated(
-                query, page_token, page_size
-            )
-            uris = [self.context.get_page_uri(msg["id"], EmailPage) for msg in messages]
-            emails = list(map(self.context.get_page, uris))
-            # Calculate token count
-            total_tokens = sum(doc.metadata.token_count or 0 for doc in emails)
+        # Get the actual page data
+        uris, next_page_token = self.gmail_service.search_emails(
+            query, page_token, page_size
+        )
 
-            return PaginatedResponse(
-                results=emails,
-                page_number=page,
-                has_next_page=bool(next_page_token),
-                total_results=None,
-                token_count=total_tokens,
-            )
+        # Resolve URIs to pages using context - throw errors, don't fail silently
+        pages = [self.context.get_page(uri) for uri in uris]
+        logger.debug(f"Successfully resolved {len(pages)} email pages")
 
-        except Exception as e:
-            print(f"Error in paginated email search: {e}")
-            return PaginatedResponse(
-                results=[],
-                page_number=page,
-                has_next_page=False,
-                total_results=0,
-                token_count=0,
-            )
+        return PaginatedResponse(
+            results=pages,
+            page_number=page,
+            has_next_page=bool(next_page_token),
+        )
 
     def get_emails_by_sender(
         self, sender: str, page: int = 0
@@ -163,7 +80,7 @@ class GmailToolkit(GoogleBaseToolkit):
         """Get emails from a specific sender.
 
         Args:
-            sender: Either an email address or person's name
+            sender: Email address of the sender
             page: Page number for pagination (0-based)
         """
         query = f"from:{sender}"
@@ -175,7 +92,7 @@ class GmailToolkit(GoogleBaseToolkit):
         """Get emails sent to a specific recipient.
 
         Args:
-            recipient: Either an email address or person's name
+            recipient: Email address of the recipient
             page: Page number for pagination (0-based)
         """
         query = f"to:{recipient}"
@@ -187,7 +104,7 @@ class GmailToolkit(GoogleBaseToolkit):
         """Get emails where a specific person was CC'd.
 
         Args:
-            cc_participant: Either an email address or person's name
+            cc_participant: Email address of the CC participant
             page: Page number for pagination (0-based)
         """
         query = f"cc:{cc_participant}"
@@ -218,10 +135,7 @@ class GmailToolkit(GoogleBaseToolkit):
             keyword: Keyword to search for
             page: Page number for pagination (0-based)
         """
-        if keyword.strip():
-            query = f"{keyword}"
-        else:
-            query = ""
+        query = keyword if keyword.strip() else ""
         return self._search_emails_paginated_response(query, page)
 
     def get_recent_emails(

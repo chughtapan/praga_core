@@ -11,6 +11,7 @@ from conftest import MockRetrieverToolkit, SimpleTestPage, create_test_pages
 
 from praga_core.agents import RetrieverToolkit
 from praga_core.agents.tool import Tool
+from praga_core.types import PageURI
 
 
 class TestRetrieverToolkitCore:
@@ -122,9 +123,9 @@ class TestRetrieverToolkitCore:
         toolkit.register_tool(simple_tool, "simple_tool")
         result = toolkit.invoke_tool("simple_tool", "test_query")
 
-        assert "documents" in result
-        assert len(result["documents"]) == 2
-        assert "test_query" in result["documents"][0]["title"]
+        assert "results" in result
+        assert len(result["results"]) == 2
+        assert "test_query" in result["results"][0]["title"]
 
     def test_invoke_tool_with_dict_args(self) -> None:
         """Test tool invocation with dictionary arguments."""
@@ -136,7 +137,7 @@ class TestRetrieverToolkitCore:
         toolkit.register_tool(parameterized_tool, "param_tool")
         result = toolkit.invoke_tool("param_tool", {"query": "test", "limit": 3})
 
-        assert len(result["documents"]) == 3
+        assert len(result["results"]) == 3
 
     def test_invoke_tool_not_found(self) -> None:
         """Test invoking a non-existent tool raises appropriate error."""
@@ -150,7 +151,13 @@ class TestRetrieverToolkitCore:
         toolkit = MockRetrieverToolkit()
 
         def accessible_tool(name: str) -> List[SimpleTestPage]:
-            return [SimpleTestPage(id="test", title="Test", content=f"Hello {name}")]
+            return [
+                SimpleTestPage(
+                    uri=PageURI.parse("test/SimpleTestPage:test@1"),
+                    title="Test",
+                    content=f"Hello {name}",
+                )
+            ]
 
         toolkit.register_tool(accessible_tool, "accessible_tool")
 
@@ -179,7 +186,7 @@ class TestRetrieverToolkitDecorator:
 
         assert "decorated_tool" in toolkit.tools
         result = toolkit.invoke_tool("decorated_tool", "test")
-        assert len(result["documents"]) == 2
+        assert len(result["results"]) == 2
 
     def test_decorator_with_description(self) -> None:
         """Test decorator uses function docstring for description."""
@@ -319,7 +326,6 @@ class TestRetrieverToolkitErrorHandling:
 
         # Results should be different, confirming replacement
         assert (
-            first_result["documents"][0]["title"]
-            != second_result["documents"][0]["title"]
+            first_result["results"][0]["title"] != second_result["results"][0]["title"]
         )
-        assert "second" in second_result["documents"][0]["title"]
+        assert "second" in second_result["results"][0]["title"]

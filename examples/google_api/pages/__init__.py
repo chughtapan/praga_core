@@ -1,1 +1,6 @@
-"""Complete document handlers that handle the entire pipeline from ID to document."""
+"""Pages package for Google API integration."""
+
+from .calendar import CalendarEventPage
+from .gmail import EmailPage
+
+__all__ = ["EmailPage", "CalendarEventPage"]

@@ -10,7 +10,7 @@ from typing import Any, List, Optional
 import pytest
 
 from praga_core.agents.toolkit import RetrieverToolkit
-from praga_core.types import Page, TextPage
+from praga_core.types import Page, PageURI, TextPage
 
 
 class SimpleTestPage(Page):
@@ -59,7 +59,7 @@ def create_test_pages(
     """Create a list of test pages."""
     return [
         SimpleTestPage(
-            id=f"doc_{i}",
+            uri=PageURI.parse(f"test/SimpleTestPage:doc_{i}@1"),
             title=f"page {i} - {query}",
             content=f"{content_prefix} about {query} in page {i}. " * 2,
         )
@@ -72,7 +72,8 @@ def create_text_pages(count: int = 5, query: str = "test") -> List[TextPage]:
     docs: List[TextPage] = []
     for i in range(count):
         doc = TextPage(
-            id=f"text_doc_{i}", content=f"Text content about {query} - page {i}"
+            uri=PageURI.parse(f"test/TextPage:text_doc_{i}@1"),
+            content=f"Text content about {query} - page {i}",
         )
         # Add custom metadata for testing
         doc.metadata.index = i  # type: ignore[attr-defined]
@@ -117,7 +118,8 @@ def create_timestamped_page(content: str = "test") -> List[TextPage]:
     """Create a page with timestamp for cache testing."""
     return [
         TextPage(
-            id="timestamp_doc", content=f"{content} at {datetime.now().isoformat()}"
+            uri=PageURI.parse("test/TextPage:timestamp_doc@1"),
+            content=f"{content} at {datetime.now().isoformat()}",
         )
     ]
 

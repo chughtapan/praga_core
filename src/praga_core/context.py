@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional, Type, TypeVar, Union, overload
+from typing import Callable, Dict, List, Optional, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import Page, PageReference
+from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 # Type for page handler functions
 PageHandler = Callable[..., Page]
@@ -13,57 +13,31 @@ T = TypeVar("T", bound=Page)
 class ServerContext:
     """Central server context that acts as single source of truth for caching and state."""
 
-    def __init__(self) -> None:
-        """Initialize server context without requiring a retriever."""
+    def __init__(self, root: str = "") -> None:
+        """Initialize server context.
+
+        Args:
+            root: Root identifier for this context, used in PageURIs
+        """
+        self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
-        self._page_handlers: Dict[Type[Page], PageHandler] = {}
+        self._page_handlers: Dict[str, PageHandler] = {}
         self._page_cache: Dict[str, Page] = {}
-        self._type_aliases: Dict[str, Type[Page]] = (
-            {}
-        )  # New: alias -> actual type mapping
 
-    def _resolve_page_type(self, page_type: Union[Type[Page], str]) -> Type[Page]:
-        """Resolve a page type from either a Type or string to the actual Type."""
-        if isinstance(page_type, str):
-            # First check aliases
-            if page_type in self._type_aliases:
-                return self._type_aliases[page_type]
+    def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
+        """Create a PageURI with this context's root.
 
-            # Then check registered handlers by class name
-            for registered_type in self._page_handlers:
-                if registered_type.__name__ == page_type:
-                    return registered_type
-            raise RuntimeError(f"No page handler registered for type: {page_type}")
-        return page_type
+        Args:
+            type_name: Type name for the page
+            id: Unique identifier
+            version: Version number (defaults to 1)
 
-    @overload
-    def get_page_uri(self, page_ref_or_id: PageReference) -> str: ...
+        Returns:
+            PageURI object
+        """
+        return PageURI(root=self.root, type=type_name, id=id, version=version)
 
-    @overload
-    def get_page_uri(
-        self, page_ref_or_id: str, page_type: Union[Type[Page], str]
-    ) -> str: ...
-
-    def get_page_uri(
-        self,
-        page_ref_or_id: Union[PageReference, str],
-        page_type: Optional[Union[Type[Page], str]] = None,
-    ) -> str:
-        """Get the URI for a page."""
-        if isinstance(page_ref_or_id, PageReference):
-            return f"{page_ref_or_id.type}:{page_ref_or_id.id}"
-        else:
-            # page_ref_or_id is a string (page_id)
-            if page_type is None:
-                raise ValueError(
-                    "page_type must be provided when first argument is a page_id"
-                )
-            resolved_type = self._resolve_page_type(page_type)
-            return f"{resolved_type.__name__}:{page_ref_or_id}"
-
-    def handler(
-        self, page_type: Type[T], aliases: Optional[List[str]] = None
-    ) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    def handler(self, page_type: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
         """Decorator to register a page handler function for a specific page type.
 
         Usage:
@@ -79,41 +53,42 @@ class ServerContext:
         """
 
         def decorator(func: Callable[..., T]) -> Callable[..., T]:
-            self.register_handler(func, page_type, aliases)
+            self.register_handler(page_type, func)
             return func
 
         return decorator
 
-    def _create_page(self, page_id: str, page_type: Type[T]) -> T:
-        """
-        Create a page using the registered handler for the given type."""
-        if page_type not in self._page_handlers:
-            raise RuntimeError(
-                f"No page handler registered for type: {page_type.__name__}"
-            )
+    def _create_page(self, page_uri: PageURI) -> Page:
+        """Create a page using the registered handler for the given type."""
+        if page_uri.type not in self._page_handlers:
+            raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
 
-        handler = self._page_handlers[page_type]
-        page: T = handler(page_id)  # type: ignore[assignment]
+        handler = self._page_handlers[page_uri.type]
+        # Call handler with just the id - handlers are responsible for creating proper URIs
+        page: Page = handler(page_uri.id)
         return page
 
     def _cache_set_page(self, page: Page) -> None:
-        """Store a page in the cache using its URI."""
-        uri = self.get_page_uri(page.id, type(page))
-        self._page_cache[uri] = page
+        """Store a page in the cache using its URI string."""
+        uri_str = str(page.uri)
+        self._page_cache[uri_str] = page
 
-    def _cache_get_page(self, uri: str) -> Optional[Page]:
+    def _cache_get_page(self, uri: str | PageURI) -> Optional[Page]:
         """Get a page from the cache using its URI."""
-        return self._page_cache.get(uri, None)
+        uri_str = str(uri)
+        return self._page_cache.get(uri_str, None)
 
-    def get_page(self, page_uri: str) -> Page:
+    def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a document from the cache or create it if not found."""
+
+        # Parse URI if it's a string
+        if isinstance(page_uri, str):
+            page_uri = PageURI.parse(page_uri)
 
         page = self._cache_get_page(page_uri)
         if page is None:
             # Not in cache, create it
-            type_name, page_id = page_uri.split(":", 1)
-            resolved_type = self._resolve_page_type(type_name)
-            page = self._create_page(page_id, resolved_type)
+            page = self._create_page(page_uri)
             self._cache_set_page(page)
         return page
 
@@ -122,7 +97,7 @@ class ServerContext:
         instruction: str,
         retriever: Optional[RetrieverAgentBase] = None,
         resolve_references: bool = True,
-    ) -> List[PageReference]:
+    ) -> SearchResponse:
         """Execute search using the provided retriever."""
 
         active_retriever = retriever or self.retriever
@@ -134,7 +109,7 @@ class ServerContext:
         results = self._search(instruction, active_retriever)
         if resolve_references:
             results = self._resolve_references(results)
-        return results
+        return SearchResponse(results=results)
 
     def _search(
         self, instruction: str, retriever: RetrieverAgentBase
@@ -145,48 +120,32 @@ class ServerContext:
     def _resolve_references(self, results: List[PageReference]) -> List[PageReference]:
         """Resolve references to pages in the cache."""
         for ref in results:
-            uri = self.get_page_uri(ref)
-            ref.page = self.get_page(uri)
+            ref.page = self.get_page(ref.uri)
         return results
 
     def register_handler(
         self,
-        handler_func: Callable[..., T],
-        page_type: Type[T],
-        aliases: Optional[List[str]] = None,
+        type_name: str,
+        handler_func: Callable[..., Page],
     ) -> None:
         """
-        Programmatically register a page handler function.
+        Register a page handler function for a specific type name.
 
         Args:
+            type_name: String identifier for the page type
             handler_func: Function that takes minimal input and returns a complete Page
-            page_type: The page type this handler creates
-            aliases: Optional list of alternative type names that can be used to reference this page type
 
         Usage:
-            def handle_email(email_id: str) -> EmailDocument:
+            def handle_email(email_id: str) -> EmailPage:
                 # Make API calls, parse, return document
-                return EmailDocument(...)
+                return EmailPage(...)
 
-            ctx.register_handler(handle_email, EmailDocument, aliases=["Email", "EmailMessage"])
+            ctx.register_handler("email", handle_email)
         """
-        if not issubclass(page_type, Page):
-            raise RuntimeError(
-                f"Page type {page_type.__name__} is not a subclass of Page"
-            )
-        if page_type in self._page_handlers:
-            raise RuntimeError(
-                f"Page handler already registered for type: {page_type.__name__}"
-            )
+        if type_name in self._page_handlers:
+            raise RuntimeError(f"Page handler already registered for type: {type_name}")
 
-        self._page_handlers[page_type] = handler_func
-
-        # Register aliases
-        if aliases:
-            for alias in aliases:
-                if alias in self._type_aliases:
-                    raise RuntimeError(f"Type alias '{alias}' already registered")
-                self._type_aliases[alias] = page_type
+        self._page_handlers[type_name] = handler_func
 
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:

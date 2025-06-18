@@ -71,10 +71,6 @@ class MockDocument(Page):
     """A simple document class for testing."""
 
     content: str = Field(description="The content of the document")
-    type: str = Field(default="MockDocument", description="Type of document")
-
-    def __init__(self, doc_id: str, content: str, **data):
-        super().__init__(id=doc_id, content=content, type="MockDocument", **data)
 
 
 class MockRetrieverToolkit(RetrieverToolkit):
@@ -85,10 +81,19 @@ class MockRetrieverToolkit(RetrieverToolkit):
 
         # Mock document store
         self.documents = [
-            MockDocument("1", "John works in AI research"),
-            MockDocument("2", "Sarah is a Machine Learning engineer"),
-            MockDocument("3", "Bob teaches Python programming"),
-            MockDocument("4", "John likes Python and AI"),
+            MockDocument(
+                uri="test/MockDocument:1@1", content="John works in AI research"
+            ),
+            MockDocument(
+                uri="test/MockDocument:2@1",
+                content="Sarah is a Machine Learning engineer",
+            ),
+            MockDocument(
+                uri="test/MockDocument:3@1", content="Bob teaches Python programming"
+            ),
+            MockDocument(
+                uri="test/MockDocument:4@1", content="John likes Python and AI"
+            ),
         ]
 
         # Register mock tools
@@ -125,8 +130,14 @@ class MockEmailToolkit(RetrieverToolkit):
 
         # Mock email documents
         self.emails = [
-            MockDocument("email_1", "Meeting about AI project from John"),
-            MockDocument("email_2", "Budget discussion from Sarah"),
+            MockDocument(
+                uri="test/MockDocument:email_1@1",
+                content="Meeting about AI project from John",
+            ),
+            MockDocument(
+                uri="test/MockDocument:email_2@1",
+                content="Budget discussion from Sarah",
+            ),
         ]
 
         # Register email-specific tools
@@ -151,8 +162,12 @@ class MockCalendarToolkit(RetrieverToolkit):
 
         # Mock calendar documents
         self.events = [
-            MockDocument("cal_1", "Daily standup meeting"),
-            MockDocument("cal_2", "Team planning session"),
+            MockDocument(
+                uri="test/MockDocument:cal_1@1", content="Daily standup meeting"
+            ),
+            MockDocument(
+                uri="test/MockDocument:cal_2@1", content="Team planning session"
+            ),
         ]
 
         # Register calendar-specific tools
@@ -198,8 +213,11 @@ class TestReactAgentBasic:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "1", "explanation": "Contains AI research"},
-                        {"id": "4", "explanation": "Contains AI"},
+                        {
+                            "uri": "test/MockDocument:1@1",
+                            "explanation": "Contains AI research",
+                        },
+                        {"uri": "test/MockDocument:4@1", "explanation": "Contains AI"},
                     ],
                     "error_message": "",
                 },
@@ -214,8 +232,8 @@ class TestReactAgentBasic:
 
         # Verify results
         assert len(references) == 2
-        assert references[0].id == "1"
-        assert references[1].id == "4"
+        assert references[0].uri.id == "1"
+        assert references[1].uri.id == "4"
 
         # Verify the client was called correctly
         messages = self.mock_client.get_last_messages()
@@ -267,8 +285,14 @@ class TestReactAgentBasic:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "1", "explanation": "John works in AI research"},
-                        {"id": "4", "explanation": "John likes AI"},
+                        {
+                            "uri": "test/MockDocument:1@1",
+                            "explanation": "John works in AI research",
+                        },
+                        {
+                            "uri": "test/MockDocument:4@1",
+                            "explanation": "John likes AI",
+                        },
                     ],
                     "error_message": "",
                 },
@@ -281,8 +305,8 @@ class TestReactAgentBasic:
         references = self.agent.search("Find where John talks about AI")
 
         assert len(references) == 2
-        assert references[0].id == "1"
-        assert references[1].id == "4"
+        assert references[0].uri.id == "1"
+        assert references[1].uri.id == "4"
 
     def test_max_iterations_limit(self):
         """Test that agent respects max iterations limit."""
@@ -312,7 +336,7 @@ class TestReactAgentBasic:
             "action_input": {
                 "response_code": "success",
                 "references": [
-                    {"id": "1", "explanation": "Found in markdown"}
+                    {"uri": "test/MockDocument:1@1", "explanation": "Found in markdown"}
                 ],
                 "error_message": ""
             }
@@ -324,7 +348,7 @@ class TestReactAgentBasic:
 
         references = self.agent.search("Test markdown parsing")
         assert len(references) == 1
-        assert references[0].id == "1"
+        assert references[0].uri.id == "1"
 
     def test_raw_document_retrieval(self):
         """Test that documents are properly retrieved and included in results."""
@@ -343,8 +367,11 @@ class TestReactAgentBasic:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "1", "explanation": "Contains AI research"},
-                        {"id": "4", "explanation": "Contains AI"},
+                        {
+                            "uri": "test/MockDocument:1@1",
+                            "explanation": "Contains AI research",
+                        },
+                        {"uri": "test/MockDocument:4@1", "explanation": "Contains AI"},
                     ],
                     "error_message": "",
                 },
@@ -361,10 +388,10 @@ class TestReactAgentBasic:
         assert len(references) == 2
 
         # Check first document
-        assert references[0].id == "1"
+        assert references[0].uri.id == "1"
 
         # Check second document
-        assert references[1].id == "4"
+        assert references[1].uri.id == "4"
 
     def test_raw_document_not_found(self):
         """Test behavior when document ID is not found in any toolkit."""
@@ -383,7 +410,10 @@ class TestReactAgentBasic:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "999", "explanation": "Non-existent document"},
+                        {
+                            "uri": "test/MockDocument:999@1",
+                            "explanation": "Non-existent document",
+                        },
                     ],
                     "error_message": "",
                 },
@@ -398,7 +428,7 @@ class TestReactAgentBasic:
 
         # Verify that the reference is created but document is None
         assert len(references) == 1
-        assert references[0].id == "999"
+        assert references[0].uri.id == "999"
 
 
 class TestReactAgentMultipleToolkits:
@@ -444,7 +474,10 @@ class TestReactAgentMultipleToolkits:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "email_1", "explanation": "Meeting about AI project"}
+                        {
+                            "uri": "test/MockDocument:email_1@1",
+                            "explanation": "Meeting about AI project",
+                        }
                     ],
                     "error_message": "",
                 },
@@ -456,7 +489,7 @@ class TestReactAgentMultipleToolkits:
 
         references = self.agent.search("Find emails about meetings")
         assert len(references) == 1
-        assert references[0].id == "email_1"
+        assert references[0].uri.id == "email_1"
 
     def test_search_calendar_tool(self):
         """Test searching using calendar toolkit tool."""
@@ -475,7 +508,10 @@ class TestReactAgentMultipleToolkits:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "cal_1", "explanation": "Daily standup meeting"}
+                        {
+                            "uri": "test/MockDocument:cal_1@1",
+                            "explanation": "Daily standup meeting",
+                        }
                     ],
                     "error_message": "",
                 },
@@ -487,7 +523,7 @@ class TestReactAgentMultipleToolkits:
 
         references = self.agent.search("Find standup meetings")
         assert len(references) == 1
-        assert references[0].id == "cal_1"
+        assert references[0].uri.id == "cal_1"
 
     def test_tool_name_conflict_warning(self, caplog):
         """Test that tool name conflicts generate warnings."""
@@ -535,7 +571,10 @@ class TestReactAgentMultipleToolkits:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "email_1", "explanation": "Meeting about AI project"}
+                        {
+                            "uri": "test/MockDocument:email_1@1",
+                            "explanation": "Meeting about AI project",
+                        }
                     ],
                     "error_message": "",
                 },
@@ -548,7 +587,7 @@ class TestReactAgentMultipleToolkits:
         references = self.agent.search("Find emails about meetings")
 
         assert len(references) == 1
-        assert references[0].id == "email_1"
+        assert references[0].uri.id == "email_1"
 
     def test_raw_document_cross_toolkit_fallback(self):
         """Test that the system tries multiple toolkits to find a document."""
@@ -567,7 +606,10 @@ class TestReactAgentMultipleToolkits:
                 "action_input": {
                     "response_code": "success",
                     "references": [
-                        {"id": "cal_1", "explanation": "Daily standup meeting"}
+                        {
+                            "uri": "test/MockDocument:cal_1@1",
+                            "explanation": "Daily standup meeting",
+                        }
                     ],
                     "error_message": "",
                 },
@@ -580,7 +622,7 @@ class TestReactAgentMultipleToolkits:
         references = self.agent.search("Find standup meetings")
 
         assert len(references) == 1
-        assert references[0].id == "cal_1"
+        assert references[0].uri.id == "cal_1"
 
 
 if __name__ == "__main__":
