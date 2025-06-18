@@ -113,7 +113,10 @@ class Page(BaseModel, ABC):
     )
 
     model_config = ConfigDict(
-        json_encoders={datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")},
+        json_encoders={
+            datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S"),
+            PageURI: str,
+        },
     )
 
     @property
@@ -130,16 +133,6 @@ class Page(BaseModel, ABC):
 
     def __repr__(self) -> str:
         return self.text
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Custom model dump that uses URI string representation."""
-        if "mode" in kwargs and kwargs["mode"] != "json":
-            logger.warning("Page.model_dump: mode is not json, ignoring")
-            del kwargs["mode"]
-        kwargs["mode"] = "json"
-        data = super().model_dump(**kwargs)
-        data["uri"] = str(self.uri)
-        return data
 
 
 class PageMetadata(BaseModel):
@@ -172,6 +165,10 @@ class PageReference(BaseModel):
     explanation: str = Field(description="Explanation of the document", default="")
     _page: Optional[Page] = PrivateAttr(default=None)
 
+    model_config = ConfigDict(
+        json_encoders={PageURI: str},
+    )
+
     @property
     def page(self) -> Page:
         if self._page is None:
@@ -181,13 +178,6 @@ class PageReference(BaseModel):
     @page.setter
     def page(self, page: Page) -> None:
         self._page = page
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Custom model dump that uses URI string representation."""
-        data = super().model_dump(**kwargs)
-        # Replace the uri dict with its string representation
-        data["uri"] = str(self.uri)
-        return data
 
 
 class SearchRequest(BaseModel):

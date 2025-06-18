@@ -64,25 +64,25 @@ def setup_agent(toolkits: list) -> ReactAgent:
     )
 
 
+def setup_context() -> ServerContext:
+    """Set up the context."""
+    logger.info("Setting up context...")
+
+    ctx = ServerContext(root="google")
+    services = setup_services(ctx)
+    toolkits = setup_toolkits(ctx, services)
+    agent = setup_agent(toolkits)
+    ctx.retriever = agent
+
+    return ctx
+
+
 def main():
     """Run the Google API integration app."""
     print("🚀 Google API Integration App")
     print("=" * 50)
 
-    # Set up context
-    context = ServerContext(root="google")
-
-    # Set up services (auto-register handlers)
-    services = setup_services(context)
-
-    # Set up toolkits
-    toolkits = setup_toolkits(context, services)
-
-    # Set up agent
-    agent = setup_agent(toolkits)
-    context.retriever = agent
-
-    logger.info("Setup complete! Ready for queries.")
+    context = setup_context()
     print("✅ Setup complete! Ready for queries.")
     print("-" * 50)
 
