@@ -1,7 +1,7 @@
-"""Tests for PaginatedResponse and Document classes.
+"""Tests for PaginatedResponse classes.
 
 This module tests the PaginatedResponse implementation and its Sequence protocol
-behavior, along with basic Document functionality.
+behavior.
 """
 
 import math
@@ -10,84 +10,92 @@ from typing import List
 
 import pytest
 
-from praga_core.tool import PaginatedResponse
-from praga_core.types import TextDocument
+from praga_core import PageURI, TextPage
+from praga_core.agents import PaginatedResponse
 
 
-class SimpleTestDocumentBasics:
-    """Test basic Document and TextDocument functionality."""
+class SimpleTestPageBasics:
+    """Test basic Page and TextPage functionality."""
 
     def test_text_document_creation(self) -> None:
-        """Test basic TextDocument creation and auto-calculated fields."""
-        doc = TextDocument(id="test_id", content="test content")
+        """Test basic TextPage creation and auto-calculated fields."""
+        page = TextPage(
+            uri=PageURI.parse("test/TextPage:test_id@1"), content="test content"
+        )
 
-        assert doc.id == "test_id"
-        assert doc.content == "test content"
-        assert doc.metadata.token_count is not None
-        assert doc.metadata.token_count > 0
+        assert page.uri.id == "test_id"
+        assert page.content == "test content"
+        assert page.metadata.token_count is not None
+        assert page.metadata.token_count > 0
 
     def test_text_document_with_custom_metadata(self) -> None:
-        """Test TextDocument with additional metadata fields."""
-        doc = TextDocument(id="test_id", content="test content")
+        """Test TextPage with additional metadata fields."""
+        page = TextPage(
+            uri=PageURI.parse("test/TextPage:test_id@1"), content="test content"
+        )
 
         # Add custom fields to metadata (thanks to Config.extra = "allow")
-        doc.metadata.custom_field = "custom_value"  # type: ignore[attr-defined]
-        doc.metadata.count = 42  # type: ignore[attr-defined]
+        page.metadata.custom_field = "custom_value"  # type: ignore[attr-defined]
+        page.metadata.count = 42  # type: ignore[attr-defined]
 
-        assert doc.metadata.custom_field == "custom_value"  # type: ignore[attr-defined]
-        assert doc.metadata.count == 42  # type: ignore[attr-defined]
+        assert page.metadata.custom_field == "custom_value"  # type: ignore[attr-defined]
+        assert page.metadata.count == 42  # type: ignore[attr-defined]
 
     def test_document_token_count_calculation(self) -> None:
         """Test that token count is calculated correctly."""
-        doc = TextDocument(id="test_id", content="hello world test")
+        page = TextPage(
+            uri=PageURI.parse("test/TextPage:test_id@1"), content="hello world test"
+        )
 
         # Should be approximately 3 words * 4/3 = 4 tokens
         expected_tokens = math.ceil(3 * 4 / 3)
-        assert doc.metadata.token_count == expected_tokens
+        assert page.metadata.token_count == expected_tokens
 
 
 class TestPaginatedResponseSequenceProtocol:
     """Test that PaginatedResponse behaves like a Sequence."""
 
     @pytest.fixture
-    def sample_documents(self) -> List[TextDocument]:
-        """Create sample documents for testing."""
-        docs: List[TextDocument] = []
+    def sample_pages(self) -> List[TextPage]:
+        """Create sample pages for testing."""
+        pages: List[TextPage] = []
         for i in range(1, 4):
-            doc = TextDocument(id=f"doc{i}", content=f"Content {i}")
-            doc.metadata.index = i  # type: ignore[attr-defined]
-            docs.append(doc)
-        return docs
+            page = TextPage(
+                uri=PageURI.parse(f"test/TextPage:doc{i}@1"), content=f"Content {i}"
+            )
+            page.metadata.index = i  # type: ignore[attr-defined]
+            pages.append(page)
+        return pages
 
     @pytest.fixture
     def paginated_response(
-        self, sample_documents: List[TextDocument]
-    ) -> PaginatedResponse[TextDocument]:
+        self, sample_pages: List[TextPage]
+    ) -> PaginatedResponse[TextPage]:
         """Create a sample PaginatedResponse for testing."""
         return PaginatedResponse(
-            documents=sample_documents,
+            results=sample_pages,
             page_number=0,
             has_next_page=True,
-            total_documents=10,
+            total_results=10,
         )
 
     @pytest.fixture
-    def empty_paginated_response(self) -> PaginatedResponse[TextDocument]:
+    def empty_paginated_response(self) -> PaginatedResponse[TextPage]:
         """Create an empty PaginatedResponse for testing."""
         return PaginatedResponse(
-            documents=[], page_number=0, has_next_page=False, total_documents=0
+            results=[], page_number=0, has_next_page=False, total_results=0
         )
 
     def test_implements_sequence_protocol(
-        self, paginated_response: PaginatedResponse[TextDocument]
+        self, paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test that PaginatedResponse implements the Sequence protocol."""
         assert isinstance(paginated_response, Sequence)
 
     def test_length_operations(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __len__ method."""
         assert len(paginated_response) == 3
@@ -95,38 +103,38 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_index_access(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_pages: List[TextPage],
     ) -> None:
         """Test __getitem__ method with integer indices."""
         # Test positive indices
-        assert paginated_response[0] == sample_documents[0]
-        assert paginated_response[1] == sample_documents[1]
-        assert paginated_response[2] == sample_documents[2]
+        assert paginated_response[0] == sample_pages[0]
+        assert paginated_response[1] == sample_pages[1]
+        assert paginated_response[2] == sample_pages[2]
 
         # Test negative indices
-        assert paginated_response[-1] == sample_documents[2]
-        assert paginated_response[-2] == sample_documents[1]
-        assert paginated_response[-3] == sample_documents[0]
+        assert paginated_response[-1] == sample_pages[2]
+        assert paginated_response[-2] == sample_pages[1]
+        assert paginated_response[-3] == sample_pages[0]
 
     def test_slice_access(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_pages: List[TextPage],
     ) -> None:
         """Test __getitem__ method with slice objects."""
         # Test basic slicing
-        assert list(paginated_response[1:]) == sample_documents[1:]
-        assert list(paginated_response[:2]) == sample_documents[:2]
-        assert list(paginated_response[1:3]) == sample_documents[1:3]
+        assert list(paginated_response[1:]) == sample_pages[1:]
+        assert list(paginated_response[:2]) == sample_pages[:2]
+        assert list(paginated_response[1:3]) == sample_pages[1:3]
 
         # Test step slicing
-        assert list(paginated_response[::2]) == sample_documents[::2]
+        assert list(paginated_response[::2]) == sample_pages[::2]
 
     def test_index_errors(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __getitem__ method raises IndexError for invalid indices."""
         with pytest.raises(IndexError):
@@ -140,13 +148,13 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_iteration_behavior(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_pages: List[TextPage],
     ) -> None:
         """Test __iter__ method and iteration patterns."""
         # Test basic iteration
         iterated_docs = list(paginated_response)
-        assert iterated_docs == sample_documents
+        assert iterated_docs == sample_pages
 
         # Test that we can iterate multiple times
         count = 0
@@ -156,11 +164,11 @@ class TestPaginatedResponseSequenceProtocol:
 
         # Test reverse iteration
         reversed_docs = list(reversed(paginated_response))
-        expected = list(reversed(sample_documents))
+        expected = list(reversed(sample_pages))
         assert reversed_docs == expected
 
     def test_empty_iteration(
-        self, empty_paginated_response: PaginatedResponse[TextDocument]
+        self, empty_paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test iteration over empty response."""
         iterated_docs = list(empty_paginated_response)
@@ -168,8 +176,8 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_boolean_conversion(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        empty_paginated_response: PaginatedResponse[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        empty_paginated_response: PaginatedResponse[TextPage],
     ) -> None:
         """Test __bool__ method and truthiness."""
         assert bool(paginated_response) is True
@@ -188,25 +196,30 @@ class TestPaginatedResponseSequenceProtocol:
 
     def test_membership_testing(
         self,
-        paginated_response: PaginatedResponse[TextDocument],
-        sample_documents: List[TextDocument],
+        paginated_response: PaginatedResponse[TextPage],
+        sample_pages: List[TextPage],
     ) -> None:
         """Test __contains__ method."""
-        # Test with documents that are in the response
-        assert sample_documents[0] in paginated_response
-        assert sample_documents[1] in paginated_response
-        assert sample_documents[2] in paginated_response
+        # Test with pages that are in the response
+        assert sample_pages[0] in paginated_response
+        assert sample_pages[1] in paginated_response
+        assert sample_pages[2] in paginated_response
 
-        # Test with document that's not in the response
-        other_doc = TextDocument(id="other", content="Other content")
-        assert other_doc not in paginated_response
+        # Test with page that's not in the response
+        not_in_response = TextPage(
+            uri=PageURI.parse("test/TextPage:not_in_response@1"),
+            content="Different content",
+        )
+        assert not_in_response not in paginated_response
 
     def test_membership_empty_response(
-        self, empty_paginated_response: PaginatedResponse[TextDocument]
+        self, empty_paginated_response: PaginatedResponse[TextPage]
     ) -> None:
         """Test __contains__ method with empty response."""
-        doc = TextDocument(id="test", content="Test content")
-        assert doc not in empty_paginated_response
+        page = TextPage(
+            uri=PageURI.parse("test/TextPage:test@1"), content="Test content"
+        )
+        assert page not in empty_paginated_response
 
 
 class TestPaginatedResponseUtilityMethods:
@@ -214,16 +227,18 @@ class TestPaginatedResponseUtilityMethods:
 
     def test_equality_comparison(self) -> None:
         """Test equality between PaginatedResponse instances."""
-        sample_docs = [TextDocument(id="1", content="Content 1")]
+        sample_pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:doc1@1"), content="Content 1")
+        ]
 
         response1 = PaginatedResponse(
-            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+            results=sample_pages, page_number=0, has_next_page=True, total_results=5
         )
         response2 = PaginatedResponse(
-            documents=sample_docs, page_number=0, has_next_page=True, total_documents=5
+            results=sample_pages, page_number=0, has_next_page=True, total_results=5
         )
         response3 = PaginatedResponse(
-            documents=sample_docs, page_number=1, has_next_page=True, total_documents=5
+            results=sample_pages, page_number=1, has_next_page=True, total_results=5
         )
 
         assert response1 == response2  # Same content
@@ -231,80 +246,93 @@ class TestPaginatedResponseUtilityMethods:
 
     def test_sequence_methods_simulation(self) -> None:
         """Test sequence-like methods that can be simulated."""
-        docs = [
-            TextDocument(id="1", content="First"),
-            TextDocument(id="2", content="Second"),
-            TextDocument(id="1", content="First"),  # Duplicate for testing
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="First"),
+            TextPage(uri=PageURI.parse("test/TextPage:2@1"), content="Second"),
+            TextPage(
+                uri=PageURI.parse("test/TextPage:1@1"), content="First"
+            ),  # Duplicate for testing
         ]
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=False, total_documents=3
+            results=pages, page_number=0, has_next_page=False, total_results=3
         )
 
-        # Test index-like functionality (finding position of document)
+        # Test index-like functionality (finding position of page)
         def find_index(
-            response: PaginatedResponse[TextDocument], target_doc: TextDocument
+            response: PaginatedResponse[TextPage], target_page: TextPage
         ) -> int:
-            for i, doc in enumerate(response):
-                if doc == target_doc:
+            for i, page in enumerate(response):
+                if page == target_page:
                     return i
-            raise ValueError("Document not found")
+            raise ValueError("Page not found")
 
-        assert find_index(response, docs[0]) == 0
-        assert find_index(response, docs[1]) == 1
+        assert find_index(response, pages[0]) == 0
+        assert find_index(response, pages[1]) == 1
 
-        # Test with non-existent document
-        other_doc = TextDocument(id="other", content="Other")
+        # Test with non-existent page
+        other_page = TextPage(
+            uri=PageURI.parse("test/TextPage:other@1"), content="Other"
+        )
         with pytest.raises(ValueError):
-            find_index(response, other_doc)
+            find_index(response, other_page)
 
 
 class TestPaginatedResponseEdgeCases:
     """Test edge cases and boundary conditions."""
 
-    def test_single_document_response(self) -> None:
-        """Test PaginatedResponse with single document."""
-        doc = TextDocument(id="single", content="Single document")
+    def test_single_page_response(self) -> None:
+        """Test PaginatedResponse with a single page."""
+        page = TextPage(
+            uri=PageURI.parse("test/TextPage:single@1"), content="Single page"
+        )
         response = PaginatedResponse(
-            documents=[doc], page_number=0, has_next_page=False, total_documents=1
+            results=[page], page_number=0, has_next_page=False, total_results=1
         )
 
         assert len(response) == 1
-        assert response[0] == doc
-        assert response[-1] == doc
-        assert list(response) == [doc]
+        assert response[0] == page
+        assert response[-1] == page
+        assert list(response) == [page]
         assert bool(response) is True
 
     def test_large_response_performance(self) -> None:
-        """Test PaginatedResponse with many documents."""
-        docs = [TextDocument(id=f"doc_{i}", content=f"Content {i}") for i in range(100)]
+        """Test PaginatedResponse with many pages."""
+        pages = [
+            TextPage(
+                uri=PageURI.parse(f"test/TextPage:doc{i}@1"), content=f"Content {i}"
+            )
+            for i in range(100)
+        ]
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=True, total_documents=1000
+            results=pages, page_number=0, has_next_page=True, total_results=1000
         )
 
         # Test that operations are efficient
         assert len(response) == 100
-        assert response[50].id == "doc_50"
-        assert response[-1].id == "doc_99"
+        assert response[50].uri.id == "doc50"
+        assert response[-1].uri.id == "doc99"
 
         # Test slicing doesn't cause performance issues
         subset = list(response[25:75])
         assert len(subset) == 50
-        assert subset[0].id == "doc_25"
+        assert subset[0].uri.id == "doc25"
 
-    def test_response_with_complex_documents(self) -> None:
-        """Test PaginatedResponse with documents containing complex metadata."""
-        docs = []
+    def test_response_with_complex_pages(self) -> None:
+        """Test PaginatedResponse with pages containing complex metadata."""
+        pages = []
         for i in range(3):
-            doc = TextDocument(id=f"complex_{i}", content=f"Complex content {i}")
-            doc.metadata.tags = [f"tag_{i}", f"category_{i % 2}"]  # type: ignore[attr-defined]
-            doc.metadata.score = i * 0.5  # type: ignore[attr-defined]
-            doc.metadata.nested = {"level": i, "type": "test"}  # type: ignore[attr-defined]
-            docs.append(doc)
+            page = TextPage(
+                uri=PageURI.parse(f"test/TextPage:complex{i}@1"),
+                content=f"Complex content {i}",
+            )
+            page.metadata.tags = [f"tag_{i}", f"category_{i % 2}"]  # type: ignore[attr-defined]
+            page.metadata.score = i * 0.5  # type: ignore[attr-defined]
+            page.metadata.nested = {"level": i, "type": "test"}  # type: ignore[attr-defined]
+            pages.append(page)
 
         response = PaginatedResponse(
-            documents=docs, page_number=0, has_next_page=False, total_documents=3
+            results=pages, page_number=0, has_next_page=False, total_results=3
         )
-
         # Verify complex metadata is preserved
         assert response[0].metadata.tags == ["tag_0", "category_0"]  # type: ignore[attr-defined]
         assert response[1].metadata.score == 0.5  # type: ignore[attr-defined]
@@ -316,12 +344,14 @@ class TestPaginatedResponseSerialization:
 
     def test_to_json_dict_with_all_fields(self) -> None:
         """Test to_json_dict includes all fields when they have values."""
-        docs = [TextDocument(id="test", content="Test content")]
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=0,
             has_next_page=True,
-            total_documents=10,
+            total_results=10,
             token_count=42,
         )
 
@@ -329,62 +359,68 @@ class TestPaginatedResponseSerialization:
 
         # Should include all fields
         expected_keys = {
-            "documents",
+            "results",
             "page_number",
             "has_next_page",
-            "total_documents",
+            "total_results",
             "token_count",
         }
         assert set(result.keys()) == expected_keys
         assert result["page_number"] == 0
         assert result["has_next_page"] is True
-        assert result["total_documents"] == 10
+        assert result["total_results"] == 10
         assert result["token_count"] == 42
-        assert len(result["documents"]) == 1
+        assert len(result["results"]) == 1
 
-    def test_to_json_dict_without_total_documents(self) -> None:
-        """Test to_json_dict excludes total_documents when None."""
-        docs = [TextDocument(id="test", content="Test content")]
+    def test_to_json_dict_without_total_results(self) -> None:
+        """Test to_json_dict excludes total_results when None."""
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=0,
             has_next_page=False,
-            total_documents=None,  # Explicitly None
+            total_results=None,  # Explicitly None
             token_count=42,
         )
 
         result = response.to_json_dict()
 
-        # Should NOT include total_documents
-        expected_keys = {"documents", "page_number", "has_next_page", "token_count"}
+        # Should NOT include total_results
+        expected_keys = {"results", "page_number", "has_next_page", "token_count"}
         assert set(result.keys()) == expected_keys
-        assert "total_documents" not in result
+        assert "total_results" not in result
         assert result["token_count"] == 42
 
     def test_to_json_dict_without_token_count(self) -> None:
         """Test to_json_dict excludes token_count when None."""
-        docs = [TextDocument(id="test", content="Test content")]
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=1,
             has_next_page=True,
-            total_documents=100,
+            total_results=100,
             token_count=None,  # Explicitly None
         )
 
         result = response.to_json_dict()
 
         # Should NOT include token_count
-        expected_keys = {"documents", "page_number", "has_next_page", "total_documents"}
+        expected_keys = {"results", "page_number", "has_next_page", "total_results"}
         assert set(result.keys()) == expected_keys
         assert "token_count" not in result
-        assert result["total_documents"] == 100
+        assert result["total_results"] == 100
 
     def test_to_json_dict_minimal_fields(self) -> None:
         """Test to_json_dict with only required fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=2,
             has_next_page=False,
             # Both optional fields are None by default
@@ -393,59 +429,63 @@ class TestPaginatedResponseSerialization:
         result = response.to_json_dict()
 
         # Should only include required fields
-        expected_keys = {"documents", "page_number", "has_next_page"}
+        expected_keys = {"results", "page_number", "has_next_page"}
         assert set(result.keys()) == expected_keys
-        assert "total_documents" not in result
+        assert "total_results" not in result
         assert "token_count" not in result
         assert result["page_number"] == 2
         assert result["has_next_page"] is False
 
     def test_to_json_dict_excludes_zero_values(self) -> None:
         """Test to_json_dict excludes zero values for optional fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=0,
             has_next_page=False,
-            total_documents=0,  # Zero - should be excluded
+            total_results=0,  # Zero - should be excluded
             token_count=0,  # Zero - should be excluded
         )
 
         result = response.to_json_dict()
 
         # Should NOT include zero values for optional fields
-        expected_keys = {"documents", "page_number", "has_next_page"}
+        expected_keys = {"results", "page_number", "has_next_page"}
         assert set(result.keys()) == expected_keys
-        assert "total_documents" not in result
+        assert "total_results" not in result
         assert "token_count" not in result
 
-    def test_to_json_dict_empty_documents(self) -> None:
-        """Test to_json_dict works with empty document list."""
+    def test_to_json_dict_empty_pages(self) -> None:
+        """Test to_json_dict works with empty page list."""
         response = PaginatedResponse(
-            documents=[],
+            results=[],
             page_number=0,
             has_next_page=False,
-            total_documents=0,  # Zero - will be excluded
+            total_results=0,  # Zero - will be excluded
             token_count=0,  # Zero - will be excluded
         )
 
         result = response.to_json_dict()
 
         # Should only include core fields since optional fields are zero
-        expected_keys = {"documents", "page_number", "has_next_page"}
+        expected_keys = {"results", "page_number", "has_next_page"}
         assert set(result.keys()) == expected_keys
-        assert result["documents"] == []
-        assert "total_documents" not in result
+        assert result["results"] == []
+        assert "total_results" not in result
         assert "token_count" not in result
 
     def test_to_json_dict_includes_positive_values(self) -> None:
         """Test to_json_dict includes positive values for optional fields."""
-        docs = [TextDocument(id="test", content="Test content")]
+        pages = [
+            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
+        ]
         response = PaginatedResponse(
-            documents=docs,
+            results=pages,
             page_number=0,
             has_next_page=True,
-            total_documents=1,  # Positive - should be included
+            total_results=1,  # Positive - should be included
             token_count=15,  # Positive - should be included
         )
 
@@ -453,12 +493,12 @@ class TestPaginatedResponseSerialization:
 
         # Should include all fields since optional fields have positive values
         expected_keys = {
-            "documents",
+            "results",
             "page_number",
             "has_next_page",
-            "total_documents",
+            "total_results",
             "token_count",
         }
         assert set(result.keys()) == expected_keys
-        assert result["total_documents"] == 1
+        assert result["total_results"] == 1
         assert result["token_count"] == 15

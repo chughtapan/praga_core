@@ -23,8 +23,10 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
+from praga_core.context import ServerContext
+from praga_core.types import Page
+
 from .tool import PaginatedResponse, Tool
-from .types import Document
 
 
 class FunctionInvocation(BaseModel):
@@ -43,9 +45,9 @@ class FunctionInvocation(BaseModel):
         return json.dumps(payload, sort_keys=True, default=str)
 
 
-ToolReturnType = Union[Sequence[Document], PaginatedResponse[Document]]
-SequenceToolFunction = Callable[..., Sequence[Document]]
-PaginatedToolFunction = Callable[..., PaginatedResponse[Document]]
+ToolReturnType = Union[Sequence[Page], PaginatedResponse[Page]]
+SequenceToolFunction = Callable[..., Sequence[Page]]
+PaginatedToolFunction = Callable[..., PaginatedResponse[Page]]
 ToolFunction = Union[SequenceToolFunction, PaginatedToolFunction]
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
@@ -91,16 +93,16 @@ class RetrieverToolkitMeta(abc.ABC):
             ttl: The time to live for the cache.
             invalidator: A function to invalidate the cache.
             paginate: Whether to paginate the tool via invoke method.
-            max_docs: The maximum number of documents to return per page.
+            max_docs: The maximum number of Pages to return per page.
             max_tokens: The maximum number of tokens to return per page.
         """
         # Use function name if no name is provided
         if name is None:
             name = method.__name__
-        if not _is_document_sequence_type(method):
+        if not _is_page_sequence_type(method):
             raise TypeError(
                 f"""Tool "{name}" must have return type annotation of either 
-                "Sequence[Document]", "List[Document]', or "PaginatedResponse". 
+                "Sequence[Page]", "List[Page]', or "PaginatedResponse". 
                 Got: {getattr(method, '__annotations__', {})}
             """
             )
@@ -229,7 +231,7 @@ class RetrieverToolkitMeta(abc.ABC):
         Thin decorator for functions that **do not** use `self`.
         Example:
             @RetrieverToolkit.tool(cache=False)
-            def get_docs() -> List[Document]: ...
+            def get_docs() -> List[Page]: ...
         """
 
         def marker(fn: ToolFunction) -> ToolFunction:
@@ -268,23 +270,27 @@ class RetrieverToolkitMeta(abc.ABC):
     def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
         pass
 
-    @abc.abstractmethod
-    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
-        pass
-
 
 class RetrieverToolkit(RetrieverToolkitMeta):
+
+    def __init__(self, context: Optional[ServerContext] = None) -> None:
+        self._context = context
+        super().__init__()
 
     def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
         blob = json.dumps([fn.__qualname__, args, kwargs], default=str, sort_keys=True)
         return md5(blob.encode()).hexdigest()
 
-    def speculate(self, query: str) -> List[Tuple[FunctionInvocation, List[Document]]]:
-        return []
-
+    @property
     @abc.abstractmethod
-    def get_document_by_id(self, document_id: str) -> Optional[Document]:
+    def name(self) -> str:
         pass
+
+    @property
+    def context(self) -> ServerContext:
+        if self._context is None:
+            raise RuntimeError(f"Context not set for toolkit: {self.name}")
+        return self._context
 
 
 # ========================================================
@@ -311,12 +317,12 @@ def _create_method_stub(fn: ToolFunction) -> ToolFunction:
     return method_stub
 
 
-def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
+def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
     """
-    Check if a function returns Sequence[Document], List[Document], or PaginatedResponse.
+    Check if a function returns Sequence[Page], List[Page], or PaginatedResponse.
 
-    Since PaginatedResponse now implements Sequence[Document], this covers all valid
-    return types for retriever tools. Also accepts subclasses of Document.
+    Since PaginatedResponse now implements Sequence[Page], this covers all valid
+    return types for retriever tools. Also accepts subclasses of Page.
     """
     try:
         type_hints = get_type_hints(tool_function)
@@ -334,18 +340,16 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
         if origin_type is None:
             return False
 
-        # Handle generic PaginatedResponse[T] where T is bound to Document
+        # Handle generic PaginatedResponse[T] where T is bound to Page
         if origin_type is PaginatedResponse:
             type_args = get_args(return_annotation)
             if len(type_args) == 1:
-                document_type = type_args[0]
-                # Check if it's Document or a subclass of Document
-                if document_type is Document:
+                Page_type = type_args[0]
+                # Check if it's Page or a subclass of Page
+                if Page_type is Page:
                     return True
-                # Check if it's a subclass of Document
-                if isinstance(document_type, type) and issubclass(
-                    document_type, Document
-                ):
+                # Check if it's a subclass of Page
+                if isinstance(Page_type, type) and issubclass(Page_type, Page):
                     return True
             return False
 
@@ -353,14 +357,12 @@ def _is_document_sequence_type(tool_function: ToolFunction) -> bool:
         if origin_type in (Sequence, ABCSequence, list, List):
             type_args = get_args(return_annotation)
             if len(type_args) == 1:
-                document_type = type_args[0]
-                # Check if it's Document or a subclass of Document
-                if document_type is Document:
+                Page_type = type_args[0]
+                # Check if it's Page or a subclass of Page
+                if Page_type is Page:
                     return True
-                # Check if it's a subclass of Document
-                if isinstance(document_type, type) and issubclass(
-                    document_type, Document
-                ):
+                # Check if it's a subclass of Page
+                if isinstance(Page_type, type) and issubclass(Page_type, Page):
                     return True
 
         return False

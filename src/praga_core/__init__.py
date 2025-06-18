@@ -1,20 +1,24 @@
-"""Praga Core - A toolkit for document retrieval and agent-based search."""
+"""
+Praga Core
 
-from .retriever import RetrieverAgent
-from .retriever_toolkit import RetrieverToolkit
-from .tool import PaginatedResponse, Tool
-from .types import Document, DocumentMetadata, DocumentReference, TextDocument
+A framework for building document retrieval toolkits and agents for LLM applications.
+Includes LLMRP (LLM Retrieval Protocol) implementation for standardized document retrieval over HTTP.
+"""
+
+from .agents import ReactAgent, RetrieverToolkit
+from .context import ServerContext
+from .retriever import RetrieverAgentBase
+from .types import Page, PageReference, PageURI, TextPage
+
+__version__ = "0.1.0"
 
 __all__ = [
-    # Core types
-    "Document",
-    "DocumentMetadata",
-    "DocumentReference",
-    "TextDocument",
-    # Tools and toolkit
-    "Tool",
-    "PaginatedResponse",
+    "ServerContext",
+    "ReactAgent",
+    "RetrieverAgentBase",
     "RetrieverToolkit",
-    # Retriever agent
-    "RetrieverAgent",
+    "Page",
+    "PageReference",
+    "PageURI",
+    "TextPage",
 ]

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from praga_core.types import DocumentReference
+from praga_core.types import PageReference
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class AgentResponse(BaseModel):
     response_code: ResponseCode = Field(
         description="Response code indicating success or specific error type"
     )
-    references: List[DocumentReference] = Field(
+    references: List[PageReference] = Field(
         default_factory=list,
         description="List of document references with explanations",
     )

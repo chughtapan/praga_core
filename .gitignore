@@ -111,3 +111,6 @@ dmypy.json
 # PyPI configuration file
 .pypirc
 
+# Secrets
+credentials.json
+token.pickle
