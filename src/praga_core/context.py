@@ -121,6 +121,7 @@ class ServerContext:
         """Resolve references to pages in the cache."""
         for ref in results:
             ref.page = self.get_page(ref.uri)
+            assert ref.page is not None
         return results
 
     def register_handler(

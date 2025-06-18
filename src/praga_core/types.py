@@ -8,7 +8,14 @@ from abc import ABC
 from datetime import datetime
 from typing import Annotated, Any, List, Optional, Union, overload
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_serializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +108,11 @@ class PageURI(BaseModel):
             and self.version == other.version
         )
 
+    @model_serializer
+    def ser_model(self) -> str:
+        """Serialize PageURI as string representation."""
+        return str(self)
+
 
 class Page(BaseModel, ABC):
     """A document with a URI, content, and optional metadata."""
@@ -130,16 +142,6 @@ class Page(BaseModel, ABC):
 
     def __repr__(self) -> str:
         return self.text
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Custom model dump that uses URI string representation."""
-        if "mode" in kwargs and kwargs["mode"] != "json":
-            logger.warning("Page.model_dump: mode is not json, ignoring")
-            del kwargs["mode"]
-        kwargs["mode"] = "json"
-        data = super().model_dump(**kwargs)
-        data["uri"] = str(self.uri)
-        return data
 
 
 class PageMetadata(BaseModel):
@@ -181,13 +183,6 @@ class PageReference(BaseModel):
     @page.setter
     def page(self, page: Page) -> None:
         self._page = page
-
-    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
-        """Custom model dump that uses URI string representation."""
-        data = super().model_dump(**kwargs)
-        # Replace the uri dict with its string representation
-        data["uri"] = str(self.uri)
-        return data
 
 
 class SearchRequest(BaseModel):
