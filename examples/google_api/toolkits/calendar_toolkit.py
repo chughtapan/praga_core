@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pages.calendar import CalendarEventPage  # noqa: E402
 from services.calendar_service import CalendarService  # noqa: E402
+from toolkits.person_resolver import resolve_person_to_email  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,7 @@ class CalendarToolkit(RetrieverToolkit):
 
         # Register all calendar tools
         self.register_tool(self.get_events_by_date_range)
-        self.register_tool(self.get_events_by_attendee)
-        self.register_tool(self.get_events_by_organizer)
+        self.register_tool(self.get_events_with_person)
         self.register_tool(self.get_upcoming_events)
         self.register_tool(self.get_events_by_keyword)
 
@@ -98,39 +98,25 @@ class CalendarToolkit(RetrieverToolkit):
         }
         return self._search_events_paginated_response(query_params, page)
 
-    def get_events_by_attendee(
-        self, attendee: str, page: int = 0
+    def get_events_with_person(
+        self, person: str, page: int = 0
     ) -> PaginatedResponse[CalendarEventPage]:
-        """Get calendar events where a specific person is an attendee.
+        """Get calendar events where a specific person is involved (as attendee or organizer).
 
         Args:
-            attendee: Email address or name of the attendee to search for
+            person: Email address or name of the person to search for
             page: Page number for pagination (0-based)
         """
-        # Calculate time range
+        # Resolve person identifier to email address if needed
+        email = resolve_person_to_email(person, self.context)
+        if not email:
+            logger.warning(f"Could not resolve person '{person}' to email address")
+            return PaginatedResponse(results=[], page_number=page, has_next_page=False)
+
+        # Search for events with this person (attendee or organizer)
         now = datetime.utcnow()
         query_params = {
-            "q": f"who:{attendee}",
-            "calendarId": "primary",
-            "timeMin": now.isoformat() + "Z",
-            "singleEvents": True,
-            "orderBy": "startTime",
-        }
-        return self._search_events_paginated_response(query_params, page)
-
-    def get_events_by_organizer(
-        self, organizer: str, page: int = 0
-    ) -> PaginatedResponse[CalendarEventPage]:
-        """Get calendar events organized by a specific person.
-
-        Args:
-            organizer: Email address or name of the organizer to search for
-            page: Page number for pagination (0-based)
-        """
-        # Get upcoming events and filter by organizer
-        now = datetime.utcnow()
-        query_params = {
-            "q": f"organizer:{organizer}",
+            "q": email,
             "calendarId": "primary",
             "timeMin": now.isoformat() + "Z",
             "singleEvents": True,

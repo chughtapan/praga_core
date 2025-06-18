@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pages.gmail import EmailPage  # noqa: E402
 from services.gmail_service import GmailService  # noqa: E402
+from toolkits.person_resolver import resolve_person_to_email  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -80,10 +81,16 @@ class GmailToolkit(RetrieverToolkit):
         """Get emails from a specific sender.
 
         Args:
-            sender: Email address of the sender
+            sender: Email address or name of the sender
             page: Page number for pagination (0-based)
         """
-        query = f"from:{sender}"
+        # Resolve person identifier to email address if needed
+        email = resolve_person_to_email(sender, self.context)
+        if not email:
+            logger.warning(f"Could not resolve sender '{sender}' to email address")
+            return PaginatedResponse(results=[], page_number=page, has_next_page=False)
+
+        query = f"from:{email}"
         return self._search_emails_paginated_response(query, page)
 
     def get_emails_by_recipient(
@@ -92,10 +99,18 @@ class GmailToolkit(RetrieverToolkit):
         """Get emails sent to a specific recipient.
 
         Args:
-            recipient: Email address of the recipient
+            recipient: Email address or name of the recipient
             page: Page number for pagination (0-based)
         """
-        query = f"to:{recipient}"
+        # Resolve person identifier to email address if needed
+        email = resolve_person_to_email(recipient, self.context)
+        if not email:
+            logger.warning(
+                f"Could not resolve recipient '{recipient}' to email address"
+            )
+            return PaginatedResponse(results=[], page_number=page, has_next_page=False)
+
+        query = f"to:{email}"
         return self._search_emails_paginated_response(query, page)
 
     def get_emails_by_cc_participant(
@@ -104,10 +119,18 @@ class GmailToolkit(RetrieverToolkit):
         """Get emails where a specific person was CC'd.
 
         Args:
-            cc_participant: Email address of the CC participant
+            cc_participant: Email address or name of the CC participant
             page: Page number for pagination (0-based)
         """
-        query = f"cc:{cc_participant}"
+        # Resolve person identifier to email address if needed
+        email = resolve_person_to_email(cc_participant, self.context)
+        if not email:
+            logger.warning(
+                f"Could not resolve CC participant '{cc_participant}' to email address"
+            )
+            return PaginatedResponse(results=[], page_number=page, has_next_page=False)
+
+        query = f"cc:{email}"
         return self._search_emails_paginated_response(query, page)
 
     def get_emails_by_date_range(
