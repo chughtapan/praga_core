@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""
-Production MCP Server for Google APIs - Gmail & Calendar integration.
-"""
+"""MCP Server for Google APIs - Gmail & Calendar integration."""
 
 import os
 import sys

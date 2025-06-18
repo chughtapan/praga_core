@@ -8,7 +8,14 @@ from abc import ABC
 from datetime import datetime
 from typing import Annotated, Any, List, Optional, Union, overload
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PrivateAttr
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_serializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +108,11 @@ class PageURI(BaseModel):
             and self.version == other.version
         )
 
+    @model_serializer
+    def ser_model(self) -> str:
+        """Serialize PageURI as string representation."""
+        return str(self)
+
 
 class Page(BaseModel, ABC):
     """A document with a URI, content, and optional metadata."""
@@ -113,10 +125,7 @@ class Page(BaseModel, ABC):
     )
 
     model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S"),
-            PageURI: str,
-        },
+        json_encoders={datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")},
     )
 
     @property
@@ -164,10 +173,6 @@ class PageReference(BaseModel):
     score: float = Field(description="Score of the document", default=0.0)
     explanation: str = Field(description="Explanation of the document", default="")
     _page: Optional[Page] = PrivateAttr(default=None)
-
-    model_config = ConfigDict(
-        json_encoders={PageURI: str},
-    )
 
     @property
     def page(self) -> Page:

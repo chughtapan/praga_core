@@ -13,12 +13,11 @@ class TestPageURIJSONSerialization:
     """Test PageURI JSON serialization behavior."""
 
     def test_page_uri_direct_json_serialization(self) -> None:
-        """Test that PageURI can be serialized directly to JSON."""
+        """Test that PageURI can be serialized directly to JSON string."""
         uri = PageURI(root="test", type="Email", id="123", version=2)
 
-        # PageURI itself doesn't have json_encoders, so this should serialize as dict
         serialized = uri.model_dump(mode="json")
-        expected = {"root": "test", "type": "Email", "id": "123", "version": 2}
+        expected = "test/Email:123@2"
         assert serialized == expected
 
     def test_page_uri_string_representation(self) -> None:
