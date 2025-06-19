@@ -350,6 +350,68 @@ class TestReactAgentBasic:
         assert len(references) == 1
         assert references[0].uri.id == "1"
 
+    def test_fix_invalid_json_escapes(self):
+        """Test that invalid JSON escapes are properly fixed."""
+        # Test the fix_json_escapes function directly
+        from praga_core.agents.response import fix_json_escapes
+
+        test_cases = [
+            # Single quote escape
+            ('{"text": "can\'t do this"}', '{"text": "can\'t do this"}'),
+            # Multiple invalid escapes
+            (
+                '{"text": "email cc\'d to user\\@ domain"}',
+                '{"text": "email cc\'d to user@ domain"}',
+            ),
+            # Valid escapes should remain unchanged
+            (
+                '{"text": "quote \\"here\\" and slash \\\\"}',
+                '{"text": "quote \\"here\\" and slash \\\\"}',
+            ),
+        ]
+
+        for input_json, expected_output in test_cases:
+            result = fix_json_escapes(input_json)
+            assert result == expected_output, f"Failed for input: {input_json}"
+
+    def test_parse_llm_output_with_invalid_escapes(self):
+        """Test parsing LLM output that contains invalid JSON escapes."""
+        # This simulates the exact error the user encountered
+        llm_output_with_invalid_escapes = """
+        {
+            "question": "Find all unread emails for John Doe",
+            "thought": "Filtering unread emails where John Doe is recipient",
+            "action": "Final Answer",
+            "action_input": {
+                "response_code": "success",
+                "references": [
+                    {
+                        "uri": "google/email:197848012048cbc3@1",
+                        "explanation": "email cc\'d to Tapan Chugh <tapanc@cs.washington.edu> (Re: MLLM Serving Sync)"
+                    }
+                ],
+                "error_message": null
+            }
+        }
+        """
+
+        parsed_output = self.agent._parse_llm_output(llm_output_with_invalid_escapes)
+
+        # Should successfully parse without error
+        assert parsed_output is not None
+        # Import AgentFinish from the react_agent module
+        from praga_core.agents.react_agent import AgentFinish
+
+        assert isinstance(parsed_output, AgentFinish)
+
+        # Verify the content was parsed correctly
+        return_values = parsed_output.return_values
+        assert return_values["response_code"] == "success"
+        assert len(return_values["references"]) == 1
+        assert (
+            "email cc'd to Tapan Chugh" in return_values["references"][0]["explanation"]
+        )
+
     def test_raw_document_retrieval(self):
         """Test that documents are properly retrieved and included in results."""
         mock_response_1 = json.dumps(

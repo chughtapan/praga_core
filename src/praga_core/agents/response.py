@@ -10,6 +10,35 @@ from praga_core.types import PageReference
 logger = logging.getLogger(__name__)
 
 
+def fix_json_escapes(json_str: str) -> str:
+    """Fix invalid JSON escape sequences that LLMs sometimes generate.
+
+    The JSON standard only allows specific escape sequences:
+    \\", \\\\, \\/, \\b, \\f, \\n, \\r, \\t, and \\uXXXX
+
+    LLMs sometimes generate invalid escapes like \\' which need to be fixed.
+    """
+    # Fix invalid single quote escapes - replace \' with just '
+    # This is the most common issue with LLM-generated JSON
+    json_str = json_str.replace("\\'", "'")
+
+    # Fix other common invalid escapes that might appear
+    # Replace invalid escapes with their intended characters
+    invalid_escapes = {
+        "\\`": "`",  # backtick
+        "\\&": "&",  # ampersand
+        "\\%": "%",  # percent
+        "\\#": "#",  # hash
+        "\\@": "@",  # at symbol
+        "\\$": "$",  # dollar
+    }
+
+    for invalid, replacement in invalid_escapes.items():
+        json_str = json_str.replace(invalid, replacement)
+
+    return json_str
+
+
 class ResponseCode(str, Enum):
     """Response codes for retrieval operations."""
 
@@ -66,6 +95,8 @@ def parse_agent_response(text: str | Dict[str, Any]) -> AgentResponse:
 
             # Parse the JSON string
             try:
+                # Fix invalid JSON escapes before parsing
+                json_match = fix_json_escapes(json_match)
                 parsed = json.loads(json_match)
             except json.JSONDecodeError as e:
                 logger.error("JSON decode error: %s", str(e))

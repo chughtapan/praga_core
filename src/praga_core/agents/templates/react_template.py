@@ -99,7 +99,7 @@ When a tool returns a paginated response, it will include:
 
 After each paginated response, you MUST:
 1. Analyze the observation in your next thought
-    - Keep track of the relevant document ids you have found so far.
+    - Keep track of the relevant document URIs you have found so far.
     - Think if there might be more documents that are relevant to the query or not.
 2. Consider:
    - The timestamp range of documents in the current page
@@ -108,7 +108,7 @@ After each paginated response, you MUST:
    - has_next_page is false OR
    - documents are sorted by date in descending order and the oldest document is beyond the date range of the query.
    - you are very likely to have found all the documents you need to answer the query.
-4. When returning the final answer, include the document ids from all the pages you have found so far.
+4. When returning the final answer, include the document URIs from all the pages you have found so far.
 
 To request paginated results, include this optional parameter in your action_input:
     - page: Page number to retrieve (starting from 0, defaults to 0)
@@ -116,7 +116,7 @@ To request paginated results, include this optional parameter in your action_inp
 Example:
 ```json
 {{
-    "thought": "I found some document ids "ii", "jj", "kk" that might be relevant to the query, but I should check the next page to be sure",
+    "thought": "I found some document URIs "ii", "jj", "kk" that might be relevant to the query, but I should check the next page to be sure",
     "action": "search_documents",
     "action_input": {{
         "query": "find emails about AI",
@@ -126,10 +126,10 @@ Example:
 ```
 ```json
 {{
-    "thought": "I found all the document ids I need to answer the query, so I can stop searching.",
+    "thought": "I found all the document URIs I need to answer the query, so I can stop searching.",
     "action": "Final Answer",
     "action_input": {{
-        "answer": "I found all the document ids I need to answer the query"
+        "answer": "I found all the document URIs I need to answer the query"
     }}
 }}
 ```
