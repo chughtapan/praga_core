@@ -19,9 +19,15 @@ from praga_core.context import ServerContext
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from services import CalendarService, GmailService, PeopleService  # noqa: E402
+from services import (  # noqa: E402
+    CalendarService,
+    GmailService,
+    GoogleDocsService,
+    PeopleService,
+)
 from toolkits.calendar_toolkit import CalendarToolkit  # noqa: E402
 from toolkits.gmail_toolkit import GmailToolkit  # noqa: E402
+from toolkits.google_docs_toolkit import GoogleDocsToolkit  # noqa: E402
 from toolkits.people_toolkit import PeopleToolkit  # noqa: E402
 
 load_dotenv()
@@ -38,11 +44,13 @@ def setup_services(context: ServerContext) -> dict:
     gmail_service = GmailService(context)
     calendar_service = CalendarService(context)
     people_service = PeopleService(context)
+    gdocs_service = GoogleDocsService(context)
 
     return {
         "gmail": gmail_service,
         "calendar": calendar_service,
         "people": people_service,
+        "gdocs": gdocs_service,
     }
 
 
@@ -53,8 +61,9 @@ def setup_toolkits(context: ServerContext, services: dict) -> list:
     gmail_toolkit = GmailToolkit(context, services["gmail"])
     calendar_toolkit = CalendarToolkit(context, services["calendar"])
     people_toolkit = PeopleToolkit(context, services["people"])
+    gdocs_toolkit = GoogleDocsToolkit(context, services["gdocs"])
 
-    return [gmail_toolkit, calendar_toolkit, people_toolkit]
+    return [gmail_toolkit, calendar_toolkit, people_toolkit, gdocs_toolkit]
 
 
 def setup_agent(toolkits: list) -> ReactAgent:

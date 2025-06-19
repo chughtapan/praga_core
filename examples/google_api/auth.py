@@ -13,6 +13,8 @@ _SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/contacts.readonly",  # For People API
     "https://www.googleapis.com/auth/directory.readonly",
+    "https://www.googleapis.com/auth/documents.readonly",  # For Google Docs
+    "https://www.googleapis.com/auth/drive.readonly",  # For Drive file listing
 ]
 
 
@@ -35,6 +37,8 @@ class GoogleAuthManager:
         self._creds = None
         self._gmail_service = None
         self._calendar_service = None
+        self._docs_service = None
+        self._drive_service = None
         self._authenticate()
         self._initialized = True
 
@@ -89,3 +93,15 @@ class GoogleAuthManager:
     def get_people_service(self):
         """Get People API service."""
         return build("people", "v1", credentials=self._creds)
+
+    def get_docs_service(self):
+        """Get Google Docs service (cached)."""
+        if self._docs_service is None:
+            self._docs_service = build("docs", "v1", credentials=self._creds)
+        return self._docs_service
+
+    def get_drive_service(self):
+        """Get Google Drive service (cached)."""
+        if self._drive_service is None:
+            self._drive_service = build("drive", "v3", credentials=self._creds)
+        return self._drive_service
