@@ -33,7 +33,7 @@ def get_agent_format_instructions(include_examples: bool = True) -> str:
         thought="I have found relevant documents",
         references=[
             {
-                "uri": "root/DocumentClassName:doc_id@1",
+                "uri": "$URI_1",
                 "explanation": "explanation of why this document is relevant",
             }
         ],
@@ -44,9 +44,9 @@ Your final answer should follow this format:
 {base_example}
 
 Follow these guidelines:
-1. Return document URIs and explanations, not complete documents
+1. Return the document URIs and explanations, not complete documents
 2. Return all relevant document references, not just one
-3. Always include the complete URI in the "uri" field
+3. Always return the EXACT URI from the "uri" field in the document
 4. Use "success" response_code when documents are found
 5. Use "error_no_documents_found" when no matches exist
 6. Use "error_internal" for any other errors
@@ -59,11 +59,11 @@ Follow these guidelines:
             thought="I found documents containing the requested terms",
             references=[
                 {
-                    "uri": "root/Email:doc1@1",
+                    "uri": "$URI_1",
                     "explanation": "email contains AI and machine learning",
                 },
                 {
-                    "uri": "root/SlackMessage:doc2@1",
+                    "uri": "$URI_2",
                     "explanation": "slack message contains machine learning examples",
                 },
             ],

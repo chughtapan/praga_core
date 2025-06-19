@@ -15,6 +15,7 @@ from .format_instructions import get_agent_format_instructions
 from .response import (
     AgentResponse,
     ResponseCode,
+    fix_json_escapes,
     parse_agent_response,
 )
 from .templates.react_template import REACT_TEMPLATE
@@ -366,6 +367,8 @@ class ReactAgent(RetrieverAgentBase):
             if isinstance(output, str):
                 # Handle markdown-wrapped JSON
                 json_str = self._extract_json_from_markdown(output)
+                # Fix invalid JSON escapes before parsing
+                json_str = fix_json_escapes(json_str)
                 output_dict = json.loads(json_str)
             else:
                 output_dict = output
