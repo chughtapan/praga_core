@@ -29,24 +29,14 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
     """Container for paginated tool responses that implements Sequence[T]."""
 
     results: Sequence[T]
-    page_number: int
-    has_next_page: bool
-    total_results: Optional[int] = None
-    token_count: Optional[int] = None
+    next_cursor: Optional[str] = None
 
     def to_json_dict(self) -> Dict[str, Any]:
         """Convert to a JSON-serializable dictionary."""
         result = {
             "results": [doc.model_dump(mode="json") for doc in self.results],
-            "page_number": self.page_number,
-            "has_next_page": self.has_next_page,
+            "next_cursor": self.next_cursor,
         }
-
-        # Only include optional fields if they have meaningful values (not None or 0)
-        if self.total_results is not None and self.total_results > 0:
-            result["total_results"] = self.total_results
-        if self.token_count is not None and self.token_count > 0:
-            result["token_count"] = self.token_count
 
         return result
 
@@ -156,9 +146,11 @@ class Tool:
             doc += "\n\n    Args:"
             doc_lines = doc.split("\n")
 
-        # Add page parameter to Args
+        # Add cursor parameter to Args
         args_idx = next(i for i, line in enumerate(doc_lines) if "Args:" in line)
-        doc_lines.insert(args_idx + 1, "        page: Page number (starting from 0)")
+        doc_lines.insert(
+            args_idx + 1, "        cursor: Cursor token for pagination (optional)"
+        )
 
         # Replace or add Returns section
         returns_idx = next(
@@ -166,7 +158,7 @@ class Tool:
         )
         returns_content = [
             "    Returns:",
-            "        PaginatedResponse: Contains requested page of documents with pagination metadata.",
+            "        PaginatedResponse: Contains results and optional next_cursor for pagination.",
         ]
 
         if returns_idx is not None:
@@ -192,11 +184,14 @@ class Tool:
         """Extract metadata from the function signature."""
         sig = inspect.signature(self.func)
 
-        # Add page parameter if tool is paginated and doesn't already have one
+        # Add cursor parameter if tool is paginated and doesn't already have one
         params = dict(sig.parameters)
-        if self.page_size is not None and "page" not in params:
-            params["page"] = inspect.Parameter(
-                "page", inspect.Parameter.KEYWORD_ONLY, default=0, annotation=int
+        if self.page_size is not None and "cursor" not in params:
+            params["cursor"] = inspect.Parameter(
+                "cursor",
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Optional[str],
             )
 
             # Update docstring with pagination information
@@ -209,88 +204,100 @@ class Tool:
             return_type=sig.return_annotation,
         )
 
+    def _parse_cursor(self, cursor: Optional[str]) -> int:
+        """Parse cursor string to get starting position for pagination."""
+        if cursor is None:
+            return 0
+
+        try:
+            start_pos = int(cursor)
+        except ValueError:
+            raise ValueError("Invalid cursor format")
+
+        if start_pos < 0:
+            raise ValueError("Cursor position must be >= 0")
+
+        return start_pos
+
+    def _create_next_cursor(
+        self, start_pos: int, documents_returned: int, total_results: int
+    ) -> Optional[str]:
+        """Create next cursor if there are more results available."""
+        documents_processed = start_pos + documents_returned
+        has_next_page = documents_processed < total_results
+        return str(documents_processed) if has_next_page else None
+
     def _paginate_results(
-        self, results: List[Page], page: int
+        self, results: List[Page], cursor: Optional[str]
     ) -> PaginatedResponse[Page]:
         """Paginate results with both document count and token limits."""
         if not self.page_size:
             raise RuntimeError("_paginate_results called on non-paginated tool")
 
         total_results = len(results)
+        start_pos = self._parse_cursor(cursor)
 
-        if page < 0:
-            raise ValueError("Page number must be >= 0")
-
-        # Calculate page slice boundaries
-        page_start = page * self.page_size
-        page_end = page_start + self.page_size
-        page_documents = results[page_start:page_end]
-
-        # Apply token budget limit within the page if max_tokens is set
-        final_documents: List[Page] = []
-        total_tokens = 0
-
-        if self.max_tokens is not None:
-            for i, document in enumerate(page_documents):
-                doc_tokens = document.metadata.token_count or 0
-
-                # Always include at least one document per page, even if it exceeds token limit
-                if i == 0:
-                    final_documents.append(document)
-                    total_tokens += doc_tokens
-                elif total_tokens + doc_tokens <= self.max_tokens:
-                    final_documents.append(document)
-                    total_tokens += doc_tokens
-                else:
-                    break
-        else:
-            # No token limit, use all documents in the page
-            final_documents = list(page_documents)
-            total_tokens = sum(doc.metadata.token_count or 0 for doc in final_documents)
-
-        # Calculate if there are more documents available beyond what we returned
-        # This accounts for documents filtered out due to token limits
-        documents_returned = len(final_documents)
-        documents_processed = page_start + documents_returned
-        has_next_page = documents_processed < total_results
-
-        return PaginatedResponse(
-            results=final_documents,
-            page_number=page,
-            has_next_page=has_next_page,
-            total_results=total_results,
-            token_count=total_tokens,
+        # Extract page slice
+        end_pos = start_pos + self.page_size
+        page_documents = results[start_pos:end_pos]
+        next_cursor = self._create_next_cursor(
+            start_pos, len(page_documents), total_results
         )
 
-    def __call__(self, **kwargs: Any) -> Union[Sequence[Page], PaginatedResponse[Page]]:
-        """Execute the tool with the given arguments."""
-        if not self.page_size:
-            # No pagination, call directly
-            return self.func(**kwargs)
+        return PaginatedResponse(
+            results=page_documents,
+            next_cursor=next_cursor,
+        )
 
-        # Extract page parameter
-        page = kwargs.pop("page", 0)
-        if page < 0:
-            raise ValueError("Page number must be >= 0")
+    def _handle_native_pagination(self, **kwargs: Any) -> PaginatedResponse[Page]:
+        """Handle tools that support native pagination (accept cursor parameter)."""
+        results = self.func(**kwargs)
 
-        # Call the function to get all results (caching handled by toolkit)
+        # If function returns PaginatedResponse, use it directly
+        assert isinstance(results, PaginatedResponse)
+        return results
+
+    def _handle_client_side_pagination(self, **kwargs: Any) -> PaginatedResponse[Page]:
+        """Handle tools that need client-side pagination (don't accept cursor parameter)."""
+        # Extract cursor from kwargs before calling function
+        cursor = kwargs.pop("cursor", None)
+
+        # Call the function without cursor parameter
         results = self.func(**kwargs)
 
         # Convert to list if needed
         if not isinstance(results, list):
             results = list(results)
+        return self._paginate_results(results, cursor)
 
-        # Handle no results case
-        if len(results) == 0:
-            raise ValueError("No matching documents found")
+    def _supports_native_pagination(self) -> bool:
+        """Check if the underlying function accepts a cursor parameter."""
+        sig = inspect.signature(self.func)
+        return "cursor" in sig.parameters
 
-        return self._paginate_results(results, page)
+    def __call__(self, **kwargs: Any) -> Union[Sequence[Page], PaginatedResponse[Page]]:
+        """Execute the tool with the given arguments."""
+        # No pagination configured - call function directly
+        if not self.page_size:
+            return self.func(**kwargs)
+
+        # Route to appropriate pagination handler
+        if self._supports_native_pagination():
+            return self._handle_native_pagination(**kwargs)
+        else:
+            return self._handle_client_side_pagination(**kwargs)
 
     def invoke(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Execute the tool with the given input and serialize the response."""
         try:
             kwargs = self._prepare_arguments(raw_input)
             result = self(**kwargs)
+            if len(result) == 0:
+                return {
+                    "response_code": "error_no_documents_found",
+                    "references": [],
+                    "error_message": "No matching documents found",
+                }
             return self._serialize_result(result)
 
         except ValueError as e:

@@ -93,9 +93,8 @@ Remember to:
 # Paginated Tool Usage
 
 When a tool returns a paginated response, it will include:
-- documents: List of documents for the current page
-- has_next_page: Boolean indicating if there are more pages
-- page_number: Current page number (0-based)
+- results: List of documents for the current page
+- next_cursor: Optional cursor token for the next page (null if no more pages)
 
 After each paginated response, you MUST:
 1. Analyze the observation in your next thought
@@ -105,22 +104,22 @@ After each paginated response, you MUST:
    - The timestamp range of documents in the current page
    - If the oldest document is still within the query's date range
 3. Do not request the next page if:
-   - has_next_page is false OR
+   - next_cursor is null OR
    - documents are sorted by date in descending order and the oldest document is beyond the date range of the query.
    - you are very likely to have found all the documents you need to answer the query.
 4. When returning the final answer, include the document URIs from all the pages you have found so far.
 
 To request paginated results, include this optional parameter in your action_input:
-    - page: Page number to retrieve (starting from 0, defaults to 0)
+    - cursor: Cursor token to retrieve the next page (optional, use value from previous response's next_cursor)
 
 Example:
 ```json
 {{
-    "thought": "I found some document URIs "ii", "jj", "kk" that might be relevant to the query, but I should check the next page to be sure",
+    "thought": "I found some document URIs 'ii', 'jj', 'kk' that might be relevant to the query, but I should check the next page to be sure",
     "action": "search_documents",
     "action_input": {{
         "query": "find emails about AI",
-        "page": 1
+        "cursor": "cursor_token_from_previous_response"
     }}
 }}
 ```

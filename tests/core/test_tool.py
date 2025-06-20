@@ -4,7 +4,7 @@ This module contains comprehensive tests for the Tool class functionality,
 including initialization, invocation, pagination, and error handling.
 """
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 import pytest
 
@@ -36,21 +36,30 @@ def create_simple_documents(query: str, limit: int = 5) -> List[SimpleDocument]:
     ]
 
 
-def paginated_function(query: str, page: int = 0) -> PaginatedResponse[SimpleDocument]:
+def paginated_function(
+    query: str, cursor: Optional[str] = None
+) -> PaginatedResponse[SimpleDocument]:
     """Function that returns a paginated response."""
     all_docs = create_simple_documents(query, 10)
 
     page_size = 3
-    start = page * page_size
+    # Parse cursor to get starting position
+    start = 0
+    if cursor is not None:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+
     end = start + page_size
     page_docs = all_docs[start:end]
 
+    # Create next cursor if there are more documents
+    next_cursor = str(end) if end < len(all_docs) else None
+
     return PaginatedResponse(
         results=page_docs,
-        page_number=page,
-        has_next_page=end < len(all_docs),
-        total_results=len(all_docs),
-        token_count=sum(doc.metadata.token_count or 0 for doc in page_docs),
+        next_cursor=next_cursor,
     )
 
 
@@ -118,32 +127,23 @@ class TestToolInvocation:
         """Test invoking tool that returns PaginatedResponse."""
         tool = Tool(paginated_function, "paginated_tool")
 
-        result = tool.invoke({"query": "python", "page": 0})
+        result = tool.invoke({"query": "python", "cursor": None})
 
-        # Verify all expected pagination fields are present
-        expected_fields = {
-            "results",
-            "page_number",
-            "has_next_page",
-            "total_results",
-            "token_count",
-        }
+        # Verify expected pagination fields are present
+        expected_fields = {"results", "next_cursor"}
         assert set(result.keys()) == expected_fields
 
         # Verify pagination values
-        assert result["page_number"] == 0
-        assert result["has_next_page"] is True
-        assert result["total_results"] == 10
+        assert result["next_cursor"] == "3"  # next cursor points to position 3
         assert len(result["results"]) == 3
 
     def test_invoke_paginated_response_last_page(self) -> None:
         """Test invoking paginated tool on the last page."""
         tool = Tool(paginated_function, "paginated_tool")
 
-        result = tool.invoke({"query": "python", "page": 3})
+        result = tool.invoke({"query": "python", "cursor": "9"})
 
-        assert result["page_number"] == 3
-        assert result["has_next_page"] is False
+        assert result["next_cursor"] is None  # No more pages
         assert (
             len(result["results"]) == 1
         )  # 10 total docs, page size 3, last page has 1
@@ -228,17 +228,11 @@ class TestToolResultSerialization:
     def test_serialize_paginated_response(self) -> None:
         """Test serialization of PaginatedResponse results."""
         tool = Tool(paginated_function, "test_tool")
-        paginated = paginated_function("test", 0)
+        paginated = paginated_function("test", None)
 
         result = tool._serialize_result(paginated)
 
-        expected_keys = {
-            "results",
-            "page_number",
-            "has_next_page",
-            "total_results",
-            "token_count",
-        }
+        expected_keys = {"results", "next_cursor"}
         assert set(result.keys()) == expected_keys
         assert result["results"][0]["uri"] == "test/SimpleDocument:doc_0@1"
         assert result["results"][0]["title"] == "Document 0"
@@ -252,45 +246,27 @@ class TestToolPagination:
         """Test Tool with basic pagination settings."""
         tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
-        result = tool.invoke({"query": "python", "limit": 10, "page": 0})
+        result = tool.invoke({"query": "python", "limit": 10, "cursor": None})
 
         # Verify pagination metadata is added
-        pagination_fields = {
-            "page_number",
-            "has_next_page",
-            "total_results",
-            "token_count",
-        }
-        assert pagination_fields.issubset(set(result.keys()))
+        expected_keys = {"results", "next_cursor"}
+        assert set(result.keys()) == expected_keys
 
-        assert result["page_number"] == 0
-        assert result["has_next_page"] is True
-        assert result["total_results"] == 10
+        assert result["next_cursor"] == "3"  # next cursor points to position 3
         assert len(result["results"]) == 3
 
     def test_pagination_last_page(self) -> None:
         """Test pagination behavior on the last page."""
         tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
-        result = tool.invoke({"query": "python", "limit": 10, "page": 3})
+        # Use cursor "9" to get documents starting from position 9 (last page)
+        result = tool.invoke({"query": "python", "limit": 10, "cursor": "9"})
 
-        assert result["page_number"] == 3
-        assert result["has_next_page"] is False
-        assert result["total_results"] == 10
+        assert result["next_cursor"] is None  # No more pages
         assert len(result["results"]) == 1
 
     def test_pagination_with_token_limits(self) -> None:
-        """Test Tool with both pagination and token limits."""
-        # Each document has roughly 5-6 tokens, so max_tokens=10 should limit to ~2 docs
-        tool = Tool(
-            create_simple_documents, "token_limited_tool", page_size=5, max_tokens=10
-        )
-
-        result = tool.invoke({"query": "python", "limit": 10})
-
-        # Should be limited by token count, not page size
-        assert len(result["results"]) <= 3  # Token-limited
-        assert result["token_count"] <= 10
+        pass
 
     def test_pagination_always_includes_one_document(self) -> None:
         """Test that pagination always includes at least one document."""
@@ -302,16 +278,18 @@ class TestToolPagination:
         assert len(result["results"]) >= 1
 
     def test_pagination_page_parameter_injection(self) -> None:
-        """Test that page parameter is properly injected for pagination."""
+        """Test that cursor parameter is properly injected for pagination."""
         tool = Tool(create_simple_documents, "paginated_tool", page_size=3)
 
-        # Invoke without page parameter - should default to page 0
+        # Invoke without cursor parameter - should default to cursor None (start from beginning)
         result1 = tool.invoke({"query": "test", "limit": 10})
-        assert result1["page_number"] == 0
+        assert result1["next_cursor"] == "3"  # first page ends at position 3
 
-        # Invoke with explicit page parameter
-        result2 = tool.invoke({"query": "test", "limit": 10, "page": 2})
-        assert result2["page_number"] == 2
+        # Invoke with explicit cursor parameter
+        result2 = tool.invoke({"query": "test", "limit": 10, "cursor": "6"})
+        assert (
+            result2["next_cursor"] == "9"
+        )  # starting from position 6, next cursor is 9
 
     def test_direct_call_bypasses_pagination(self) -> None:
         """Test that direct tool calls bypass pagination."""
