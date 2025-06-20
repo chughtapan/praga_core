@@ -1,17 +1,13 @@
 """People toolkit for retrieving and managing person information."""
 
 import logging
-import os
-import sys
 from typing import List
 
 from praga_core.agents import RetrieverToolkit
 from praga_core.context import ServerContext
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pages.person import PersonPage  # noqa: E402
-from services.people_service import PeopleService  # noqa: E402
+from ..pages.person import PersonPage
+from ..services.people_service import PeopleService
 
 logger = logging.getLogger(__name__)
 

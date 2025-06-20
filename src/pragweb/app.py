@@ -9,20 +9,14 @@ Clean architecture with:
 """
 
 import logging
-import os
-import sys
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
-from praga_core.agents import ReactAgent
+from praga_core.agents import ReactAgent, RetrieverToolkit
 from praga_core.context import ServerContext
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from services import CalendarService, GmailService, PeopleService  # noqa: E402
-from toolkits.calendar_toolkit import CalendarToolkit  # noqa: E402
-from toolkits.gmail_toolkit import GmailToolkit  # noqa: E402
-from toolkits.people_toolkit import PeopleToolkit  # noqa: E402
+from pragweb.google_api.services import CalendarService, GmailService, PeopleService
+from pragweb.google_api.toolkits import CalendarToolkit, GmailToolkit, PeopleToolkit
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def setup_services(context: ServerContext) -> dict:
+def setup_services(context: ServerContext) -> Dict[str, Any]:
     """Set up services and register handlers with context."""
     logger.info("Setting up services...")
 
@@ -46,7 +40,9 @@ def setup_services(context: ServerContext) -> dict:
     }
 
 
-def setup_toolkits(context: ServerContext, services: dict) -> list:
+def setup_toolkits(
+    context: ServerContext, services: Dict[str, Any]
+) -> List[RetrieverToolkit]:
     """Set up toolkits that use services for search and context for resolution."""
     logger.info("Setting up toolkits...")
 
@@ -57,7 +53,7 @@ def setup_toolkits(context: ServerContext, services: dict) -> list:
     return [gmail_toolkit, calendar_toolkit, people_toolkit]
 
 
-def setup_agent(toolkits: list) -> ReactAgent:
+def setup_agent(toolkits: List[RetrieverToolkit]) -> ReactAgent:
     """Set up the React agent with toolkits."""
     logger.info("Setting up React agent...")
 
@@ -81,7 +77,7 @@ def setup_context() -> ServerContext:
     return ctx
 
 
-def main():
+def main() -> None:
     """Run the Google API integration app."""
     print("🚀 Google API Integration App")
     print("=" * 50)

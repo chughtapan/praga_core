@@ -1,18 +1,14 @@
 """Calendar service for handling Calendar API interactions and page creation."""
 
 import logging
-import os
-import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from praga_core.context import ServerContext
 from praga_core.types import PageURI
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from auth import GoogleAuthManager  # noqa: E402
-from pages.calendar import CalendarEventPage  # noqa: E402
+from ..auth import GoogleAuthManager
+from ..pages.calendar import CalendarEventPage
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +16,7 @@ logger = logging.getLogger(__name__)
 class CalendarService:
     """Service for Calendar API interactions and CalendarEventPage creation."""
 
-    def __init__(self, context: ServerContext):
+    def __init__(self, context: ServerContext) -> None:
         self.context = context
         self.root = context.root
         self.auth_manager = GoogleAuthManager()

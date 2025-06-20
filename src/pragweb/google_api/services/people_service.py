@@ -2,23 +2,34 @@
 
 import hashlib
 import logging
-import os
 import re
-import sys
 from email.utils import parseaddr
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict, Union
 
-from sqlmodel import Field, Session, SQLModel, create_engine, select
+from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
 from praga_core.context import ServerContext
 from praga_core.types import PageURI
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from auth import GoogleAuthManager  # noqa: E402
-from pages.person import PersonPage  # noqa: E402
+from ..auth import GoogleAuthManager
+from ..pages.person import PersonPage
 
 logger = logging.getLogger(__name__)
+
+
+class PersonInfo(TypedDict):
+    """Type for person information dictionary."""
+
+    first_name: str
+    last_name: str
+    email: str
+    source: str
+
+
+class PersonInfoWithExisting(TypedDict):
+    """Type for person information dictionary with existing person."""
+
+    existing: PersonPage
 
 
 # SQLModel for person storage
@@ -77,12 +88,12 @@ class PeopleService:
         """
         with Session(self.engine) as session:
             identifier_lower = identifier.lower().strip()
-            all_matches = []
+            all_matches: List[PersonRecord] = []
 
             # Try exact email match first (most specific)
             if _is_email_address(identifier):
                 stmt = select(PersonRecord).where(
-                    PersonRecord.email == identifier_lower
+                    col(PersonRecord.email) == identifier_lower
                 )
                 person_record = session.exec(stmt).first()
                 if person_record:
@@ -90,7 +101,7 @@ class PeopleService:
 
             # Try full name matches
             stmt = select(PersonRecord).where(
-                PersonRecord.full_name.ilike(f"%{identifier_lower}%")
+                col(PersonRecord.full_name).ilike(f"%{identifier_lower}%")
             )
             full_name_matches = session.exec(stmt).all()
             all_matches.extend(full_name_matches)
@@ -98,7 +109,7 @@ class PeopleService:
             # Try first name matches (if not already found)
             if not all_matches:
                 stmt = select(PersonRecord).where(
-                    PersonRecord.first_name.ilike(f"%{identifier_lower}%")
+                    col(PersonRecord.first_name).ilike(f"%{identifier_lower}%")
                 )
                 first_name_matches = session.exec(stmt).all()
                 all_matches.extend(first_name_matches)
@@ -119,7 +130,7 @@ class PeopleService:
             return existing_people
 
         # Try to extract information from various API sources
-        all_person_infos = []
+        all_person_infos: List[PersonInfo] = []
 
         # Google People API might return multiple matches
         people_infos = self._extract_people_info_from_google_people(identifier)
@@ -129,15 +140,18 @@ class PeopleService:
         gmail_infos = self._extract_people_from_gmail_contacts(identifier)
         all_person_infos.extend(gmail_infos)
 
-        # Calendar might find multiple attendees/organizers
+        #  might find multiple attendees/organizers
         calendar_infos = self._extract_people_from_calendar_contacts(identifier)
         all_person_infos.extend(calendar_infos)
 
         # Filter out non-real persons and remove duplicates based on email address
-        unique_person_infos = []
+        unique_person_infos: List[Union[PersonInfo, PersonInfoWithExisting]] = []
         seen_emails = set()
 
         for person_info in all_person_infos:
+            if not person_info["email"]:  # Skip if no email
+                continue
+
             email = person_info["email"].lower()
 
             # Skip if we've already seen this email
@@ -155,6 +169,8 @@ class PeopleService:
                 # Check for name divergence
                 existing_full_name = (
                     existing_person_with_email.full_name.lower().strip()
+                    if existing_person_with_email.full_name
+                    else ""
                 )
                 new_full_name = f"{person_info['first_name']} {person_info['last_name']}".lower().strip()
 
@@ -179,11 +195,11 @@ class PeopleService:
             )
 
         # Store all found people in database and return PersonPages
-        created_people = []
-        for person_info in unique_person_infos:
+        created_people: List[PersonPage] = []
+        for person_info in unique_person_infos:  # type: ignore
             if "existing" in person_info:
                 # Return existing person
-                created_people.append(person_info["existing"])
+                created_people.append(person_info["existing"])  # type: ignore
             else:
                 # Create new person
                 person_page = self._store_and_create_page(person_info)
@@ -194,11 +210,13 @@ class PeopleService:
         )
         return created_people
 
-    def _is_real_person(self, person_info: Dict[str, str]) -> bool:
+    def _is_real_person(self, person_info: PersonInfo) -> bool:
         """Check if this person info represents a real person or an automated system."""
-        email = person_info["email"].lower()
-        first_name = person_info["first_name"].lower()
-        last_name = person_info["last_name"].lower()
+        email = person_info["email"].lower() if person_info["email"] else ""
+        first_name = (
+            person_info["first_name"].lower() if person_info["first_name"] else ""
+        )
+        last_name = person_info["last_name"].lower() if person_info["last_name"] else ""
         full_name = f"{first_name} {last_name}".strip()
 
         # Common automated email patterns
@@ -268,7 +286,7 @@ class PeopleService:
     def _get_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
         """Get existing person by email address."""
         with Session(self.engine) as session:
-            stmt = select(PersonRecord).where(PersonRecord.email == email.lower())
+            stmt = select(PersonRecord).where(col(PersonRecord.email) == email.lower())
             person_record = session.exec(stmt).first()
             if person_record:
                 return self._record_to_page(person_record)
@@ -276,7 +294,7 @@ class PeopleService:
 
     def _extract_people_info_from_google_people(
         self, identifier: str
-    ) -> List[Dict[str, str]]:
+    ) -> List[PersonInfo]:
         """Extract multiple people information from Google People API."""
         people_infos = []
         try:
@@ -300,8 +318,8 @@ class PeopleService:
         return people_infos
 
     def _extract_person_from_people_api(
-        self, person: Dict, identifier: str
-    ) -> Optional[Dict[str, str]]:
+        self, person: Dict[str, Any], identifier: str
+    ) -> Optional[PersonInfo]:
         """Extract person info from People API person object."""
         names = person.get("names", [])
         emails = person.get("emailAddresses", [])
@@ -315,13 +333,16 @@ class PeopleService:
         last_name = primary_name.get("familyName", "")
         primary_email = emails[0].get("value", "")
 
+        # Skip if no email
+        if not primary_email:
+            return None
+
         # Check if this matches our identifier
         full_name = f"{first_name} {last_name}".strip()
         if (
             identifier.lower() in primary_email.lower()
             or identifier.lower() in full_name.lower()
         ):
-
             return {
                 "first_name": first_name,
                 "last_name": last_name,
@@ -331,9 +352,7 @@ class PeopleService:
 
         return None
 
-    def _extract_people_from_gmail_contacts(
-        self, identifier: str
-    ) -> List[Dict[str, str]]:
+    def _extract_people_from_gmail_contacts(self, identifier: str) -> List[PersonInfo]:
         """Extract multiple people info from Gmail by searching emails from/to this person."""
         people_infos = []
 
@@ -347,7 +366,7 @@ class PeopleService:
 
     def _extract_people_from_gmail_field(
         self, identifier: str, field: str
-    ) -> List[Dict[str, str]]:
+    ) -> List[PersonInfo]:
         """Extract people info from Gmail by searching a specific field (from/to)."""
         people_infos = []
         try:
@@ -386,7 +405,7 @@ class PeopleService:
 
     def _extract_person_from_gmail_message(
         self, message_id: str, field: str
-    ) -> Optional[Dict[str, str]]:
+    ) -> Optional[PersonInfo]:
         """Extract person info from a specific Gmail message."""
         try:
             message = (
@@ -416,7 +435,7 @@ class PeopleService:
 
     def _extract_people_from_calendar_contacts(
         self, identifier: str
-    ) -> List[Dict[str, str]]:
+    ) -> List[PersonInfo]:
         """Extract multiple people info from Calendar by searching for events with attendees/organizers."""
         people_infos = []
         try:
@@ -463,8 +482,8 @@ class PeopleService:
         return people_infos
 
     def _extract_people_from_calendar_attendees(
-        self, event: Dict, identifier: str
-    ) -> List[Dict[str, str]]:
+        self, event: Dict[str, Any], identifier: str
+    ) -> List[PersonInfo]:
         """Extract multiple people info from calendar event attendees."""
         people_infos = []
         attendees = event.get("attendees", [])
@@ -491,8 +510,8 @@ class PeopleService:
         return people_infos
 
     def _extract_from_calendar_organizer(
-        self, event: Dict, identifier: str
-    ) -> Optional[Dict[str, str]]:
+        self, event: Dict[str, Any], identifier: str
+    ) -> Optional[PersonInfo]:
         """Extract person info from calendar event organizer."""
         organizer = event.get("organizer", {})
         email = organizer.get("email", "")
@@ -509,7 +528,7 @@ class PeopleService:
 
     def _parse_name_and_email(
         self, display_name: str, email: str, source: str
-    ) -> Dict[str, str]:
+    ) -> PersonInfo:
         """Parse display name and email into person info."""
         if display_name:
             parts = display_name.split()
@@ -528,7 +547,7 @@ class PeopleService:
             "source": source,
         }
 
-    def _store_and_create_page(self, person_info: Dict[str, str]) -> PersonPage:
+    def _store_and_create_page(self, person_info: PersonInfo) -> PersonPage:
         """Store person in database and create PersonPage."""
         person_id = self._generate_person_id(person_info["email"])
         full_name = f"{person_info['first_name']} {person_info['last_name']}".strip()

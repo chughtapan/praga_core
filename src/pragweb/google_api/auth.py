@@ -2,16 +2,16 @@
 
 import os
 import pickle
-from typing import Optional
+from typing import Any, Optional
 
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
+from googleapiclient.discovery import build  # type: ignore[import-untyped]
 
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/contacts.readonly",  # For People API
+    "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/directory.readonly",
 ]
 
@@ -22,7 +22,7 @@ class GoogleAuthManager:
     _instance: Optional["GoogleAuthManager"] = None
     _initialized = False
 
-    def __new__(cls, secrets_dir: str = ""):
+    def __new__(cls, secrets_dir: str = "") -> "GoogleAuthManager":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -74,18 +74,18 @@ class GoogleAuthManager:
             with open(token_path, "wb") as token:
                 pickle.dump(self._creds, token)
 
-    def get_gmail_service(self):
+    def get_gmail_service(self) -> Any:
         """Get Gmail service (cached)."""
         if self._gmail_service is None:
             self._gmail_service = build("gmail", "v1", credentials=self._creds)
         return self._gmail_service
 
-    def get_calendar_service(self):
+    def get_calendar_service(self) -> Any:
         """Get Calendar service (cached)."""
         if self._calendar_service is None:
             self._calendar_service = build("calendar", "v3", credentials=self._creds)
         return self._calendar_service
 
-    def get_people_service(self):
+    def get_people_service(self) -> Any:
         """Get People API service."""
         return build("people", "v1", credentials=self._creds)

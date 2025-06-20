@@ -1,8 +1,6 @@
 """Gmail service for handling Gmail API interactions and page creation."""
 
 import logging
-import os
-import sys
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import List, Optional, Tuple
@@ -10,11 +8,9 @@ from typing import List, Optional, Tuple
 from praga_core.context import ServerContext
 from praga_core.types import PageURI
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from auth import GoogleAuthManager  # noqa: E402
-from pages.gmail import EmailPage  # noqa: E402
-from pages.utils import GmailParser  # noqa: E402
+from ..auth import GoogleAuthManager
+from ..pages.gmail import EmailPage
+from ..pages.utils import GmailParser
 
 logger = logging.getLogger(__name__)
 
