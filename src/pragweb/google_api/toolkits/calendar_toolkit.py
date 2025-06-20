@@ -1,19 +1,15 @@
 """Calendar toolkit for retrieving and searching calendar events."""
 
 import logging
-import os
-import sys
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit
 from praga_core.context import ServerContext
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pages.calendar import CalendarEventPage  # noqa: E402
-from services.calendar_service import CalendarService  # noqa: E402
-from toolkits.person_resolver import resolve_person_to_email  # noqa: E402
+from ..pages.calendar import CalendarEventPage
+from ..services.calendar_service import CalendarService
+from .utils import resolve_person_to_email
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +62,12 @@ class CalendarToolkit(RetrieverToolkit):
         )
 
         # Resolve URIs to pages using context - throw errors, don't fail silently
-        pages = [self.context.get_page(uri) for uri in uris]
+        pages: List[CalendarEventPage] = []
+        for uri in uris:
+            page_obj = self.context.get_page(uri)
+            if not isinstance(page_obj, CalendarEventPage):
+                raise TypeError(f"Expected CalendarEventPage but got {type(page_obj)}")
+            pages.append(page_obj)
         logger.debug(f"Successfully resolved {len(pages)} calendar pages")
 
         return PaginatedResponse(

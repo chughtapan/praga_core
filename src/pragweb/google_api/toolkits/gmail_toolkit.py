@@ -1,17 +1,14 @@
 """Gmail toolkit for retrieving and searching emails."""
 
 import logging
-import os
-import sys
+from typing import List
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit
 from praga_core.context import ServerContext
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from pages.gmail import EmailPage  # noqa: E402
-from services.gmail_service import GmailService  # noqa: E402
-from toolkits.person_resolver import resolve_person_to_email  # noqa: E402
+from ..pages.gmail import EmailPage
+from ..services.gmail_service import GmailService
+from .utils import resolve_person_to_email
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +63,12 @@ class GmailToolkit(RetrieverToolkit):
         )
 
         # Resolve URIs to pages using context - throw errors, don't fail silently
-        pages = [self.context.get_page(uri) for uri in uris]
+        pages: List[EmailPage] = []
+        for uri in uris:
+            page_obj = self.context.get_page(uri)
+            if not isinstance(page_obj, EmailPage):
+                raise TypeError(f"Expected EmailPage but got {type(page_obj)}")
+            pages.append(page_obj)
         logger.debug(f"Successfully resolved {len(pages)} email pages")
 
         return PaginatedResponse(

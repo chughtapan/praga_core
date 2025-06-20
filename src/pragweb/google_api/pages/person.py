@@ -1,6 +1,6 @@
 """Person page definition."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field
 
@@ -15,7 +15,7 @@ class PersonPage(Page):
     email: str = Field(description="Person's email address")
     full_name: Optional[str] = Field(None, description="Person's full name (computed)")
 
-    def __init__(self, **data):
+    def __init__(self, **data: Any) -> None:
         super().__init__(**data)
         # Compute full_name if not provided
         if self.full_name is None:
