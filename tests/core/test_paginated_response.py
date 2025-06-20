@@ -74,16 +74,15 @@ class TestPaginatedResponseSequenceProtocol:
         """Create a sample PaginatedResponse for testing."""
         return PaginatedResponse(
             results=sample_pages,
-            page_number=0,
-            has_next_page=True,
-            total_results=10,
+            next_cursor="next_cursor_token",
         )
 
     @pytest.fixture
     def empty_paginated_response(self) -> PaginatedResponse[TextPage]:
         """Create an empty PaginatedResponse for testing."""
         return PaginatedResponse(
-            results=[], page_number=0, has_next_page=False, total_results=0
+            results=[],
+            next_cursor=None,
         )
 
     def test_implements_sequence_protocol(
@@ -231,18 +230,12 @@ class TestPaginatedResponseUtilityMethods:
             TextPage(uri=PageURI.parse("test/TextPage:doc1@1"), content="Content 1")
         ]
 
-        response1 = PaginatedResponse(
-            results=sample_pages, page_number=0, has_next_page=True, total_results=5
-        )
-        response2 = PaginatedResponse(
-            results=sample_pages, page_number=0, has_next_page=True, total_results=5
-        )
-        response3 = PaginatedResponse(
-            results=sample_pages, page_number=1, has_next_page=True, total_results=5
-        )
+        response1 = PaginatedResponse(results=sample_pages, next_cursor="cursor1")
+        response2 = PaginatedResponse(results=sample_pages, next_cursor="cursor1")
+        response3 = PaginatedResponse(results=sample_pages, next_cursor="cursor2")
 
         assert response1 == response2  # Same content
-        assert response1 != response3  # Different page number
+        assert response1 != response3  # Different cursor
 
     def test_sequence_methods_simulation(self) -> None:
         """Test sequence-like methods that can be simulated."""
@@ -253,9 +246,7 @@ class TestPaginatedResponseUtilityMethods:
                 uri=PageURI.parse("test/TextPage:1@1"), content="First"
             ),  # Duplicate for testing
         ]
-        response = PaginatedResponse(
-            results=pages, page_number=0, has_next_page=False, total_results=3
-        )
+        response = PaginatedResponse(results=pages, next_cursor=None)
 
         # Test index-like functionality (finding position of page)
         def find_index(
@@ -285,9 +276,7 @@ class TestPaginatedResponseEdgeCases:
         page = TextPage(
             uri=PageURI.parse("test/TextPage:single@1"), content="Single page"
         )
-        response = PaginatedResponse(
-            results=[page], page_number=0, has_next_page=False, total_results=1
-        )
+        response = PaginatedResponse(results=[page], next_cursor=None)
 
         assert len(response) == 1
         assert response[0] == page
@@ -303,9 +292,7 @@ class TestPaginatedResponseEdgeCases:
             )
             for i in range(100)
         ]
-        response = PaginatedResponse(
-            results=pages, page_number=0, has_next_page=True, total_results=1000
-        )
+        response = PaginatedResponse(results=pages, next_cursor="large_cursor")
 
         # Test that operations are efficient
         assert len(response) == 100
@@ -330,9 +317,7 @@ class TestPaginatedResponseEdgeCases:
             page.metadata.nested = {"level": i, "type": "test"}  # type: ignore[attr-defined]
             pages.append(page)
 
-        response = PaginatedResponse(
-            results=pages, page_number=0, has_next_page=False, total_results=3
-        )
+        response = PaginatedResponse(results=pages, next_cursor="complex_cursor")
         # Verify complex metadata is preserved
         assert response[0].metadata.tags == ["tag_0", "category_0"]  # type: ignore[attr-defined]
         assert response[1].metadata.score == 0.5  # type: ignore[attr-defined]
@@ -342,163 +327,67 @@ class TestPaginatedResponseEdgeCases:
 class TestPaginatedResponseSerialization:
     """Test JSON serialization behavior of PaginatedResponse."""
 
-    def test_to_json_dict_with_all_fields(self) -> None:
-        """Test to_json_dict includes all fields when they have values."""
+    def test_to_json_dict_with_cursor(self) -> None:
+        """Test to_json_dict includes next_cursor when it has a value."""
         pages = [
             TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
         ]
         response = PaginatedResponse(
             results=pages,
-            page_number=0,
-            has_next_page=True,
-            total_results=10,
-            token_count=42,
+            next_cursor="cursor_token_123",
         )
 
         result = response.to_json_dict()
 
-        # Should include all fields
-        expected_keys = {
-            "results",
-            "page_number",
-            "has_next_page",
-            "total_results",
-            "token_count",
-        }
+        # Should include next_cursor
+        expected_keys = {"results", "next_cursor"}
         assert set(result.keys()) == expected_keys
-        assert result["page_number"] == 0
-        assert result["has_next_page"] is True
-        assert result["total_results"] == 10
-        assert result["token_count"] == 42
+        assert result["next_cursor"] == "cursor_token_123"
         assert len(result["results"]) == 1
 
-    def test_to_json_dict_without_total_results(self) -> None:
-        """Test to_json_dict excludes total_results when None."""
+    def test_to_json_dict_without_cursor(self) -> None:
+        """Test to_json_dict includes next_cursor as None when no next page."""
         pages = [
             TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
         ]
         response = PaginatedResponse(
             results=pages,
-            page_number=0,
-            has_next_page=False,
-            total_results=None,  # Explicitly None
-            token_count=42,
+            next_cursor=None,
         )
 
         result = response.to_json_dict()
 
-        # Should NOT include total_results
-        expected_keys = {"results", "page_number", "has_next_page", "token_count"}
+        # Should include next_cursor as None
+        expected_keys = {"results", "next_cursor"}
         assert set(result.keys()) == expected_keys
-        assert "total_results" not in result
-        assert result["token_count"] == 42
-
-    def test_to_json_dict_without_token_count(self) -> None:
-        """Test to_json_dict excludes token_count when None."""
-        pages = [
-            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
-        ]
-        response = PaginatedResponse(
-            results=pages,
-            page_number=1,
-            has_next_page=True,
-            total_results=100,
-            token_count=None,  # Explicitly None
-        )
-
-        result = response.to_json_dict()
-
-        # Should NOT include token_count
-        expected_keys = {"results", "page_number", "has_next_page", "total_results"}
-        assert set(result.keys()) == expected_keys
-        assert "token_count" not in result
-        assert result["total_results"] == 100
-
-    def test_to_json_dict_minimal_fields(self) -> None:
-        """Test to_json_dict with only required fields."""
-        pages = [
-            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
-        ]
-        response = PaginatedResponse(
-            results=pages,
-            page_number=2,
-            has_next_page=False,
-            # Both optional fields are None by default
-        )
-
-        result = response.to_json_dict()
-
-        # Should only include required fields
-        expected_keys = {"results", "page_number", "has_next_page"}
-        assert set(result.keys()) == expected_keys
-        assert "total_results" not in result
-        assert "token_count" not in result
-        assert result["page_number"] == 2
-        assert result["has_next_page"] is False
-
-    def test_to_json_dict_excludes_zero_values(self) -> None:
-        """Test to_json_dict excludes zero values for optional fields."""
-        pages = [
-            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
-        ]
-        response = PaginatedResponse(
-            results=pages,
-            page_number=0,
-            has_next_page=False,
-            total_results=0,  # Zero - should be excluded
-            token_count=0,  # Zero - should be excluded
-        )
-
-        result = response.to_json_dict()
-
-        # Should NOT include zero values for optional fields
-        expected_keys = {"results", "page_number", "has_next_page"}
-        assert set(result.keys()) == expected_keys
-        assert "total_results" not in result
-        assert "token_count" not in result
+        assert result["next_cursor"] is None
 
     def test_to_json_dict_empty_pages(self) -> None:
         """Test to_json_dict works with empty page list."""
         response = PaginatedResponse(
             results=[],
-            page_number=0,
-            has_next_page=False,
-            total_results=0,  # Zero - will be excluded
-            token_count=0,  # Zero - will be excluded
+            next_cursor=None,
         )
 
         result = response.to_json_dict()
 
-        # Should only include core fields since optional fields are zero
-        expected_keys = {"results", "page_number", "has_next_page"}
+        # Should include both fields
+        expected_keys = {"results", "next_cursor"}
         assert set(result.keys()) == expected_keys
         assert result["results"] == []
-        assert "total_results" not in result
-        assert "token_count" not in result
+        assert result["next_cursor"] is None
 
-    def test_to_json_dict_includes_positive_values(self) -> None:
-        """Test to_json_dict includes positive values for optional fields."""
-        pages = [
-            TextPage(uri=PageURI.parse("test/TextPage:test@1"), content="Test content")
-        ]
+    def test_to_json_dict_empty_pages_with_cursor(self) -> None:
+        """Test to_json_dict works with empty page list but with cursor."""
         response = PaginatedResponse(
-            results=pages,
-            page_number=0,
-            has_next_page=True,
-            total_results=1,  # Positive - should be included
-            token_count=15,  # Positive - should be included
+            results=[],
+            next_cursor="empty_cursor",
         )
 
         result = response.to_json_dict()
 
-        # Should include all fields since optional fields have positive values
-        expected_keys = {
-            "results",
-            "page_number",
-            "has_next_page",
-            "total_results",
-            "token_count",
-        }
+        # Should include both fields
+        expected_keys = {"results", "next_cursor"}
         assert set(result.keys()) == expected_keys
-        assert result["total_results"] == 1
-        assert result["token_count"] == 15
+        assert result["results"] == []
+        assert result["next_cursor"] == "empty_cursor"

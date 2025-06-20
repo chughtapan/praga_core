@@ -133,27 +133,22 @@ class TestRetrieverToolkitIntegration:
         )
 
         assert "results" in result
-        assert "page_number" in result
-        assert "has_next_page" in result
-        assert "total_results" in result
+        assert "next_cursor" in result
 
         # Should be paginated to max_docs=3
         assert len(result["results"]) <= 3
-        assert result["page_number"] == 0
-        assert result["has_next_page"] is True
-        assert result["total_results"] == 8
+        assert result["next_cursor"] is not None  # Has more pages
 
     def test_invoke_method_pagination_second_page(self) -> None:
         """Test invoke method can get second page."""
         toolkit = IntegrationTestToolkit()
 
         result = toolkit.invoke_tool(
-            "search_documents", {"query": "python", "limit": 8, "page": 1}
+            "search_documents", {"query": "python", "limit": 8, "cursor": "3"}
         )
 
-        assert result["page_number"] == 1
         assert len(result["results"]) <= 3
-        assert result["has_next_page"] is True
+        assert result["next_cursor"] is not None  # Has more pages
 
     def test_invoke_method_without_pagination(self) -> None:
         """Test invoke method on non-paginated tool."""
@@ -168,7 +163,7 @@ class TestRetrieverToolkitIntegration:
 
         assert "results" in result_invoke
         assert len(result_invoke["results"]) == 1
-        assert "page_number" not in result_invoke  # No pagination metadata
+        assert "next_cursor" not in result_invoke  # No pagination metadata
 
     def test_string_input_for_invoke(self) -> None:
         """Test invoke with string input maps to first parameter."""
@@ -212,8 +207,7 @@ class TestRetrieverToolkitIntegration:
         result_invoke = toolkit.invoke_tool("get_cached_docs", "AI")
 
         assert len(result_invoke["results"]) <= 2
-        assert result_invoke["has_next_page"] is True
-        assert result_invoke["total_results"] == 5
+        assert result_invoke["next_cursor"] is not None  # Has more pages
 
     def test_caching_behavior(self) -> None:
         """Test that caching still works with the new Tool integration."""
@@ -231,7 +225,6 @@ class TestRetrieverToolkitIntegration:
 
         # Results should be identical (cached)
         assert result1 == result2
-        assert result1["total_results"] == 5
 
     def test_different_pages_same_cache(self) -> None:
         """Test that different pages use the same cached underlying data."""
@@ -239,18 +232,13 @@ class TestRetrieverToolkitIntegration:
 
         # Get page 0
         page0 = toolkit.invoke_tool(
-            "search_documents", {"query": "pagination_test", "limit": 8, "page": 0}
+            "search_documents", {"query": "pagination_test", "limit": 8, "cursor": None}
         )
 
-        # Get page 1
+        # Get page 1 (using cursor from page 0)
         page1 = toolkit.invoke_tool(
-            "search_documents", {"query": "pagination_test", "limit": 8, "page": 1}
+            "search_documents", {"query": "pagination_test", "limit": 8, "cursor": "3"}
         )
-
-        # Both should have same total_documents (cached underlying data)
-        assert page0["total_results"] == page1["total_results"] == 8
-        assert page0["page_number"] == 0
-        assert page1["page_number"] == 1
 
         # Documents should be different (different pages)
         page0_ids = [doc["uri"] for doc in page0["results"]]
@@ -296,7 +284,6 @@ class TestRetrieverToolkitIntegration:
 
         # Invoke call returns paginated result
         assert len(result_invoke["results"]) <= 3
-        assert result_invoke["total_results"] == 6
 
         # Both should have documents about the same query
         assert "mixed_test" in docs_direct[0].title

@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit
 from praga_core.context import ServerContext
@@ -36,29 +36,13 @@ class CalendarToolkit(RetrieverToolkit):
     def _search_events_paginated_response(
         self,
         query_params: Dict[str, Any],
-        page: int = 0,
+        cursor: Optional[str] = None,
         page_size: int = 10,
     ) -> PaginatedResponse[CalendarEventPage]:
         """Search events and return a paginated response."""
-        page_token = None
-        if page > 0:
-            current_token = None
-            for _ in range(page):
-                _, current_token = self.calendar_service.search_events(
-                    query_params, current_token, page_size
-                )
-                if not current_token:
-                    # No more pages available
-                    logger.debug(f"No more pages available at page {page}")
-                    return PaginatedResponse(
-                        results=[],
-                        page_number=page,
-                        has_next_page=False,
-                    )
-            page_token = current_token
-        # Get the actual page data
+        # Get the page data using the cursor directly
         uris, next_page_token = self.calendar_service.search_events(
-            query_params, page_token, page_size
+            query_params, cursor, page_size
         )
 
         # Resolve URIs to pages using context - throw errors, don't fail silently
@@ -72,19 +56,18 @@ class CalendarToolkit(RetrieverToolkit):
 
         return PaginatedResponse(
             results=pages,
-            page_number=page,
-            has_next_page=bool(next_page_token),
+            next_cursor=next_page_token,
         )
 
     def get_events_by_date_range(
-        self, start_date: str, num_days: int, page: int = 0
+        self, start_date: str, num_days: int, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events within a date range.
 
         Args:
             start_date: Start date in YYYY-MM-DD format
             num_days: Number of days to search
-            page: Page number for pagination (0-based)
+            cursor: Cursor token for pagination (optional)
         """
         # Convert dates to RFC3339 timestamps
         start_dt = datetime.fromisoformat(start_date)
@@ -97,22 +80,22 @@ class CalendarToolkit(RetrieverToolkit):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return self._search_events_paginated_response(query_params, page)
+        return self._search_events_paginated_response(query_params, cursor)
 
     def get_events_with_person(
-        self, person: str, page: int = 0
+        self, person: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events where a specific person is involved (as attendee or organizer).
 
         Args:
             person: Email address or name of the person to search for
-            page: Page number for pagination (0-based)
+            cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
         email = resolve_person_to_email(person, self.context)
         if not email:
             logger.warning(f"Could not resolve person '{person}' to email address")
-            return PaginatedResponse(results=[], page_number=page, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         # Search for events with this person (attendee or organizer)
         now = datetime.utcnow()
@@ -123,10 +106,10 @@ class CalendarToolkit(RetrieverToolkit):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return self._search_events_paginated_response(query_params, page)
+        return self._search_events_paginated_response(query_params, cursor)
 
     def get_upcoming_events(
-        self, days: int = 7, page: int = 0
+        self, days: int = 7, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get upcoming events for the next N days."""
         now = datetime.utcnow()
@@ -139,10 +122,10 @@ class CalendarToolkit(RetrieverToolkit):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return self._search_events_paginated_response(query_params, page)
+        return self._search_events_paginated_response(query_params, cursor)
 
     def get_events_by_keyword(
-        self, keyword: str, page: int = 0
+        self, keyword: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get events containing a specific keyword in title or description."""
         now = datetime.utcnow()
@@ -153,4 +136,4 @@ class CalendarToolkit(RetrieverToolkit):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return self._search_events_paginated_response(query_params, page)
+        return self._search_events_paginated_response(query_params, cursor)

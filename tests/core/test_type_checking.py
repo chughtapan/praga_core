@@ -119,11 +119,9 @@ def test_pagination_with_proper_types() -> None:
     # Test pagination using invoke method
     result = tk.invoke_tool("get_many_docs", {})
     assert "results" in result
-    assert "page_number" in result
-    assert "has_next_page" in result
+    assert "next_cursor" in result
     assert len(result["results"]) == 2
-    assert result["page_number"] == 0
-    assert result["has_next_page"] is True
+    assert result["next_cursor"] is not None  # Has more pages
 
     # Test direct method call returns all documents
     direct_result = tk.get_many_docs()
@@ -153,7 +151,7 @@ class TestTypeCheckingLogic:
         """Test that PaginatedResponse is considered valid."""
 
         def tool_with_paginated_response() -> PaginatedResponse[Page]:
-            return PaginatedResponse(results=[], page_number=0, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         assert _is_page_sequence_type(tool_with_paginated_response) is True
 
@@ -183,7 +181,7 @@ class TestTypeCheckingLogic:
             return []
 
         def tool_with_paginated_response() -> PaginatedResponse[Page]:
-            return PaginatedResponse(results=[], page_number=0, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         assert _is_page_sequence_type(tool_with_list) is True
         assert _is_page_sequence_type(tool_with_sequence) is True
@@ -199,7 +197,7 @@ class TestTypeCheckingLogic:
             return []
 
         def tool_with_paginated_response() -> PaginatedResponse[Page]:
-            return PaginatedResponse(results=[], page_number=0, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         assert _returns_paginated_response(tool_with_list) is False
         assert _returns_paginated_response(tool_with_sequence) is False
@@ -215,7 +213,7 @@ class TestTypeCheckingLogic:
             return []
 
         def tool_with_paginated_response() -> PaginatedResponse[Page]:
-            return PaginatedResponse(results=[], page_number=0, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         # These should return True (can be paginated - not already paginated responses)
         assert not _returns_paginated_response(tool_with_list)
@@ -232,7 +230,7 @@ class TestPaginationPrevention:
         """Test that trying to paginate a tool that returns PaginatedResponse raises an error."""
 
         def tool_returning_paginated_response() -> PaginatedResponse[Page]:
-            return PaginatedResponse(results=[], page_number=0, has_next_page=False)
+            return PaginatedResponse(results=[], next_cursor=None)
 
         class MockToolkit(RetrieverToolkit):
             @property
@@ -299,9 +297,9 @@ class TestPaginationPrevention:
         invoke_result2 = toolkit.invoke_tool("sequence_tool", {})
 
         assert "results" in invoke_result1
-        assert "page_number" in invoke_result1
+        assert "next_cursor" in invoke_result1
         assert "results" in invoke_result2
-        assert "page_number" in invoke_result2
+        assert "next_cursor" in invoke_result2
 
     def test_toolkit_allows_non_paginated_paginated_response(self) -> None:
         """Test that we can register tools that return PaginatedResponse without pagination."""
@@ -312,10 +310,7 @@ class TestPaginationPrevention:
             ]
             return PaginatedResponse(
                 results=docs,
-                page_number=0,
-                has_next_page=False,
-                total_results=1,
-                token_count=4,
+                next_cursor=None,
             )
 
         class TestToolkit(RetrieverToolkit):
@@ -499,13 +494,14 @@ class SimpleTestDocumentSubclassTypeChecking:
         # Test invoke call applies pagination
         invoke_result = toolkit.invoke_tool("paginated_text_tool", {})
         assert "results" in invoke_result
-        assert "page_number" in invoke_result
+        assert "next_cursor" in invoke_result
         assert len(invoke_result["results"]) == 2
-        assert invoke_result["page_number"] == 0
-        assert invoke_result["has_next_page"] is True
+        assert invoke_result["next_cursor"] is not None  # Has more pages
 
-        # Test we can get the next page via invoke
-        invoke_result_page2 = toolkit.invoke_tool("paginated_text_tool", {"page": 1})
+        # Test we can get the next page via invoke using cursor
+        invoke_result_page2 = toolkit.invoke_tool(
+            "paginated_text_tool", {"cursor": invoke_result["next_cursor"]}
+        )
         assert len(invoke_result_page2["results"]) == 2
         assert (
             invoke_result_page2["results"][0]["uri"]
@@ -522,10 +518,7 @@ class TestTypeEquivalence:
         docs = [TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1")]
         response: PaginatedResponse[TextPage] = PaginatedResponse(
             results=docs,
-            page_number=0,
-            has_next_page=False,
-            total_results=1,
-            token_count=4,
+            next_cursor=None,
         )
 
         # This should work now that PaginatedResponse implements Sequence[Document]
@@ -557,9 +550,7 @@ class TestGenericPaginatedResponseTypeConstraints:
         ]
         valid_response = PaginatedResponse[TextPage](
             results=valid_docs,
-            page_number=0,
-            has_next_page=False,
-            total_results=1,
+            next_cursor=None,
         )
         assert len(valid_response) == 1
         assert isinstance(valid_response[0], TextPage)
@@ -583,9 +574,7 @@ class TestGenericPaginatedResponseTypeConstraints:
         ]
         text_response: PaginatedResponse[TextPage] = PaginatedResponse(
             results=text_docs,
-            page_number=0,
-            has_next_page=False,
-            total_results=1,
+            next_cursor=None,
         )
 
         # Test with custom Document subclass
@@ -602,9 +591,7 @@ class TestGenericPaginatedResponseTypeConstraints:
         ]
         custom_response: PaginatedResponse[CustomDocument] = PaginatedResponse(
             results=custom_docs,
-            page_number=0,
-            has_next_page=False,
-            total_results=1,
+            next_cursor=None,
         )
 
         # Verify type safety - the responses should maintain their specific types

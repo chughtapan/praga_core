@@ -4,8 +4,7 @@
 from dotenv import load_dotenv
 
 from praga_core.integrations.mcp import create_mcp_server
-
-from .app import setup_context
+from pragweb.app import setup_context
 
 load_dotenv()
 ctx = setup_context()
