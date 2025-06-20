@@ -25,10 +25,12 @@ from services import (  # noqa: E402
     GoogleDocsService,
     PeopleService,
 )
+from services.slack_service import SlackService  # noqa: E402
 from toolkits.calendar_toolkit import CalendarToolkit  # noqa: E402
 from toolkits.gmail_toolkit import GmailToolkit  # noqa: E402
 from toolkits.google_docs_toolkit import GoogleDocsToolkit  # noqa: E402
 from toolkits.people_toolkit import PeopleToolkit  # noqa: E402
+from toolkits.slack_toolkit import SlackToolkit  # noqa: E402
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -45,12 +47,14 @@ def setup_services(context: ServerContext) -> dict:
     calendar_service = CalendarService(context)
     people_service = PeopleService(context)
     gdocs_service = GoogleDocsService(context)
+    slack_service = SlackService(context)
 
     return {
         "gmail": gmail_service,
         "calendar": calendar_service,
         "people": people_service,
         "gdocs": gdocs_service,
+        "slack": slack_service,
     }
 
 
@@ -62,8 +66,15 @@ def setup_toolkits(context: ServerContext, services: dict) -> list:
     calendar_toolkit = CalendarToolkit(context, services["calendar"])
     people_toolkit = PeopleToolkit(context, services["people"])
     gdocs_toolkit = GoogleDocsToolkit(context, services["gdocs"])
+    slack_toolkit = SlackToolkit(context, services["slack"])
 
-    return [gmail_toolkit, calendar_toolkit, people_toolkit, gdocs_toolkit]
+    return [
+        gmail_toolkit,
+        calendar_toolkit,
+        people_toolkit,
+        gdocs_toolkit,
+        slack_toolkit,
+    ]
 
 
 def setup_agent(toolkits: list) -> ReactAgent:
