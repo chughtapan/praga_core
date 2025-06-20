@@ -9,7 +9,8 @@ from datetime import timedelta
 from typing import Any, Dict, List
 
 import pytest
-from conftest import (
+
+from .conftest import (
     MockRetrieverToolkit,
     SimpleTestPage,
     create_test_pages,

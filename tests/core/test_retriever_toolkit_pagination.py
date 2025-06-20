@@ -7,15 +7,16 @@ including page sizing, token limits, and pagination edge cases.
 from typing import List
 
 import pytest
-from conftest import (
+
+from praga_core.agents import PaginatedResponse
+from praga_core.types import PageURI
+
+from .conftest import (
     SAMPLE_PAGE_SIZES,
     MockRetrieverToolkit,
     SimpleTestPage,
     create_test_pages,
 )
-
-from praga_core.agents import PaginatedResponse
-from praga_core.types import PageURI
 
 
 class TestRetrieverToolkitPagination:
