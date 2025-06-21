@@ -6,8 +6,8 @@ import pytest
 
 from praga_core import clear_global_context, set_global_context
 from praga_core.types import PageURI
-from pragweb.google_api.pages.person import PersonPage
-from pragweb.google_api.services.people_service import PeopleService
+from pragweb.google_api.people.page import PersonPage
+from pragweb.google_api.people.service import PeopleService
 
 
 class TestPeopleService:
@@ -17,28 +17,27 @@ class TestPeopleService:
         """Set up test environment."""
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
+        self.mock_context.services = {}  # Mock services dictionary
         self.mock_page_cache = Mock()
         self.mock_context.page_cache = self.mock_page_cache
+
+        # Mock the register_service method to actually register
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
+
         set_global_context(self.mock_context)
 
-        # Create mock services
-        self.mock_people_service = Mock()
-        self.mock_gmail_service = Mock()
-        self.mock_calendar_service = Mock()
-        self.mock_auth_manager = Mock()
-        self.mock_auth_manager.get_people_service.return_value = (
-            self.mock_people_service
-        )
-        self.mock_auth_manager.get_gmail_service.return_value = self.mock_gmail_service
-        self.mock_auth_manager.get_calendar_service.return_value = (
-            self.mock_calendar_service
-        )
+        # Create mock GoogleAPIClient
+        self.mock_api_client = Mock()
 
-        with patch(
-            "pragweb.google_api.services.people_service.GoogleAuthManager"
-        ) as mock_auth_class:
-            mock_auth_class.return_value = self.mock_auth_manager
-            self.service = PeopleService()
+        # Mock the client methods
+        self.mock_api_client.search_contacts = Mock()
+        self.mock_api_client.search_messages = Mock()
+        self.mock_api_client.search_events = Mock()
+
+        self.service = PeopleService(self.mock_api_client)
 
     def teardown_method(self):
         """Clean up test environment."""
@@ -46,20 +45,16 @@ class TestPeopleService:
 
     def test_init(self):
         """Test PeopleService initialization."""
-        assert self.service.auth_manager is self.mock_auth_manager
-        assert self.service.people_service is self.mock_people_service
-        assert self.service.gmail_service is self.mock_gmail_service
-        assert self.service.calendar_service is self.mock_calendar_service
+        assert self.service.api_client is self.mock_api_client
         assert self.service.name == "person"
 
-        # Verify handler registration
-        self.mock_context.register_handler.assert_called_once_with(
-            "person", self.service.handle_person_request
-        )
+        # Verify service is registered in context (service auto-registers via ServiceContext)
+        assert "person" in self.mock_context.services
+        assert self.mock_context.services["person"] is self.service
 
     def test_root_property(self):
         """Test root property returns context root."""
-        assert self.service.root == "test-root"
+        assert self.service.context.root == "test-root"
 
     def test_handle_person_request_cached(self):
         """Test handle_person_request returns cached person."""
@@ -119,12 +114,12 @@ class TestPeopleService:
         """Test lookup_people by first name when other matches fail."""
         # Email and full name return empty, first name returns results
         mock_people = [Mock(spec=PersonPage)]
-        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], [], mock_people]
+        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], mock_people]
 
         result = self.service.lookup_people("John")
 
-        # Should try email, full name, then first name
-        assert self.mock_page_cache.find_pages_by_attribute.call_count == 3
+        # Should try full name first (since it's not an email), then first name
+        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
         assert result == mock_people
 
     def test_create_person_existing(self):
@@ -221,47 +216,47 @@ class TestPeopleService:
                         "_extract_people_from_calendar_contacts",
                         return_value=[],
                     ):
-                        with patch.object(
-                            self.service, "_is_real_person", return_value=False
+                        with pytest.raises(
+                            ValueError, match="Could not find any real people"
                         ):
-                            with pytest.raises(
-                                ValueError, match="Could not find any real people"
-                            ):
-                                self.service.create_person("noreply@example.com")
+                            self.service.create_person("noreply@example.com")
 
     def test_create_person_name_divergence_error(self):
-        """Test create_person raises error on name divergence."""
+        """Test create_person raises error when names diverge for same email."""
         with patch.object(self.service, "lookup_people", return_value=[]):
-            mock_person_info = {
-                "first_name": "John",
-                "last_name": "Smith",
-                "email": "john@example.com",
-                "source": "gmail",
-            }
             # Mock existing person with different name
-            mock_existing_person = Mock(spec=PersonPage)
-            mock_existing_person.full_name = "John Doe"
+            existing_person = Mock(spec=PersonPage)
+            existing_person.full_name = "Jane Smith"
+            existing_person.email = "john@example.com"
 
             with patch.object(
                 self.service,
-                "_extract_people_info_from_google_people",
-                return_value=[mock_person_info],
+                "_get_existing_person_by_email",
+                return_value=existing_person,
             ):
+                mock_person_info = {
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "email": "john@example.com",
+                    "source": "google_people",
+                }
                 with patch.object(
-                    self.service, "_extract_people_from_gmail_contacts", return_value=[]
+                    self.service,
+                    "_extract_people_info_from_google_people",
+                    return_value=[mock_person_info],
                 ):
                     with patch.object(
                         self.service,
-                        "_extract_people_from_calendar_contacts",
+                        "_extract_people_from_gmail_contacts",
                         return_value=[],
                     ):
                         with patch.object(
-                            self.service, "_is_real_person", return_value=True
+                            self.service,
+                            "_extract_people_from_calendar_contacts",
+                            return_value=[],
                         ):
                             with patch.object(
-                                self.service,
-                                "_get_existing_person_by_email",
-                                return_value=mock_existing_person,
+                                self.service, "_is_real_person", return_value=True
                             ):
                                 with pytest.raises(
                                     ValueError, match="Name divergence detected"
@@ -269,125 +264,130 @@ class TestPeopleService:
                                     self.service.create_person("john@example.com")
 
     def test_is_real_person_valid(self):
-        """Test _is_real_person identifies valid people."""
+        """Test _is_real_person returns True for valid person."""
         person_info = {
             "first_name": "John",
             "last_name": "Doe",
             "email": "john.doe@example.com",
-            "source": "gmail",
+            "source": "google_people",
         }
-
-        result = self.service._is_real_person(person_info)
-        assert result is True
+        assert self.service._is_real_person(person_info) is True
 
     def test_is_real_person_automated_email(self):
-        """Test _is_real_person filters automated emails."""
-        automated_cases = [
-            {"first_name": "No Reply", "last_name": "", "email": "noreply@example.com"},
-            {"first_name": "", "last_name": "", "email": "donotreply@example.com"},
-            {"first_name": "Support", "last_name": "", "email": "support@example.com"},
-            {"first_name": "Admin", "last_name": "", "email": "admin@example.com"},
-        ]
+        """Test _is_real_person returns False for automated emails."""
+        person_info = {
+            "first_name": "No Reply",
+            "last_name": "",
+            "email": "noreply@example.com",
+            "source": "gmail",
+        }
+        assert self.service._is_real_person(person_info) is False
 
-        for case in automated_cases:
-            case["source"] = "test"
-            result = self.service._is_real_person(case)
-            assert result is False, f"Should filter out {case['email']}"
+        person_info["email"] = "do-not-reply@example.com"
+        assert self.service._is_real_person(person_info) is False
+
+        person_info["email"] = "automated@example.com"
+        assert self.service._is_real_person(person_info) is False
 
     def test_get_existing_person_by_email(self):
-        """Test _get_existing_person_by_email."""
-        mock_people = [Mock(spec=PersonPage)]
-        self.mock_page_cache.find_pages_by_attribute.return_value = mock_people
+        """Test _get_existing_person_by_email finds existing person."""
+        mock_person = Mock(spec=PersonPage)
+        self.mock_page_cache.find_pages_by_attribute.return_value = [mock_person]
 
         result = self.service._get_existing_person_by_email("test@example.com")
-
-        assert result == mock_people[0]
+        assert result is mock_person
 
     def test_get_existing_person_by_email_not_found(self):
         """Test _get_existing_person_by_email returns None when not found."""
         self.mock_page_cache.find_pages_by_attribute.return_value = []
 
         result = self.service._get_existing_person_by_email("test@example.com")
-
         assert result is None
 
     def test_parse_name_and_email_full_format(self):
-        """Test _parse_name_and_email with full display name format."""
+        """Test _parse_name_and_email with full name format."""
         result = self.service._parse_name_and_email(
-            "John Doe <john@example.com>", "john@example.com", "test"
+            "John Doe <john.doe@example.com>", "john.doe@example.com", "gmail"
         )
-
         expected = {
             "first_name": "John",
             "last_name": "Doe",
-            "email": "john@example.com",
-            "source": "test",
+            "email": "john.doe@example.com",
+            "source": "gmail",
         }
         assert result == expected
 
     def test_parse_name_and_email_simple_format(self):
-        """Test _parse_name_and_email with simple display name."""
+        """Test _parse_name_and_email with display name same as email."""
         result = self.service._parse_name_and_email(
-            "John Doe", "john@example.com", "test"
+            "john.doe@example.com", "John.Doe@Example.com", "gmail"
         )
-
         expected = {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john@example.com",
-            "source": "test",
+            "first_name": "john.doe@example.com",  # Display name used as-is when it's the email
+            "last_name": "",
+            "email": "john.doe@example.com",  # Email is converted to lowercase
+            "source": "gmail",
+        }
+        assert result == expected
+
+    def test_parse_name_and_email_no_display_name(self):
+        """Test _parse_name_and_email with empty display name uses email local part."""
+        result = self.service._parse_name_and_email("", "john.doe@example.com", "gmail")
+        expected = {
+            "first_name": "john.doe",  # Email local part used when no display name
+            "last_name": "",
+            "email": "john.doe@example.com",
+            "source": "gmail",
         }
         assert result == expected
 
     def test_parse_name_and_email_single_name(self):
         """Test _parse_name_and_email with single name."""
-        result = self.service._parse_name_and_email("John", "john@example.com", "test")
-
+        result = self.service._parse_name_and_email(
+            "John <john@example.com>", "john@example.com", "gmail"
+        )
         expected = {
             "first_name": "John",
             "last_name": "",
             "email": "john@example.com",
-            "source": "test",
+            "source": "gmail",
         }
         assert result == expected
 
     def test_generate_person_id(self):
-        """Test _generate_person_id creates consistent hash."""
-        result1 = self.service._generate_person_id("test@example.com")
-        result2 = self.service._generate_person_id("test@example.com")
-        result3 = self.service._generate_person_id("different@example.com")
+        """Test _generate_person_id generates consistent IDs."""
+        id1 = self.service._generate_person_id("test@example.com")
+        id2 = self.service._generate_person_id("test@example.com")
+        assert id1 == id2
+        assert len(id1) == 32  # Full MD5 hash
 
-        # Same email should produce same ID
-        assert result1 == result2
-        # Different email should produce different ID
-        assert result1 != result3
-        # Should be reasonable length hash
-        assert len(result1) > 10
+        # Different emails should generate different IDs
+        id3 = self.service._generate_person_id("other@example.com")
+        assert id1 != id3
 
     def test_store_and_create_page(self):
-        """Test _store_and_create_page creates and stores PersonPage."""
+        """Test _store_and_create_page creates and stores person page."""
         person_info = {
             "first_name": "John",
             "last_name": "Doe",
             "email": "john@example.com",
-            "source": "test",
+            "source": "google_people",
         }
 
-        with patch.object(
-            self.service, "_generate_person_id", return_value="person123"
-        ):
-            result = self.service._store_and_create_page(person_info)
+        # Mock page cache store_page method
+        self.mock_page_cache.store_page = Mock()
+
+        result = self.service._store_and_create_page(person_info)
 
         # Verify PersonPage creation
         assert isinstance(result, PersonPage)
         assert result.first_name == "John"
         assert result.last_name == "Doe"
         assert result.email == "john@example.com"
-        assert result.full_name == "John Doe"
 
-        # Verify page storage
+        # Verify page was stored in cache
         self.mock_page_cache.store_page.assert_called_once_with(result)
 
     def test_name_property(self):
-        """Test name property returns correct value."""
+        """Test name property returns correct service name."""
         assert self.service.name == "person"

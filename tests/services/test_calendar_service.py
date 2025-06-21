@@ -1,14 +1,14 @@
 """Tests for existing CalendarService before refactoring."""
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from praga_core import clear_global_context, set_global_context
 from praga_core.types import PageURI
-from pragweb.google_api.pages.calendar import CalendarEventPage
-from pragweb.google_api.services.calendar_service import CalendarService
+from pragweb.google_api.calendar.page import CalendarEventPage
+from pragweb.google_api.calendar.service import CalendarService
 
 
 class TestCalendarService:
@@ -18,20 +18,24 @@ class TestCalendarService:
         """Set up test environment."""
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
+        self.mock_context.services = {}  # Mock services dictionary
+
+        # Mock the register_service method to actually register
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
+
         set_global_context(self.mock_context)
 
-        # Create mock Calendar service
-        self.mock_calendar_service = Mock()
-        self.mock_auth_manager = Mock()
-        self.mock_auth_manager.get_calendar_service.return_value = (
-            self.mock_calendar_service
-        )
+        # Create mock GoogleAPIClient
+        self.mock_api_client = Mock()
 
-        with patch(
-            "pragweb.google_api.services.calendar_service.GoogleAuthManager"
-        ) as mock_auth_class:
-            mock_auth_class.return_value = self.mock_auth_manager
-            self.service = CalendarService()
+        # Mock the client methods
+        self.mock_api_client.get_event = Mock()
+        self.mock_api_client.search_events = Mock()
+
+        self.service = CalendarService(self.mock_api_client)
 
     def teardown_method(self):
         """Clean up test environment."""
@@ -39,18 +43,16 @@ class TestCalendarService:
 
     def test_init(self):
         """Test CalendarService initialization."""
-        assert self.service.auth_manager is self.mock_auth_manager
-        assert self.service.service is self.mock_calendar_service
+        assert self.service.api_client is self.mock_api_client
         assert self.service.name == "calendar_event"
 
-        # Verify handler registration
-        self.mock_context.register_handler.assert_called_once_with(
-            "calendar_event", self.service.create_page
-        )
+        # Verify service is registered in context (service auto-registers via ServiceContext)
+        assert "calendar_event" in self.mock_context.services
+        assert self.mock_context.services["calendar_event"] is self.service
 
     def test_root_property(self):
         """Test root property returns context root."""
-        assert self.service.root == "test-root"
+        assert self.service.context.root == "test-root"
 
     def test_create_page_success(self):
         """Test successful calendar event page creation."""
@@ -70,15 +72,13 @@ class TestCalendarService:
             "organizer": {"email": "organizer@example.com"},
         }
 
-        self.mock_calendar_service.events().get().execute.return_value = mock_event
+        self.mock_api_client.get_event.return_value = mock_event
 
         # Call create_page
         result = self.service.create_page("event123", "primary")
 
-        # Verify Calendar API call
-        self.mock_calendar_service.events().get.assert_called_once_with(
-            calendarId="primary", eventId="event123"
-        )
+        # Verify API client call
+        self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
 
         # Verify result
         assert isinstance(result, CalendarEventPage)
@@ -111,14 +111,12 @@ class TestCalendarService:
             "end": {"dateTime": "2023-06-15T11:00:00Z"},
         }
 
-        self.mock_calendar_service.events().get().execute.return_value = mock_event
+        self.mock_api_client.get_event.return_value = mock_event
 
         result = self.service.create_page("event123")  # No calendar_id provided
 
         # Should default to "primary"
-        self.mock_calendar_service.events().get.assert_called_once_with(
-            calendarId="primary", eventId="event123"
-        )
+        self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
         assert result.calendar_id == "primary"
 
     def test_create_page_date_only_event(self):
@@ -130,7 +128,7 @@ class TestCalendarService:
             "end": {"date": "2023-06-16"},
         }
 
-        self.mock_calendar_service.events().get().execute.return_value = mock_event
+        self.mock_api_client.get_event.return_value = mock_event
 
         result = self.service.create_page("event123")
 
@@ -146,7 +144,7 @@ class TestCalendarService:
             "end": {"dateTime": "2023-06-15T11:00:00Z"},
         }
 
-        self.mock_calendar_service.events().get().execute.return_value = mock_event
+        self.mock_api_client.get_event.return_value = mock_event
 
         result = self.service.create_page("event123")
 
@@ -158,9 +156,7 @@ class TestCalendarService:
 
     def test_create_page_api_error(self):
         """Test create_page handles API errors."""
-        self.mock_calendar_service.events().get().execute.side_effect = Exception(
-            "API Error"
-        )
+        self.mock_api_client.get_event.side_effect = Exception("API Error")
 
         with pytest.raises(
             ValueError, match="Failed to fetch event event123: API Error"
@@ -170,19 +166,15 @@ class TestCalendarService:
     def test_search_events_basic(self):
         """Test basic event search."""
         query_params = {"calendarId": "primary", "q": "meeting"}
-        mock_response = {
-            "items": [{"id": "event1"}, {"id": "event2"}, {"id": "event3"}],
-            "nextPageToken": "token123",
-        }
+        mock_events = [{"id": "event1"}, {"id": "event2"}, {"id": "event3"}]
 
-        self.mock_calendar_service.events().list().execute.return_value = mock_response
+        self.mock_api_client.search_events.return_value = (mock_events, "token123")
 
         uris, next_token = self.service.search_events(query_params)
 
-        # Verify API call with pagination parameters added
-        expected_params = {"calendarId": "primary", "q": "meeting", "maxResults": 20}
-        self.mock_calendar_service.events().list.assert_called_once_with(
-            **expected_params
+        # Verify API call
+        self.mock_api_client.search_events.assert_called_once_with(
+            query_params, page_token=None, page_size=20
         )
 
         # Verify results
@@ -198,21 +190,15 @@ class TestCalendarService:
     def test_search_events_with_pagination(self):
         """Test search with pagination parameters."""
         query_params = {"calendarId": "primary", "q": "meeting"}
-        mock_response = {"items": [{"id": "event1"}], "nextPageToken": None}
-        self.mock_calendar_service.events().list().execute.return_value = mock_response
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
 
         uris, next_token = self.service.search_events(
-            query_params, page_token="prev_token", page_size=5
+            query_params, page_token="prev_token", page_size=10
         )
 
-        expected_params = {
-            "calendarId": "primary",
-            "q": "meeting",
-            "maxResults": 5,
-            "pageToken": "prev_token",
-        }
-        self.mock_calendar_service.events().list.assert_called_once_with(
-            **expected_params
+        self.mock_api_client.search_events.assert_called_once_with(
+            query_params, page_token="prev_token", page_size=10
         )
 
         assert len(uris) == 1
@@ -220,19 +206,18 @@ class TestCalendarService:
 
     def test_search_events_api_error(self):
         """Test search_events handles API errors."""
-        self.mock_calendar_service.events().list().execute.side_effect = Exception(
-            "API Error"
-        )
+        query_params = {"calendarId": "primary", "q": "meeting"}
+        self.mock_api_client.search_events.side_effect = Exception("API Error")
 
         with pytest.raises(Exception, match="API Error"):
-            self.service.search_events({"calendarId": "primary"})
+            self.service.search_events(query_params)
 
     def test_search_events_no_results(self):
         """Test search with no results."""
-        mock_response = {"nextPageToken": None}  # No items field
-        self.mock_calendar_service.events().list().execute.return_value = mock_response
+        query_params = {"calendarId": "primary", "q": "nonexistent"}
+        self.mock_api_client.search_events.return_value = ([], None)
 
-        uris, next_token = self.service.search_events({"calendarId": "primary"})
+        uris, next_token = self.service.search_events(query_params)
 
         assert uris == []
         assert next_token is None
@@ -241,28 +226,24 @@ class TestCalendarService:
         """Test search with complex query parameters."""
         query_params = {
             "calendarId": "primary",
-            "timeMin": "2023-06-15T00:00:00Z",
-            "timeMax": "2023-06-16T00:00:00Z",
+            "q": "team meeting",
+            "timeMin": "2023-06-01T00:00:00Z",
+            "timeMax": "2023-06-30T23:59:59Z",
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        mock_response = {"items": [{"id": "event1"}]}
-        self.mock_calendar_service.events().list().execute.return_value = mock_response
+        mock_events = [{"id": "event1"}, {"id": "event2"}]
+        self.mock_api_client.search_events.return_value = (mock_events, "next_token")
 
-        uris, next_token = self.service.search_events(query_params, page_size=10)
+        uris, next_token = self.service.search_events(query_params, page_size=50)
 
-        expected_params = {
-            "calendarId": "primary",
-            "timeMin": "2023-06-15T00:00:00Z",
-            "timeMax": "2023-06-16T00:00:00Z",
-            "singleEvents": True,
-            "orderBy": "startTime",
-            "maxResults": 10,
-        }
-        self.mock_calendar_service.events().list.assert_called_once_with(
-            **expected_params
+        self.mock_api_client.search_events.assert_called_once_with(
+            query_params, page_token=None, page_size=50
         )
 
+        assert len(uris) == 2
+        assert next_token == "next_token"
+
     def test_name_property(self):
-        """Test name property returns correct value."""
+        """Test name property returns correct service name."""
         assert self.service.name == "calendar_event"

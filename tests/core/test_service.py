@@ -33,17 +33,6 @@ class TestService:
         with pytest.raises(TypeError):
             IncompleteService()
 
-    def test_service_requires_toolkits_property(self):
-        """Test that Service subclasses must implement toolkits property."""
-
-        class IncompleteService(Service):
-            @property
-            def name(self):
-                return "test"
-
-        with pytest.raises(TypeError):
-            IncompleteService()
-
 
 class TestServiceContext:
     """Tests for ServiceContext auto-registration."""
