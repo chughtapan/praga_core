@@ -1,20 +1,12 @@
-"""
-Google API Integration App
+"""Google API Integration App"""
 
-Clean architecture with:
-- Pages: Page definitions
-- Services: Business logic for Google API interactions
-- Toolkits: Search tools that use services and context
-- App: Orchestration layer
-"""
-
+import argparse
 import logging
-from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
-from praga_core.agents import ReactAgent, RetrieverToolkit
-from praga_core.context import ServerContext
+from praga_core import ServerContext, set_global_context
+from praga_core.agents import ReactAgent
 from pragweb.google_api.services import CalendarService, GmailService, PeopleService
 from pragweb.google_api.toolkits import CalendarToolkit, GmailToolkit, PeopleToolkit
 
@@ -24,65 +16,50 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def setup_services(context: ServerContext) -> Dict[str, Any]:
-    """Set up services and register handlers with context."""
-    logger.info("Setting up services...")
+def setup_global_context() -> None:
+    """Set up global context and initialize all components."""
+    logger.info("Setting up global context...")
 
-    # Services automatically register their handlers with context
-    gmail_service = GmailService(context)
-    calendar_service = CalendarService(context)
-    people_service = PeopleService(context)
+    # Create and set global context
+    context = ServerContext(root="google")
+    set_global_context(context)
 
-    return {
-        "gmail": gmail_service,
-        "calendar": calendar_service,
-        "people": people_service,
-    }
+    # Initialize services (they auto-register with global context)
+    logger.info("Initializing services...")
+    gmail_service = GmailService()
+    calendar_service = CalendarService()
+    people_service = PeopleService()
 
+    # Initialize toolkits (they use global context automatically)
+    logger.info("Initializing toolkits...")
+    gmail_toolkit = GmailToolkit(gmail_service)
+    calendar_toolkit = CalendarToolkit(calendar_service)
+    people_toolkit = PeopleToolkit(people_service)
 
-def setup_toolkits(
-    context: ServerContext, services: Dict[str, Any]
-) -> List[RetrieverToolkit]:
-    """Set up toolkits that use services for search and context for resolution."""
-    logger.info("Setting up toolkits...")
+    toolkits = [gmail_toolkit, calendar_toolkit, people_toolkit]
 
-    gmail_toolkit = GmailToolkit(context, services["gmail"])
-    calendar_toolkit = CalendarToolkit(context, services["calendar"])
-    people_toolkit = PeopleToolkit(context, services["people"])
-
-    return [gmail_toolkit, calendar_toolkit, people_toolkit]
-
-
-def setup_agent(toolkits: List[RetrieverToolkit]) -> ReactAgent:
-    """Set up the React agent with toolkits."""
+    # Set up agent with toolkits
     logger.info("Setting up React agent...")
-
-    return ReactAgent(
+    agent = ReactAgent(
         model="gpt-4o-mini",
         toolkits=toolkits,
         max_iterations=10,
     )
 
+    # Set retriever on global context
+    context.retriever = agent
 
-def setup_context() -> ServerContext:
-    """Set up the context."""
-    logger.info("Setting up context...")
-
-    ctx = ServerContext(root="google")
-    services = setup_services(ctx)
-    toolkits = setup_toolkits(ctx, services)
-    agent = setup_agent(toolkits)
-    ctx.retriever = agent
-
-    return ctx
+    logger.info("✅ Global context setup complete!")
 
 
-def main() -> None:
-    """Run the Google API integration app."""
-    print("🚀 Google API Integration App")
+def run_interactive_cli() -> None:
+    """Run interactive CLI for direct queries."""
+    from praga_core import get_global_context
+
+    context = get_global_context()
+
+    print("🚀 Google API Integration - Interactive Mode")
     print("=" * 50)
-
-    context = setup_context()
     print("✅ Setup complete! Ready for queries.")
     print("-" * 50)
 
@@ -124,6 +101,27 @@ def main() -> None:
             logger.error(f"Error during query processing: {e}")
             print(f"Error: {e}")
             print("Please try again.")
+
+
+def main() -> None:
+    """Main CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Google API Integration with Global Context",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose logging"
+    )
+
+    args = parser.parse_args()
+
+    # Set logging level
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # Set up global context
+    setup_global_context()
+    run_interactive_cli()
 
 
 if __name__ == "__main__":

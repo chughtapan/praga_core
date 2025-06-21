@@ -4,7 +4,7 @@ import logging
 import re
 from typing import List, Optional
 
-from praga_core.context import ServerContext
+from praga_core.global_context import get_global_context
 
 from ..pages.person import PersonPage
 
@@ -17,14 +17,11 @@ def is_email_address(text: str) -> bool:
     return bool(re.match(email_pattern, text.strip()))
 
 
-def resolve_person_to_email(
-    person_identifier: str, context: ServerContext
-) -> Optional[str]:
+def resolve_person_to_email(person_identifier: str) -> Optional[str]:
     """Resolve a person identifier (name or email) to an email address.
 
     Args:
         person_identifier: Email address or person's name
-        context: Server context for searching
 
     Returns:
         Email address if found, None otherwise
@@ -33,8 +30,9 @@ def resolve_person_to_email(
     if is_email_address(person_identifier):
         return person_identifier.strip()
 
-    # Search for the person using context.search
+    # Search for the person using global context
     try:
+        context = get_global_context()
         results = context.search(f"Find person {person_identifier}")
         if results.results:
             # Return the first match's email
@@ -47,14 +45,11 @@ def resolve_person_to_email(
     return None
 
 
-def resolve_person_to_emails(
-    person_identifiers: List[str], context: ServerContext
-) -> List[str]:
+def resolve_person_to_emails(person_identifiers: List[str]) -> List[str]:
     """Resolve multiple person identifiers to email addresses.
 
     Args:
         person_identifiers: List of email addresses or person names
-        context: Server context for searching
 
     Returns:
         List of resolved email addresses (excludes any that couldn't be resolved)
@@ -62,7 +57,7 @@ def resolve_person_to_emails(
     resolved_emails = []
 
     for identifier in person_identifiers:
-        email = resolve_person_to_email(identifier, context)
+        email = resolve_person_to_email(identifier)
         if email:
             resolved_emails.append(email)
 

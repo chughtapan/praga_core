@@ -4,7 +4,6 @@ import logging
 from typing import List
 
 from praga_core.agents import RetrieverToolkit, tool
-from praga_core.context import ServerContext
 
 from ..pages.person import PersonPage
 from ..services.people_service import PeopleService
@@ -15,8 +14,8 @@ logger = logging.getLogger(__name__)
 class PeopleToolkit(RetrieverToolkit):
     """Toolkit for retrieving and managing person information."""
 
-    def __init__(self, context: ServerContext, people_service: PeopleService):
-        super().__init__(context)
+    def __init__(self, people_service: PeopleService):
+        super().__init__()  # No explicit context - will use global context
         self.people_service = people_service
 
         logger.info("People toolkit initialized")
