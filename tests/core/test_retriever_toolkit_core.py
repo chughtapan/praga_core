@@ -8,7 +8,7 @@ from typing import List
 
 import pytest
 
-from praga_core.agents import RetrieverToolkit
+from praga_core.agents import RetrieverToolkit, tool
 from praga_core.agents.tool import Tool
 from praga_core.types import PageURI
 
@@ -330,3 +330,180 @@ class TestRetrieverToolkitErrorHandling:
             first_result["results"][0]["title"] != second_result["results"][0]["title"]
         )
         assert "second" in second_result["results"][0]["title"]
+
+
+class TestGlobalToolDecorator:
+    """Test the global @tool decorator functionality."""
+
+    def test_global_tool_decorator_basic(self) -> None:
+        """Test basic functionality of the global @tool decorator."""
+
+        class TestToolkit(RetrieverToolkit):
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
+
+            @tool()
+            def search_items(self, query: str) -> List[SimpleTestPage]:
+                """Search for items"""
+                return create_test_pages(2, query)
+
+        toolkit = TestToolkit()
+
+        # Tool should be automatically registered
+        assert "search_items" in toolkit.tools
+        assert len(toolkit.tools) == 1
+
+        # Test direct method call
+        result = toolkit.search_items("test")
+        assert len(result) == 2
+        assert "test" in result[0].title
+
+        # Test invocation
+        invoke_result = toolkit.invoke_tool("search_items", "test")
+        assert len(invoke_result["results"]) == 2
+
+    def test_global_tool_decorator_with_options(self) -> None:
+        """Test global @tool decorator with various options."""
+
+        class TestToolkit(RetrieverToolkit):
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
+
+            @tool(name="custom_search", cache=True, paginate=True, max_docs=1)
+            def search_items(self, query: str) -> List[SimpleTestPage]:
+                """Search for items with custom options"""
+                return create_test_pages(3, query)
+
+        toolkit = TestToolkit()
+
+        # Tool should be registered with custom name
+        assert "custom_search" in toolkit.tools
+        assert "search_items" not in toolkit.tools
+
+        # Test pagination works
+        result = toolkit.invoke_tool("custom_search", "test")
+        assert len(result["results"]) == 1  # max_docs=1
+        assert "next_cursor" in result
+
+    def test_global_tool_decorator_multiple_tools(self) -> None:
+        """Test multiple tools decorated with global @tool decorator."""
+
+        class TestToolkit(RetrieverToolkit):
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
+
+            @tool()
+            def search_items(self, query: str) -> List[SimpleTestPage]:
+                """Search for items"""
+                return create_test_pages(1, query)
+
+            @tool(cache=True)
+            def search_users(self, name: str) -> List[SimpleTestPage]:
+                """Search for users"""
+                return create_test_pages(1, name)
+
+        toolkit = TestToolkit()
+
+        # Both tools should be registered
+        assert len(toolkit.tools) == 2
+        assert "search_items" in toolkit.tools
+        assert "search_users" in toolkit.tools
+
+        # Both should work
+        items_result = toolkit.search_items("items")
+        users_result = toolkit.search_users("users")
+
+        assert len(items_result) == 1
+        assert len(users_result) == 1
+        assert "items" in items_result[0].title
+        assert "users" in users_result[0].title
+
+    def test_global_tool_decorator_non_retriever_toolkit_error(self) -> None:
+        """Test that @tool decorator raises error when used on non-RetrieverToolkit classes."""
+
+        # Error should be raised when defining the class (during method assignment)
+        with pytest.raises(
+            TypeError,
+            match="@tool decorator can only be used on RetrieverToolkit classes",
+        ):
+
+            class NonRetrieverClass:
+                @tool()
+                def some_method(self) -> List[SimpleTestPage]:
+                    return []
+
+    def test_global_tool_decorator_inherits_from_decorated_class(self) -> None:
+        """Test that @tool decorator works with class inheritance."""
+
+        class BaseToolkit(RetrieverToolkit):
+            @property
+            def name(self) -> str:
+                return "BaseToolkit"
+
+            @tool()
+            def base_search(self, query: str) -> List[SimpleTestPage]:
+                """Base search method"""
+                return create_test_pages(1, f"base_{query}")
+
+        class DerivedToolkit(BaseToolkit):
+            @property
+            def name(self) -> str:
+                return "DerivedToolkit"
+
+            @tool()
+            def derived_search(self, query: str) -> List[SimpleTestPage]:
+                """Derived search method"""
+                return create_test_pages(1, f"derived_{query}")
+
+        toolkit = DerivedToolkit()
+
+        # Both tools should be available
+        assert len(toolkit.tools) == 2
+        assert "base_search" in toolkit.tools
+        assert "derived_search" in toolkit.tools
+
+        # Both should work
+        base_result = toolkit.base_search("test")
+        derived_result = toolkit.derived_search("test")
+
+        assert "base_test" in base_result[0].title
+        assert "derived_test" in derived_result[0].title
+
+    def test_global_tool_decorator_with_manual_registration(self) -> None:
+        """Test that @tool decorator can coexist with manual tool registration."""
+
+        class TestToolkit(RetrieverToolkit):
+            def __init__(self):
+                super().__init__()
+                # Manually register a tool
+                self.register_tool(self.manual_tool, "manual_tool")
+
+            @property
+            def name(self) -> str:
+                return "TestToolkit"
+
+            @tool()
+            def decorated_tool(self, query: str) -> List[SimpleTestPage]:
+                """Decorated tool"""
+                return create_test_pages(1, f"decorated_{query}")
+
+            def manual_tool(self, query: str) -> List[SimpleTestPage]:
+                """Manually registered tool"""
+                return create_test_pages(1, f"manual_{query}")
+
+        toolkit = TestToolkit()
+
+        # Both tools should be available
+        assert len(toolkit.tools) == 2
+        assert "decorated_tool" in toolkit.tools
+        assert "manual_tool" in toolkit.tools
+
+        # Both should work
+        decorated_result = toolkit.decorated_tool("test")
+        manual_result = toolkit.manual_tool("test")
+
+        assert "decorated_test" in decorated_result[0].title
+        assert "manual_test" in manual_result[0].title

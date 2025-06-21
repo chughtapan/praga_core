@@ -3,7 +3,7 @@
 import logging
 from typing import List, Optional
 
-from praga_core.agents import PaginatedResponse, RetrieverToolkit
+from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.context import ServerContext
 
 from ..pages.gmail import EmailPage
@@ -19,15 +19,6 @@ class GmailToolkit(RetrieverToolkit):
     def __init__(self, context: ServerContext, gmail_service: GmailService):
         super().__init__(context)
         self.gmail_service = gmail_service
-
-        # Register all email search tools
-        self.register_tool(self.get_emails_by_sender)
-        self.register_tool(self.get_emails_by_recipient)
-        self.register_tool(self.get_emails_by_cc_participant)
-        self.register_tool(self.get_emails_by_date_range)
-        self.register_tool(self.get_emails_with_body_keyword)
-        self.register_tool(self.get_recent_emails)
-        self.register_tool(self.get_unread_emails)
 
         logger.info("Gmail toolkit initialized")
 
@@ -58,6 +49,7 @@ class GmailToolkit(RetrieverToolkit):
             next_cursor=next_page_token,
         )
 
+    @tool()
     def get_emails_by_sender(
         self, sender: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -76,6 +68,7 @@ class GmailToolkit(RetrieverToolkit):
         query = f"from:{email}"
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_emails_by_recipient(
         self, recipient: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -96,6 +89,7 @@ class GmailToolkit(RetrieverToolkit):
         query = f"to:{email}"
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_emails_by_cc_participant(
         self, cc_participant: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -116,6 +110,7 @@ class GmailToolkit(RetrieverToolkit):
         query = f"cc:{email}"
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_emails_by_date_range(
         self, start_date: str, end_date: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -132,6 +127,7 @@ class GmailToolkit(RetrieverToolkit):
         query = f"after:{start_formatted} before:{end_formatted}"
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_emails_with_body_keyword(
         self, keyword: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -144,6 +140,7 @@ class GmailToolkit(RetrieverToolkit):
         query = keyword if keyword.strip() else ""
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_recent_emails(
         self, days: int = 7, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
@@ -156,6 +153,7 @@ class GmailToolkit(RetrieverToolkit):
         query = f"newer_than:{days}d"
         return self._search_emails_paginated_response(query, cursor)
 
+    @tool()
     def get_unread_emails(
         self, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:

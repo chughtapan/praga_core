@@ -3,7 +3,7 @@
 import logging
 from typing import List
 
-from praga_core.agents import RetrieverToolkit
+from praga_core.agents import RetrieverToolkit, tool
 from praga_core.context import ServerContext
 
 from ..pages.person import PersonPage
@@ -19,15 +19,13 @@ class PeopleToolkit(RetrieverToolkit):
         super().__init__(context)
         self.people_service = people_service
 
-        # Register search_people tool
-        self.register_tool(self.search_people)
-
         logger.info("People toolkit initialized")
 
     @property
     def name(self) -> str:
         return "PeopleToolkit"
 
+    @tool()
     def search_people(self, query: str) -> List[PersonPage]:
         """Search for people with comprehensive lookup strategy.
 

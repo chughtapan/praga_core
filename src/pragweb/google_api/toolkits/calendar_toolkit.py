@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from praga_core.agents import PaginatedResponse, RetrieverToolkit
+from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.context import ServerContext
 
 from ..pages.calendar import CalendarEventPage
@@ -20,12 +20,6 @@ class CalendarToolkit(RetrieverToolkit):
     def __init__(self, context: ServerContext, calendar_service: CalendarService):
         super().__init__(context)
         self.calendar_service = calendar_service
-
-        # Register all calendar tools
-        self.register_tool(self.get_events_by_date_range)
-        self.register_tool(self.get_events_with_person)
-        self.register_tool(self.get_upcoming_events)
-        self.register_tool(self.get_events_by_keyword)
 
         logger.info("Calendar toolkit initialized")
 
@@ -59,6 +53,7 @@ class CalendarToolkit(RetrieverToolkit):
             next_cursor=next_page_token,
         )
 
+    @tool()
     def get_events_by_date_range(
         self, start_date: str, num_days: int, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
@@ -82,6 +77,7 @@ class CalendarToolkit(RetrieverToolkit):
         }
         return self._search_events_paginated_response(query_params, cursor)
 
+    @tool()
     def get_events_with_person(
         self, person: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
@@ -108,6 +104,7 @@ class CalendarToolkit(RetrieverToolkit):
         }
         return self._search_events_paginated_response(query_params, cursor)
 
+    @tool()
     def get_upcoming_events(
         self, days: int = 7, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
@@ -124,6 +121,7 @@ class CalendarToolkit(RetrieverToolkit):
         }
         return self._search_events_paginated_response(query_params, cursor)
 
+    @tool()
     def get_events_by_keyword(
         self, keyword: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
