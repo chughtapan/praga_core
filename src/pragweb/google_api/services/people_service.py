@@ -53,13 +53,12 @@ class PeopleService(ContextMixin):
 
     def handle_person_request(self, person_id: str) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""
-        # Try to get from SQL cache first
-        sql_cache = self.context.sql_cache
-        assert sql_cache is not None
+        # Try to get from page cache first
+        page_cache = self.context.page_cache
 
         # Construct URI from person_id
         person_uri = PageURI(root=self.root, type="person", id=person_id)
-        cached_person = sql_cache.get_page(PersonPage, person_uri)
+        cached_person = page_cache.get_page(PersonPage, person_uri)
         if cached_person:
             logger.debug(f"Found existing person in cache: {person_id}")
             return cached_person
@@ -71,29 +70,26 @@ class PeopleService(ContextMixin):
 
         Returns all matching people, not just the first match.
         """
-        sql_cache = self.context.sql_cache
-        if not sql_cache:
-            logger.warning("No SQL cache available for people lookup")
-            return []
+        page_cache = self.context.page_cache
 
         identifier_lower = identifier.lower().strip()
 
         # Try exact email match first (most specific)
         if _is_email_address(identifier):
-            email_matches = sql_cache.find_pages_by_attribute(
+            email_matches = page_cache.find_pages_by_attribute(
                 PersonPage, lambda t: t.email == identifier_lower
             )
             return email_matches
 
         # Try full name matches (partial/case-insensitive)
-        full_name_matches = sql_cache.find_pages_by_attribute(
+        full_name_matches = page_cache.find_pages_by_attribute(
             PersonPage, lambda t: t.full_name.ilike(f"%{identifier_lower}%")
         )
         if full_name_matches:
             return full_name_matches
 
         # Try first name matches (if not already found)
-        first_name_matches = sql_cache.find_pages_by_attribute(
+        first_name_matches = page_cache.find_pages_by_attribute(
             PersonPage, lambda t: t.first_name.ilike(f"%{identifier_lower}%")
         )
         return first_name_matches
@@ -266,11 +262,9 @@ class PeopleService(ContextMixin):
 
     def _get_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
         """Get existing person by email address."""
-        sql_cache = self.context.sql_cache
-        if not sql_cache:
-            return None
+        page_cache = self.context.page_cache
 
-        email_matches = sql_cache.find_pages_by_attribute(
+        email_matches = page_cache.find_pages_by_attribute(
             PersonPage, lambda t: t.email == email.lower()
         )
         return email_matches[0] if email_matches else None
@@ -545,10 +539,9 @@ class PeopleService(ContextMixin):
             full_name=full_name,
         )
 
-        # Store in SQL cache
-        sql_cache = self.context.sql_cache
-        if sql_cache:
-            sql_cache.store_page(person_page)
+        # Store in page cache
+        page_cache = self.context.page_cache
+        page_cache.store_page(person_page)
 
         logger.info(
             f"Created new person: {full_name} ({person_info['email']}) from {person_info.get('source', 'manual')}"
