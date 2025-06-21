@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from praga_core.context import ServerContext
+from praga_core.global_context import ContextMixin
 from praga_core.types import PageURI
 
 from ..auth import GoogleAuthManager
@@ -13,18 +13,21 @@ from ..pages.calendar import CalendarEventPage
 logger = logging.getLogger(__name__)
 
 
-class CalendarService:
+class CalendarService(ContextMixin):
     """Service for Calendar API interactions and CalendarEventPage creation."""
 
-    def __init__(self, context: ServerContext) -> None:
-        self.context = context
-        self.root = context.root
+    def __init__(self) -> None:
         self.auth_manager = GoogleAuthManager()
         self.service = self.auth_manager.get_calendar_service()
 
-        # Register handler with context
+        # Register handler with context (accessed via ContextMixin)
         self.context.register_handler(self.name, self.create_page)
         logger.info("Calendar service initialized and handler registered")
+
+    @property
+    def root(self) -> str:
+        """Get root from global context."""
+        return self.context.root
 
     def create_page(
         self, event_id: str, calendar_id: str = "primary"

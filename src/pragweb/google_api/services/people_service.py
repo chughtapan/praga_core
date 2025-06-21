@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, TypedDict, Union
 
 from sqlmodel import Field, Session, SQLModel, col, create_engine, select
 
-from praga_core.context import ServerContext
+from praga_core.global_context import ContextMixin
 from praga_core.types import PageURI
 
 from ..auth import GoogleAuthManager
@@ -46,13 +46,10 @@ class PersonRecord(SQLModel, table=True):
     source: str  # 'google_people', 'gmail', 'calendar'
 
 
-class PeopleService:
+class PeopleService(ContextMixin):
     """Service for managing person data and PersonPage creation using Google People API."""
 
-    def __init__(self, context: ServerContext):
-        self.context = context
-        self.root = context.root
-
+    def __init__(self) -> None:
         # Use singleton auth manager
         self.auth_manager = GoogleAuthManager()
 
@@ -68,6 +65,11 @@ class PeopleService:
         # Register handler with context
         self.context.register_handler(self.name, self.handle_person_request)
         logger.info("People service initialized and handler registered")
+
+    @property
+    def root(self) -> str:
+        """Get root from global context."""
+        return self.context.root
 
     def handle_person_request(self, person_id: str) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""

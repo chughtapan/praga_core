@@ -23,6 +23,7 @@ from typing import (
 from pydantic import BaseModel, Field
 
 from praga_core.context import ServerContext
+from praga_core.global_context import get_global_context, has_global_context
 from praga_core.types import Page
 
 from .tool import PaginatedResponse, Tool
@@ -333,7 +334,12 @@ class RetrieverToolkit(RetrieverToolkitMeta):
     @property
     def context(self) -> ServerContext:
         if self._context is None:
-            raise RuntimeError(f"Context not set for toolkit: {self.name}")
+            # Try to use global context if available
+            if has_global_context():
+                return get_global_context()
+            raise RuntimeError(
+                f"Context not set for toolkit: {self.name} and no global context available"
+            )
         return self._context
 
 

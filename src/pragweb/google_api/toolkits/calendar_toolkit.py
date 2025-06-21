@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.context import ServerContext
 
 from ..pages.calendar import CalendarEventPage
 from ..services.calendar_service import CalendarService
@@ -17,8 +16,8 @@ logger = logging.getLogger(__name__)
 class CalendarToolkit(RetrieverToolkit):
     """Toolkit for retrieving calendar events using Calendar service."""
 
-    def __init__(self, context: ServerContext, calendar_service: CalendarService):
-        super().__init__(context)
+    def __init__(self, calendar_service: CalendarService):
+        super().__init__()  # No explicit context - will use global context
         self.calendar_service = calendar_service
 
         logger.info("Calendar toolkit initialized")
@@ -88,7 +87,7 @@ class CalendarToolkit(RetrieverToolkit):
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
-        email = resolve_person_to_email(person, self.context)
+        email = resolve_person_to_email(person)
         if not email:
             logger.warning(f"Could not resolve person '{person}' to email address")
             return PaginatedResponse(results=[], next_cursor=None)

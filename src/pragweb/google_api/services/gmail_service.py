@@ -5,7 +5,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import List, Optional, Tuple
 
-from praga_core.context import ServerContext
+from praga_core.global_context import ContextMixin
 from praga_core.types import PageURI
 
 from ..auth import GoogleAuthManager
@@ -15,19 +15,22 @@ from ..pages.utils import GmailParser
 logger = logging.getLogger(__name__)
 
 
-class GmailService:
+class GmailService(ContextMixin):
     """Service for Gmail API interactions and EmailPage creation."""
 
-    def __init__(self, context: ServerContext):
-        self.context = context
-        self.root = context.root
+    def __init__(self) -> None:
         self.auth_manager = GoogleAuthManager()
         self.service = self.auth_manager.get_gmail_service()
         self.parser = GmailParser()
 
-        # Register handler with context
+        # Register handler with context (accessed via ContextMixin)
         self.context.register_handler(self.name, self.create_page)
         logger.info("Gmail service initialized and handler registered")
+
+    @property
+    def root(self) -> str:
+        """Get root from global context."""
+        return self.context.root
 
     def create_page(self, email_id: str) -> EmailPage:
         """Create an EmailPage from a Gmail message ID - matches old EmailHandler.handle_email logic exactly."""

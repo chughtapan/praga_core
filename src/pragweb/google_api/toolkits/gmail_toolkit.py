@@ -4,7 +4,6 @@ import logging
 from typing import List, Optional
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.context import ServerContext
 
 from ..pages.gmail import EmailPage
 from ..services.gmail_service import GmailService
@@ -16,8 +15,8 @@ logger = logging.getLogger(__name__)
 class GmailToolkit(RetrieverToolkit):
     """Toolkit for retrieving emails from Gmail using Gmail service."""
 
-    def __init__(self, context: ServerContext, gmail_service: GmailService):
-        super().__init__(context)
+    def __init__(self, gmail_service: GmailService):
+        super().__init__()  # No explicit context - will use global context
         self.gmail_service = gmail_service
 
         logger.info("Gmail toolkit initialized")
@@ -60,7 +59,7 @@ class GmailToolkit(RetrieverToolkit):
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
-        email = resolve_person_to_email(sender, self.context)
+        email = resolve_person_to_email(sender)
         if not email:
             logger.warning(f"Could not resolve sender '{sender}' to email address")
             return PaginatedResponse(results=[], next_cursor=None)
@@ -79,7 +78,7 @@ class GmailToolkit(RetrieverToolkit):
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
-        email = resolve_person_to_email(recipient, self.context)
+        email = resolve_person_to_email(recipient)
         if not email:
             logger.warning(
                 f"Could not resolve recipient '{recipient}' to email address"
@@ -100,7 +99,7 @@ class GmailToolkit(RetrieverToolkit):
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
-        email = resolve_person_to_email(cc_participant, self.context)
+        email = resolve_person_to_email(cc_participant)
         if not email:
             logger.warning(
                 f"Could not resolve CC participant '{cc_participant}' to email address"
