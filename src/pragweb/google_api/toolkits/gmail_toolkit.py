@@ -16,7 +16,7 @@ class GmailToolkit(RetrieverToolkit):
     """Toolkit for retrieving emails from Gmail using Gmail service."""
 
     def __init__(self, gmail_service: GmailService):
-        super().__init__()  # No explicit context - will use global context
+        super().__init__()
         self.gmail_service = gmail_service
 
         logger.info("Gmail toolkit initialized")

@@ -3,19 +3,13 @@
 
 from dotenv import load_dotenv
 
+from praga_core import get_global_context
 from praga_core.integrations.mcp import create_mcp_server
-from pragweb.app import setup_context
+from pragweb.app import setup_global_context
 
 load_dotenv()
-ctx = setup_context()
-mcp = create_mcp_server(
-    ctx,
-    name="Google APIs - Gmail & Calendar Server",
-)
 
+setup_global_context()
 
-if __name__ == "__main__":
-    # Run directly if executed as script
-    import asyncio
-
-    asyncio.run(mcp.run_async())
+context = get_global_context()
+mcp = create_mcp_server(context)

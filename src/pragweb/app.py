@@ -1,21 +1,12 @@
-"""
-Google API Integration App - CLI with Global Context
-
-Clean architecture with global context pattern:
-- Global context accessible via ContextMixin
-- Services register themselves automatically
-- CLI with options for MCP server or direct queries
-"""
+"""Google API Integration App"""
 
 import argparse
-import asyncio
 import logging
 
 from dotenv import load_dotenv
 
 from praga_core import ServerContext, set_global_context
 from praga_core.agents import ReactAgent
-from praga_core.integrations.mcp import create_mcp_server
 from pragweb.google_api.services import CalendarService, GmailService, PeopleService
 from pragweb.google_api.toolkits import CalendarToolkit, GmailToolkit, PeopleToolkit
 
@@ -112,42 +103,12 @@ def run_interactive_cli() -> None:
             print("Please try again.")
 
 
-async def run_mcp_server() -> None:
-    """Run MCP server."""
-    from praga_core import get_global_context
-
-    context = get_global_context()
-
-    print("🚀 Starting MCP Server...")
-    print("=" * 50)
-
-    mcp = create_mcp_server(
-        context,
-        name="Google APIs - Gmail & Calendar Server",
-    )
-
-    print("✅ MCP Server ready!")
-    await mcp.run_async()
-
-
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         description="Google API Integration with Global Context",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  %(prog)s query          # Interactive query mode
-  %(prog)s mcp            # Start MCP server
-        """,
     )
-
-    parser.add_argument(
-        "mode",
-        choices=["query", "mcp"],
-        help="Mode to run: 'query' for interactive CLI, 'mcp' for MCP server",
-    )
-
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
     )
@@ -160,12 +121,7 @@ Examples:
 
     # Set up global context
     setup_global_context()
-
-    # Run the selected mode
-    if args.mode == "query":
-        run_interactive_cli()
-    elif args.mode == "mcp":
-        asyncio.run(run_mcp_server())
+    run_interactive_cli()
 
 
 if __name__ == "__main__":
