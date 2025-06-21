@@ -1,16 +1,123 @@
-"""Calendar toolkit for retrieving and searching calendar events."""
+"""Calendar service for handling Calendar API interactions and page creation."""
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
+from praga_core.types import PageURI
+from pragweb.toolkit_service import ToolkitService
 
-from ..pages.calendar import CalendarEventPage
-from ..services.calendar_service import CalendarService
-from .utils import resolve_person_to_email
+from ..client import GoogleAPIClient
+from .page import CalendarEventPage
 
 logger = logging.getLogger(__name__)
+
+
+class CalendarService(ToolkitService):
+    """Service for Calendar API interactions and CalendarEventPage creation."""
+
+    def __init__(self, api_client: GoogleAPIClient) -> None:
+        super().__init__()
+        self.api_client = api_client
+
+        # Register handlers using decorators
+        self._register_handlers()
+        logger.info("Calendar service initialized and handlers registered")
+
+    def _register_handlers(self) -> None:
+        """Register handlers with context using decorators."""
+
+        @self.context.handler(self.name)
+        def handle_event(
+            event_id: str, calendar_id: str = "primary"
+        ) -> CalendarEventPage:
+            return self.create_page(event_id, calendar_id)
+
+    def create_page(
+        self, event_id: str, calendar_id: str = "primary"
+    ) -> CalendarEventPage:
+        """Create a CalendarEventPage from a Calendar event ID - matches old CalendarEventHandler.handle_event logic exactly."""
+        # 1. Fetch event from Calendar API using shared client
+        try:
+            event = self.api_client.get_event(event_id, calendar_id)
+        except Exception as e:
+            raise ValueError(f"Failed to fetch event {event_id}: {e}")
+
+        # 2. Extract basic fields
+        summary = event.get("summary", "")
+        description = event.get("description")
+        location = event.get("location")
+
+        # 3. Parse times (exact same as old handler)
+        start = event.get("start", {})
+        end = event.get("end", {})
+        start_time = datetime.fromisoformat(start.get("dateTime", start.get("date")))
+        end_time = datetime.fromisoformat(end.get("dateTime", end.get("date")))
+
+        # 4. Extract attendees (exact same as old handler)
+        attendees = [
+            a.get("email", "") for a in event.get("attendees", []) if a.get("email")
+        ]
+
+        # 5. Get organizer (exact same as old handler)
+        organizer = event.get("organizer", {}).get("email", "")
+
+        # 6. Create permalink (exact same as old handler)
+        permalink = f"https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
+
+        # 7. Create URI and return complete document
+        uri = PageURI(root=self.context.root, type=self.name, id=event_id)
+        return CalendarEventPage(
+            uri=uri,
+            event_id=event_id,
+            calendar_id=calendar_id,
+            summary=summary,
+            description=description,
+            location=location,
+            start_time=start_time,
+            end_time=end_time,
+            attendees=attendees,
+            organizer=organizer,
+            permalink=permalink,
+        )
+
+    def search_events(
+        self,
+        query_params: Dict[str, Any],
+        page_token: Optional[str] = None,
+        page_size: int = 20,
+    ) -> Tuple[List[PageURI], Optional[str]]:
+        """Search events and return list of PageURIs and next page token."""
+        try:
+            events, next_page_token = self.api_client.search_events(
+                query_params, page_token=page_token, page_size=page_size
+            )
+
+            logger.debug(
+                f"Calendar API returned {len(events)} events, next_token: {bool(next_page_token)}"
+            )
+
+            # Convert to PageURIs
+            uris = [
+                PageURI(root=self.context.root, type=self.name, id=event["id"])
+                for event in events
+            ]
+
+            return uris, next_page_token
+
+        except Exception as e:
+            logger.error(f"Error searching events: {e}")
+            raise
+
+    @property
+    def toolkit(self) -> "CalendarToolkit":
+        """Get the Calendar toolkit for this service."""
+        return CalendarToolkit(calendar_service=self)
+
+    @property
+    def name(self) -> str:
+        return "calendar_event"
 
 
 class CalendarToolkit(RetrieverToolkit):
@@ -87,6 +194,8 @@ class CalendarToolkit(RetrieverToolkit):
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
+        from ..utils import resolve_person_to_email
+
         email = resolve_person_to_email(person)
         if not email:
             logger.warning(f"Could not resolve person '{person}' to email address")
