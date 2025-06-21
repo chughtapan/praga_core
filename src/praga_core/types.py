@@ -73,19 +73,25 @@ class PageURI(BaseModel):
 
     @classmethod
     def _parse_str(cls, uri: str) -> "PageURI":
-        # Regex pattern for strict parsing: root/type:id@version
-        pattern = re.compile(r"^([^/]*)/([^:]+):([^@]+)@(\d+)$")
+        # Regex pattern with optional version: root/type:id[@version]
+        pattern = re.compile(r"^([^/]*)/([^:]+):([^@]+)(?:@(\d+))?$")
         match = pattern.match(uri)
+
         if not match:
             raise ValueError(
-                f"Invalid URI format: {uri}. Expected: root/type:id@version"
+                f"Invalid URI format: {uri}. Expected: root/type:id@version or root/type:id"
             )
 
         root, type_name, id_part, version_str = match.groups()
-        try:
-            version = int(version_str)
-        except ValueError:
-            raise ValueError(f"Invalid version number: {version_str}")
+
+        # Default to version 1 if not specified
+        if version_str is None:
+            version = 1
+        else:
+            try:
+                version = int(version_str)
+            except ValueError:
+                raise ValueError(f"Invalid version number: {version_str}")
 
         return cls(root=root, type=type_name, id=id_part, version=version)
 

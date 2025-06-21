@@ -153,6 +153,33 @@ class TestPageURI:
         with pytest.raises(ValueError, match="Invalid URI format"):
             PageURI.parse("invalid-format")
 
+    def test_page_uri_soft_parsing_without_version(self) -> None:
+        """Test soft parsing of URI without version (should default to version 1)."""
+        uri_str = "server/Email:msg123"
+        uri = PageURI.parse(uri_str)
+        assert uri.root == "server"
+        assert uri.type == "Email"
+        assert uri.id == "msg123"
+        assert uri.version == 1
+
+    def test_page_uri_soft_parsing_with_empty_root(self) -> None:
+        """Test soft parsing of URI with empty root and no version."""
+        uri_str = "/Email:msg123"
+        uri = PageURI.parse(uri_str)
+        assert uri.root == ""
+        assert uri.type == "Email"
+        assert uri.id == "msg123"
+        assert uri.version == 1
+
+    def test_page_uri_parsing_strict_still_works(self) -> None:
+        """Test that strict parsing with version still works."""
+        uri_str = "server/Email:msg123@5"
+        uri = PageURI.parse(uri_str)
+        assert uri.root == "server"
+        assert uri.type == "Email"
+        assert uri.id == "msg123"
+        assert uri.version == 5
+
     def test_page_uri_hashable(self) -> None:
         """Test that PageURI is hashable."""
         uri1 = PageURI(root="test", type="Email", id="123", version=1)
