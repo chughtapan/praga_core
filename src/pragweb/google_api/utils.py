@@ -6,7 +6,7 @@ from typing import List, Optional
 
 from praga_core.global_context import get_global_context
 
-from ..pages.person import PersonPage
+from .people import PersonPage
 
 logger = logging.getLogger(__name__)
 

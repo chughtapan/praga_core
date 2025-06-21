@@ -7,8 +7,10 @@ from dotenv import load_dotenv
 
 from praga_core import ServerContext, set_global_context
 from praga_core.agents import ReactAgent
-from pragweb.google_api.services import CalendarService, GmailService, PeopleService
-from pragweb.google_api.toolkits import CalendarToolkit, GmailToolkit, PeopleToolkit
+from pragweb.google_api.calendar import CalendarService
+from pragweb.google_api.client import GoogleAPIClient
+from pragweb.google_api.gmail import GmailService
+from pragweb.google_api.people import PeopleService
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -24,25 +26,28 @@ def setup_global_context() -> None:
     context = ServerContext(root="google", cache_url="sqlite:///praga_cache.db")
     set_global_context(context)
 
+    # Create single Google API client
+    google_client = GoogleAPIClient()
+
     # Initialize services (they auto-register with global context)
     logger.info("Initializing services...")
-    gmail_service = GmailService()
-    calendar_service = CalendarService()
-    people_service = PeopleService()
+    gmail_service = GmailService(google_client)
+    calendar_service = CalendarService(google_client)
+    people_service = PeopleService(google_client)
 
-    # Initialize toolkits (they use global context automatically)
-    logger.info("Initializing toolkits...")
-    gmail_toolkit = GmailToolkit(gmail_service)
-    calendar_toolkit = CalendarToolkit(calendar_service)
-    people_toolkit = PeopleToolkit(people_service)
+    # Collect all toolkits from registered services
+    logger.info("Collecting toolkits...")
+    all_toolkits = [
+        gmail_service.toolkit,
+        calendar_service.toolkit,
+        people_service.toolkit,
+    ]
 
-    toolkits = [gmail_toolkit, calendar_toolkit, people_toolkit]
-
-    # Set up agent with toolkits
+    # Set up agent with collected toolkits
     logger.info("Setting up React agent...")
     agent = ReactAgent(
         model="gpt-4o-mini",
-        toolkits=toolkits,
+        toolkits=all_toolkits,
         max_iterations=10,
     )
 

@@ -7,10 +7,11 @@ the ServerContext without explicit dependency injection.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 # Import only what we need to avoid circular dependencies
-from praga_core.context import ServerContext
+from .context import ServerContext
+from .service import Service
 
 # Global context storage
 _global_context: Optional[ServerContext] = None
@@ -61,7 +62,7 @@ def has_global_context() -> bool:
 
 
 class ContextMixin:
-    """Mixin class that provides access to the global ServerContext.
+    """Mixin class that provides access to the global ServerContext with auto-registration.
 
     Classes that inherit from this mixin can access the global context
     via the `context` property without needing explicit dependency injection.
@@ -72,6 +73,9 @@ class ContextMixin:
                 page = self.context.get_page("some://uri")
                 return page
     """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
 
     @property
     def context(self) -> ServerContext:
@@ -84,3 +88,12 @@ class ContextMixin:
             RuntimeError: If global context is not set
         """
         return get_global_context()
+
+
+class ServiceContext(Service, ContextMixin):
+    """Convenience class that combines Service and ContextMixin with auto-registration."""
+
+    def __init__(self, api_client: Any = None, *args: Any, **kwargs: Any) -> None:
+        self.api_client = api_client
+        super().__init__(*args, **kwargs)
+        self.context.register_service(self.name, self)

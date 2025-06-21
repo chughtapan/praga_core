@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Callable, Dict, List, Optional, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 from .page_cache import PageCache
+from .service import Service
+
+logger = logging.getLogger(__name__)
 
 # Type for page handler functions
 PageHandler = Callable[..., Page]
@@ -25,11 +29,30 @@ class ServerContext:
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._page_handlers: Dict[str, PageHandler] = {}
+        self._services: Dict[str, Service] = {}
 
         # Initialize SQL-based PageCache (always available)
         if cache_url is None:
             cache_url = "sqlite:///:memory:"
         self._page_cache = PageCache(cache_url)
+
+    def register_service(self, name: str, service: Service) -> None:
+        """Register a service with the context."""
+        if name in self._services:
+            raise RuntimeError(f"Service already registered: {name}")
+        self._services[name] = service
+        logger.info(f"Registered service: {name}")
+
+    def get_service(self, name: str) -> Service:
+        """Get a service by name."""
+        if name not in self._services:
+            raise RuntimeError(f"No service registered with name: {name}")
+        return self._services[name]
+
+    @property
+    def services(self) -> Dict[str, Service]:
+        """Get all registered services."""
+        return self._services.copy()
 
     def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
         """Create a PageURI with this context's root.
