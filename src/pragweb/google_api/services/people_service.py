@@ -6,8 +6,6 @@ import re
 from email.utils import parseaddr
 from typing import Any, Dict, List, Optional, TypedDict, Union
 
-from sqlmodel import Field, Session, SQLModel, col, create_engine, select
-
 from praga_core.global_context import ContextMixin
 from praga_core.types import PageURI
 
@@ -32,20 +30,6 @@ class PersonInfoWithExisting(TypedDict):
     existing: PersonPage
 
 
-# SQLModel for person storage
-class PersonRecord(SQLModel, table=True):
-    """SQLModel for storing person data in database."""
-
-    __tablename__ = "people"
-
-    id: str = Field(primary_key=True)
-    email: str = Field(unique=True, index=True)
-    first_name: str
-    last_name: str
-    full_name: str = Field(index=True)
-    source: str  # 'google_people', 'gmail', 'calendar'
-
-
 class PeopleService(ContextMixin):
     """Service for managing person data and PersonPage creation using Google People API."""
 
@@ -58,10 +42,6 @@ class PeopleService(ContextMixin):
         self.gmail_service = self.auth_manager.get_gmail_service()
         self.calendar_service = self.auth_manager.get_calendar_service()
 
-        # Setup SQLite database
-        self.engine = create_engine("sqlite:///:memory:")
-        SQLModel.metadata.create_all(self.engine)
-
         # Register handler with context
         self.context.register_handler(self.name, self.handle_person_request)
         logger.info("People service initialized and handler registered")
@@ -73,51 +53,50 @@ class PeopleService(ContextMixin):
 
     def handle_person_request(self, person_id: str) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""
-        with Session(self.engine) as session:
-            person_record = session.get(PersonRecord, person_id)
-            if person_record:
-                logger.debug(f"Found existing person: {person_id}")
-                return self._record_to_page(person_record)
+        # Try to get from SQL cache first
+        sql_cache = self.context.sql_cache
+        assert sql_cache is not None
 
-            raise ValueError(
-                f"Person {person_id} not found. Use create_person() to add new people."
-            )
+        # Construct URI from person_id
+        person_uri = PageURI(root=self.root, type="person", id=person_id)
+        cached_person = sql_cache.get_page(PersonPage, person_uri)
+        if cached_person:
+            logger.debug(f"Found existing person in cache: {person_id}")
+            return cached_person
+
+        raise RuntimeError(f"Invalid request: Person {person_id} not found.")
 
     def lookup_people(self, identifier: str) -> List[PersonPage]:
         """Lookup people by identifier (first name, full name, or email).
 
         Returns all matching people, not just the first match.
         """
-        with Session(self.engine) as session:
-            identifier_lower = identifier.lower().strip()
-            all_matches: List[PersonRecord] = []
+        sql_cache = self.context.sql_cache
+        if not sql_cache:
+            logger.warning("No SQL cache available for people lookup")
+            return []
 
-            # Try exact email match first (most specific)
-            if _is_email_address(identifier):
-                stmt = select(PersonRecord).where(
-                    col(PersonRecord.email) == identifier_lower
-                )
-                person_record = session.exec(stmt).first()
-                if person_record:
-                    return [self._record_to_page(person_record)]
+        identifier_lower = identifier.lower().strip()
 
-            # Try full name matches
-            stmt = select(PersonRecord).where(
-                col(PersonRecord.full_name).ilike(f"%{identifier_lower}%")
+        # Try exact email match first (most specific)
+        if _is_email_address(identifier):
+            email_matches = sql_cache.find_pages_by_attribute(
+                PersonPage, lambda t: t.email == identifier_lower
             )
-            full_name_matches = session.exec(stmt).all()
-            all_matches.extend(full_name_matches)
+            return email_matches
 
-            # Try first name matches (if not already found)
-            if not all_matches:
-                stmt = select(PersonRecord).where(
-                    col(PersonRecord.first_name).ilike(f"%{identifier_lower}%")
-                )
-                first_name_matches = session.exec(stmt).all()
-                all_matches.extend(first_name_matches)
+        # Try full name matches (partial/case-insensitive)
+        full_name_matches = sql_cache.find_pages_by_attribute(
+            PersonPage, lambda t: t.full_name.ilike(f"%{identifier_lower}%")
+        )
+        if full_name_matches:
+            return full_name_matches
 
-            # Convert to PersonPages and return all matches
-            return [self._record_to_page(person) for person in all_matches]
+        # Try first name matches (if not already found)
+        first_name_matches = sql_cache.find_pages_by_attribute(
+            PersonPage, lambda t: t.first_name.ilike(f"%{identifier_lower}%")
+        )
+        return first_name_matches
 
     def create_person(self, identifier: str) -> List[PersonPage]:
         """Create person pages for a given identifier.
@@ -142,7 +121,7 @@ class PeopleService(ContextMixin):
         gmail_infos = self._extract_people_from_gmail_contacts(identifier)
         all_person_infos.extend(gmail_infos)
 
-        #  might find multiple attendees/organizers
+        # Calendar might find multiple attendees/organizers
         calendar_infos = self._extract_people_from_calendar_contacts(identifier)
         all_person_infos.extend(calendar_infos)
 
@@ -287,12 +266,14 @@ class PeopleService(ContextMixin):
 
     def _get_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
         """Get existing person by email address."""
-        with Session(self.engine) as session:
-            stmt = select(PersonRecord).where(col(PersonRecord.email) == email.lower())
-            person_record = session.exec(stmt).first()
-            if person_record:
-                return self._record_to_page(person_record)
-        return None
+        sql_cache = self.context.sql_cache
+        if not sql_cache:
+            return None
+
+        email_matches = sql_cache.find_pages_by_attribute(
+            PersonPage, lambda t: t.email == email.lower()
+        )
+        return email_matches[0] if email_matches else None
 
     def _extract_people_info_from_google_people(
         self, identifier: str
@@ -554,34 +535,25 @@ class PeopleService(ContextMixin):
         person_id = self._generate_person_id(person_info["email"])
         full_name = f"{person_info['first_name']} {person_info['last_name']}".strip()
 
-        with Session(self.engine) as session:
-            person_record = PersonRecord(
-                id=person_id,
-                email=person_info["email"],
-                first_name=person_info["first_name"],
-                last_name=person_info["last_name"],
-                full_name=full_name,
-                source=person_info.get("source", "manual"),
-            )
-            session.add(person_record)
-            session.commit()
-            session.refresh(person_record)
+        # Create PersonPage with proper URI
+        uri = PageURI(root=self.root, type=self.name, id=person_id)
+        person_page = PersonPage(
+            uri=uri,
+            first_name=person_info["first_name"],
+            last_name=person_info["last_name"],
+            email=person_info["email"],
+            full_name=full_name,
+        )
+
+        # Store in SQL cache
+        sql_cache = self.context.sql_cache
+        if sql_cache:
+            sql_cache.store_page(person_page)
 
         logger.info(
             f"Created new person: {full_name} ({person_info['email']}) from {person_info.get('source', 'manual')}"
         )
-        return self._record_to_page(person_record)
-
-    def _record_to_page(self, person_record: PersonRecord) -> PersonPage:
-        """Convert PersonRecord to PersonPage."""
-        uri = PageURI(root=self.root, type=self.name, id=person_record.id)
-        return PersonPage(
-            uri=uri,
-            first_name=person_record.first_name,
-            last_name=person_record.last_name,
-            email=person_record.email,
-            full_name=person_record.full_name,
-        )
+        return person_page
 
     def _generate_person_id(self, email: str) -> str:
         """Generate a unique person ID based on email."""

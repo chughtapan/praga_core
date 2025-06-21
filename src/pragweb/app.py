@@ -20,8 +20,8 @@ def setup_global_context() -> None:
     """Set up global context and initialize all components."""
     logger.info("Setting up global context...")
 
-    # Create and set global context
-    context = ServerContext(root="google")
+    # Create and set global context with SQL cache
+    context = ServerContext(root="google", cache_url="sqlite:///praga_cache.db")
     set_global_context(context)
 
     # Initialize services (they auto-register with global context)

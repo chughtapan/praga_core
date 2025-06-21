@@ -5,6 +5,8 @@ from typing import Callable, Dict, List, Optional, TypeVar
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
+from .page_cache import PageCache
+
 # Type for page handler functions
 PageHandler = Callable[..., Page]
 T = TypeVar("T", bound=Page)
@@ -13,16 +15,22 @@ T = TypeVar("T", bound=Page)
 class ServerContext:
     """Central server context that acts as single source of truth for caching and state."""
 
-    def __init__(self, root: str = "") -> None:
+    def __init__(self, root: str = "", cache_url: Optional[str] = None) -> None:
         """Initialize server context.
 
         Args:
             root: Root identifier for this context, used in PageURIs
+            cache_url: Optional database URL for PageCache. If None, no persistent cache is used.
         """
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._page_handlers: Dict[str, PageHandler] = {}
         self._page_cache: Dict[str, Page] = {}
+
+        # Initialize SQL-based PageCache if URL provided
+        self._sql_cache: Optional[PageCache] = None
+        if cache_url:
+            self._sql_cache = PageCache(cache_url)
 
     def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
         """Create a PageURI with this context's root.
@@ -73,10 +81,31 @@ class ServerContext:
         uri_str = str(page.uri)
         self._page_cache[uri_str] = page
 
+        # Also store in SQL cache if available
+        if self._sql_cache is not None:
+            self._sql_cache.store_page(page)
+
     def _cache_get_page(self, uri: str | PageURI) -> Optional[Page]:
         """Get a page from the cache using its URI."""
         uri_str = str(uri)
-        return self._page_cache.get(uri_str, None)
+
+        # First check in-memory cache
+        cached_page = self._page_cache.get(uri_str, None)
+        if cached_page is not None:
+            return cached_page
+
+        # Then check SQL cache if available
+        if self._sql_cache is not None:
+            page_uri = PageURI.parse(uri_str)
+            # Find the page type from registered handlers
+            if page_uri.type in self._page_handlers:
+                # We need to infer the page type from the handler
+                # This is a bit tricky - we'd need to call the handler to get the type
+                # For now, let's skip SQL cache lookup in _cache_get_page
+                # and handle it explicitly in other methods
+                pass
+
+        return None
 
     def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a document from the cache or create it if not found."""
@@ -148,6 +177,13 @@ class ServerContext:
 
         self._page_handlers[type_name] = handler_func
 
+        # Register page type with SQL cache if available
+        if self._sql_cache is not None:
+            # We need to determine the page type from the handler
+            # This is tricky since we don't have the actual type yet
+            # We'll defer this until the first page of this type is created
+            pass
+
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:
         """Get the current retriever agent."""
@@ -159,3 +195,8 @@ class ServerContext:
         if self._retriever is not None:
             raise RuntimeError("Retriever for this context is already set")
         self._retriever = retriever
+
+    @property
+    def sql_cache(self) -> Optional[PageCache]:
+        """Get access to the SQL-based page cache."""
+        return self._sql_cache
