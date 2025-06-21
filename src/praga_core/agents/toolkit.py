@@ -22,8 +22,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
-from praga_core.context import ServerContext
-from praga_core.global_context import get_global_context, has_global_context
+from praga_core.global_context import ContextMixin
 from praga_core.types import Page
 
 from .tool import PaginatedResponse, Tool
@@ -316,10 +315,10 @@ class RetrieverToolkitMeta(abc.ABC):
         pass
 
 
-class RetrieverToolkit(RetrieverToolkitMeta):
+class RetrieverToolkit(RetrieverToolkitMeta, ContextMixin):
+    """Base class for retriever toolkits that use the global context pattern."""
 
-    def __init__(self, context: Optional[ServerContext] = None) -> None:
-        self._context = context
+    def __init__(self) -> None:
         super().__init__()
 
     def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
@@ -330,17 +329,6 @@ class RetrieverToolkit(RetrieverToolkitMeta):
     @abc.abstractmethod
     def name(self) -> str:
         pass
-
-    @property
-    def context(self) -> ServerContext:
-        if self._context is None:
-            # Try to use global context if available
-            if has_global_context():
-                return get_global_context()
-            raise RuntimeError(
-                f"Context not set for toolkit: {self.name} and no global context available"
-            )
-        return self._context
 
 
 # ========================================================
