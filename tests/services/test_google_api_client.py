@@ -245,6 +245,7 @@ class TestGoogleAPIClient:
 
     def test_search_contacts(self):
         """Test search_contacts method."""
+        # Setup mock response
         mock_response = {
             "results": [
                 {"person": {"names": [{"displayName": "John Doe"}]}},
@@ -255,17 +256,24 @@ class TestGoogleAPIClient:
             mock_response
         )
 
-        result = self.client.search_contacts("john")
+        # Call search_contacts
+        contacts = self.client.search_contacts("John")
 
+        # Verify API call
         self.mock_people_service.people().searchContacts.assert_called_with(
-            query="john", readMask="names,emailAddresses"
+            query="John",
+            readMask="names,emailAddresses",
+            sources=[
+                "READ_SOURCE_TYPE_PROFILE",
+                "READ_SOURCE_TYPE_CONTACT",
+                "READ_SOURCE_TYPE_DOMAIN_CONTACT",
+            ],
         )
 
-        expected_results = [
-            {"person": {"names": [{"displayName": "John Doe"}]}},
-            {"person": {"names": [{"displayName": "Jane Smith"}]}},
-        ]
-        assert result == expected_results
+        # Verify results
+        assert len(contacts) == 2
+        assert contacts[0]["person"]["names"][0]["displayName"] == "John Doe"
+        assert contacts[1]["person"]["names"][0]["displayName"] == "Jane Smith"
 
     def test_search_contacts_empty_response(self):
         """Test search_contacts with empty response."""

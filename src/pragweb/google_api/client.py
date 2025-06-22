@@ -87,7 +87,15 @@ class GoogleAPIClient:
         """Search contacts using People API."""
         results = (
             self._people.people()
-            .searchContacts(query=query, readMask="names,emailAddresses")
+            .searchContacts(
+                query=query,
+                readMask="names,emailAddresses",
+                sources=[
+                    "READ_SOURCE_TYPE_PROFILE",
+                    "READ_SOURCE_TYPE_CONTACT",
+                    "READ_SOURCE_TYPE_DOMAIN_CONTACT",
+                ],
+            )
             .execute()
         )
 

@@ -1,7 +1,7 @@
 """Tests for existing CalendarService before refactoring."""
 
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -247,3 +247,183 @@ class TestCalendarService:
     def test_name_property(self):
         """Test name property returns correct service name."""
         assert self.service.name == "calendar_event"
+
+
+class TestCalendarToolkit:
+    """Test suite for CalendarToolkit methods."""
+
+    def setup_method(self):
+        """Set up test environment."""
+        # Clear any existing global context first
+        clear_global_context()
+
+        self.mock_context = Mock()
+        self.mock_context.root = "test-root"
+        self.mock_context.services = {}
+        self.mock_context.get_page = Mock()
+
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
+        set_global_context(self.mock_context)
+
+        # Create mock GoogleAPIClient and service
+        self.mock_api_client = Mock()
+        self.mock_api_client.search_events = Mock()
+        self.service = CalendarService(self.mock_api_client)
+        self.toolkit = self.service.toolkit
+
+        # The toolkit will use the global context automatically
+        # Don't try to override the context property directly
+
+    def teardown_method(self):
+        """Clean up test environment."""
+        clear_global_context()
+
+    def test_get_events_by_date_range_basic(self):
+        """Test get_events_by_date_range without keywords."""
+        mock_events = [{"id": "event1"}, {"id": "event2"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        # Mock page creation
+        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        result = self.toolkit.get_events_by_date_range("2023-06-15", 7)
+
+        # Verify API call was made with correct parameters
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["calendarId"] == "primary"
+        assert "timeMin" in query_params
+        assert "timeMax" in query_params
+        assert query_params["singleEvents"] is True
+        assert query_params["orderBy"] == "startTime"
+        assert "q" not in query_params  # No keywords provided
+        assert len(result) == 2
+
+    def test_get_events_by_date_range_with_keywords(self):
+        """Test get_events_by_date_range with keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        mock_pages = [Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        result = self.toolkit.get_events_by_date_range(
+            "2023-06-15", 7, content="meeting"
+        )
+
+        # Verify API call includes keywords
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["q"] == "meeting"
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(
+            result[0], CalendarEventPage
+        )  # Verify the type of returned page
+
+    def test_get_events_with_person_basic(self):
+        """Test get_events_with_person without keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        mock_pages = [Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier to return the email
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = self.toolkit.get_events_with_person("test@example.com")
+
+        # Verify API call
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["q"] == 'who:"test@example.com"'
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(
+            result[0], CalendarEventPage
+        )  # Verify the type of returned page
+
+    def test_get_events_with_person_with_keywords(self):
+        """Test get_events_with_person with keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        mock_pages = [Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier to return the email
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = self.toolkit.get_events_with_person(
+                "test@example.com", content="standup"
+            )
+
+        # Verify API call includes keywords
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["q"] == 'who:"test@example.com" standup'
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(
+            result[0], CalendarEventPage
+        )  # Verify the type of returned page
+
+    def test_get_upcoming_events_basic(self):
+        """Test basic upcoming events retrieval."""
+        # Setup mock response
+        mock_events = [{"id": "event1"}, {"id": "event2"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        # Mock page creation
+        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Call get_upcoming_events on toolkit
+        result = self.toolkit.get_upcoming_events(days=7)
+
+        # Verify API call was made with correct parameters
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["calendarId"] == "primary"
+        assert "timeMin" in query_params
+        assert "timeMax" in query_params
+        assert query_params["singleEvents"] is True
+        assert query_params["orderBy"] == "startTime"
+        assert (
+            query_params["q"] is None
+        )  # No keywords provided, but q key is still present
+
+        # Verify results
+        assert len(result) == 2
+        assert all(isinstance(page, CalendarEventPage) for page in result)
+
+    def test_get_upcoming_events_with_keywords(self):
+        """Test upcoming events retrieval with keywords."""
+        # Setup mock response
+        mock_events = [{"id": "event1"}, {"id": "event2"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+
+        # Mock page creation
+        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Call get_upcoming_events on toolkit with keywords
+        result = self.toolkit.get_upcoming_events(days=7, content="meeting")
+
+        # Verify API call includes keywords
+        args, kwargs = self.mock_api_client.search_events.call_args
+        query_params = args[0]
+        assert query_params["q"] == "meeting"
+        assert query_params["calendarId"] == "primary"
+        assert "timeMin" in query_params
+        assert "timeMax" in query_params
+
+        # Verify results
+        assert len(result) == 2
+        assert all(isinstance(page, CalendarEventPage) for page in result)

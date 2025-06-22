@@ -10,6 +10,7 @@ from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
+from ..utils import resolve_person_identifier
 from .page import EmailPage, EmailSummary, EmailThreadPage
 from .utils import GmailParser
 
@@ -235,73 +236,83 @@ class GmailToolkit(RetrieverToolkit):
         )
 
     @tool()
-    def search_emails_by_query(
-        self, query: str, cursor: Optional[str] = None
-    ) -> PaginatedResponse[EmailPage]:
-        """Search emails using Gmail query syntax.
-
-        Args:
-            query: Gmail search query (e.g. 'from:john@example.com subject:meeting')
-            cursor: Cursor token for pagination (optional)
-        """
-        return self._search_emails_paginated_response(query, cursor)
-
-    @tool()
     def search_emails_from_person(
-        self, person: str, cursor: Optional[str] = None
+        self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
         """Search emails from a specific person.
 
         Args:
             person: Email address or name of the sender
+            content: Additional content to search for in the email content (optional)
             cursor: Cursor token for pagination (optional)
         """
         # Try to resolve person to email if it's a name
-        from ..utils import resolve_person_to_email
 
-        email = resolve_person_to_email(person)
-        query = f"from:{email or person}"
+        query = resolve_person_identifier(person)
+        query = f'from:"{query}"'
+
+        # Add content to the query if provided
+        if content:
+            query += f" {content}"
+
         return self._search_emails_paginated_response(query, cursor)
 
     @tool()
     def search_emails_to_person(
-        self, person: str, cursor: Optional[str] = None
+        self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
         """Search emails sent to a specific person.
 
         Args:
             person: Email address or name of the recipient
+            content: Additional content to search for in the email content (optional)
             cursor: Cursor token for pagination (optional)
         """
         # Try to resolve person to email if it's a name
-        from ..utils import resolve_person_to_email
+        query = resolve_person_identifier(person)
+        query = f'to:"{query}" OR cc:"{query}"'
 
-        email = resolve_person_to_email(person)
-        query = f"to:{email or person}"
+        # Add content to the query if provided
+        if content:
+            query += f" {content}"
+
         return self._search_emails_paginated_response(query, cursor)
 
     @tool()
-    def search_emails_by_subject(
-        self, subject: str, cursor: Optional[str] = None
+    def search_emails_by_content(
+        self, content: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
-        """Search emails by subject line.
+        """Search emails by content in subject line or body.
 
         Args:
-            subject: Subject text to search for
+            content: Text to search for in subject or body
             cursor: Cursor token for pagination (optional)
         """
-        query = f"subject:{subject}"
+        # Gmail search without specific field searches both subject and body
+        query = content
         return self._search_emails_paginated_response(query, cursor)
 
     @tool()
     def get_recent_emails(
-        self, days: int = 7, cursor: Optional[str] = None
+        self,
+        days: int = 7,
+        cursor: Optional[str] = None,
     ) -> PaginatedResponse[EmailPage]:
         """Get recent emails from the last N days.
 
         Args:
             days: Number of days to look back (default: 7)
+            content: Optional content to search for in email content
             cursor: Cursor token for pagination (optional)
         """
         query = f"newer_than:{days}d"
+        return self._search_emails_paginated_response(query, cursor)
+
+    @tool()
+    def get_unread_emails(
+        self,
+        cursor: Optional[str] = None,
+    ) -> PaginatedResponse[EmailPage]:
+        """Get unread emails."""
+        query = "is:unread"
         return self._search_emails_paginated_response(query, cursor)

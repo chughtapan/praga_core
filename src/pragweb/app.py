@@ -13,7 +13,7 @@ from pragweb.google_api.gmail import GmailService
 from pragweb.google_api.people import PeopleService
 
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
 

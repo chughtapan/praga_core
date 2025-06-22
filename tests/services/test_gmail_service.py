@@ -1,7 +1,7 @@
 """Tests for existing GmailService before refactoring."""
 
 from datetime import datetime
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -20,6 +20,9 @@ class TestGmailService:
 
     def setup_method(self):
         """Set up test environment."""
+        # Clear any existing global context first
+        clear_global_context()
+
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
         self.mock_context.services = {}  # Mock services dictionary
@@ -642,94 +645,303 @@ class TestEmailThreadPage:
 
 
 class TestEmailThreadPageIntegration:
-    """Test integration between EmailPage and EmailThreadPage."""
+    """Integration tests for EmailThreadPage with GmailService."""
+
+    def setup_method(self):
+        """Set up test environment."""
+        # Clear any existing global context first
+        clear_global_context()
+
+        self.mock_context = Mock()
+        self.mock_context.root = "test-root"
+        self.mock_context.services = {}
+
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
+        set_global_context(self.mock_context)
+
+        # Create mock GoogleAPIClient
+        self.mock_api_client = Mock()
+        self.mock_api_client.get_thread = Mock()
+        self.service = GmailService(self.mock_api_client)
+
+    def teardown_method(self):
+        """Clean up test environment."""
+        clear_global_context()
 
     def test_email_page_thread_uri_matches_thread_page_uri(self):
-        """Test that EmailPage.thread_uri matches EmailThreadPage.uri."""
-        root = "test-root"
-        thread_id = "thread456"
+        """Test that EmailPage.thread_uri matches EmailThreadPage.uri for the same thread."""
+        # Setup mock message response
+        mock_message = {
+            "id": "msg123",
+            "threadId": "thread456",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ]
+            },
+        }
 
-        # Create EmailPage
-        email_uri = PageURI(root=root, type="email", id="msg123", version=1)
-        email_page = EmailPage(
-            uri=email_uri,
-            message_id="msg123",
-            thread_id=thread_id,
-            subject="Test Email",
-            sender="sender@example.com",
-            recipients=[],
-            body="Test body",
-            time=datetime.now(),
-            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
-        )
+        # Setup mock thread response
+        mock_thread = {
+            "id": "thread456",
+            "messages": [mock_message],
+        }
 
-        # Create EmailSummary for the thread
-        email_summary = EmailSummary(
-            uri=email_uri,
-            sender="sender@example.com",
-            recipients=[],
-            body="Test body",
-            time=datetime.now(),
-        )
+        self.mock_api_client.get_message = Mock(return_value=mock_message)
+        self.mock_api_client.get_thread = Mock(return_value=mock_thread)
+        self.service.parser.extract_body = Mock(return_value="Test body")
 
-        # Create EmailThreadPage
-        thread_uri = PageURI(root=root, type="email_thread", id=thread_id, version=1)
-        thread_page = EmailThreadPage(
-            uri=thread_uri,
-            thread_id=thread_id,
-            subject="Test Email",
-            emails=[email_summary],
-            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
-        )
+        # Create email page and thread page
+        email_page = self.service.create_email_page("msg123")
+        thread_page = self.service.create_thread_page("thread456")
 
-        # Test that the email's thread_uri points to the thread page
+        # Verify that EmailPage.thread_uri matches EmailThreadPage.uri
+        assert email_page.thread_uri == thread_page.uri
         assert email_page.thread_uri.root == thread_page.uri.root
         assert email_page.thread_uri.type == thread_page.uri.type
         assert email_page.thread_uri.id == thread_page.uri.id
-        # Note: versions might differ intentionally
+        assert email_page.thread_uri.version == thread_page.uri.version
 
     def test_thread_page_contains_email_summaries(self):
-        """Test that EmailThreadPage contains the correct email summaries."""
-        root = "test-root"
-        thread_id = "thread789"
+        """Test that email summaries in thread page can be used to access individual emails."""
+        # This test verifies that the EmailSummary objects in a thread contain
+        # valid URIs that can be used to fetch the corresponding EmailPage objects
 
-        # Create multiple email summaries
-        email_summaries = [
-            EmailSummary(
-                uri=PageURI(root=root, type="email", id="msg1", version=1),
-                sender="user1@example.com",
-                recipients=["user2@example.com"],
-                body="First message",
-                time=datetime.now(),
-            ),
-            EmailSummary(
-                uri=PageURI(root=root, type="email", id="msg2", version=1),
-                sender="user2@example.com",
-                recipients=["user1@example.com"],
-                body="Second message",
-                time=datetime.now(),
-            ),
-            EmailSummary(
-                uri=PageURI(root=root, type="email", id="msg3", version=1),
-                sender="user1@example.com",
-                recipients=["user2@example.com"],
-                body="Third message",
-                time=datetime.now(),
-            ),
-        ]
+        # Setup mock thread with multiple messages
+        mock_thread = {
+            "id": "thread456",
+            "messages": [
+                {
+                    "id": "msg1",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Original Subject"},
+                            {"name": "From", "value": "alice@example.com"},
+                            {"name": "To", "value": "bob@example.com"},
+                            {
+                                "name": "Date",
+                                "value": "Mon, 10 Jun 2023 09:00:00 +0000",
+                            },
+                        ]
+                    },
+                },
+                {
+                    "id": "msg2",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Re: Original Subject"},
+                            {"name": "From", "value": "bob@example.com"},
+                            {"name": "To", "value": "alice@example.com"},
+                            {
+                                "name": "Date",
+                                "value": "Mon, 10 Jun 2023 10:00:00 +0000",
+                            },
+                        ]
+                    },
+                },
+            ],
+        }
 
-        # Create EmailThreadPage
-        thread_uri = PageURI(root=root, type="email_thread", id=thread_id, version=1)
-        thread_page = EmailThreadPage(
-            uri=thread_uri,
-            thread_id=thread_id,
-            subject="Multi-email Thread",
-            emails=email_summaries,
-            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+        self.mock_api_client.get_thread.return_value = mock_thread
+        self.service.parser.extract_body = Mock(return_value="Email body content")
+
+        # Create thread page
+        thread_page = self.service.create_thread_page("thread456")
+
+        # Verify email summaries have correct URIs
+        assert len(thread_page.emails) == 2
+        assert thread_page.emails[0].uri.id == "msg1"
+        assert thread_page.emails[1].uri.id == "msg2"
+
+        # Verify URI structure
+        for email_summary in thread_page.emails:
+            assert email_summary.uri.root == "test-root"
+            assert email_summary.uri.type == "email"
+            assert email_summary.uri.version == 1
+
+
+class TestGmailToolkit:
+    """Test suite for GmailToolkit methods."""
+
+    def setup_method(self):
+        """Set up test environment."""
+        # Clear any existing global context first
+        clear_global_context()
+
+        self.mock_context = Mock()
+        self.mock_context.root = "test-root"
+        self.mock_context.services = {}
+        self.mock_context.get_page = Mock()
+
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
+        set_global_context(self.mock_context)
+
+        # Create mock GoogleAPIClient and service
+        self.mock_api_client = Mock()
+        self.mock_api_client.search_messages = Mock()
+        self.service = GmailService(self.mock_api_client)
+        self.toolkit = self.service.toolkit
+
+        # The toolkit will use the global context automatically
+        # Don't try to override the context property directly
+
+    def teardown_method(self):
+        """Clean up test environment."""
+        clear_global_context()
+
+    def test_search_emails_from_person_basic(self):
+        """Test search_emails_from_person without keywords."""
+        mock_messages = [{"id": "msg1"}, {"id": "msg2"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        # Mock page creation
+        mock_pages = [Mock(spec=EmailPage), Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = self.toolkit.search_emails_from_person("test@example.com")
+
+        # Verify API call was made with correct query
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == 'from:"test@example.com"'
+        assert len(result) == 2  # Verify we got two pages back
+        assert all(
+            isinstance(page, EmailPage) for page in result
+        )  # Verify the type of returned pages
+
+    def test_search_emails_from_person_with_keywords(self):
+        """Test search_emails_from_person with keywords."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = self.toolkit.search_emails_from_person(
+                "test@example.com", content="urgent project"
+            )
+
+        # Verify API call includes keywords
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == 'from:"test@example.com" urgent project'
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+
+    def test_search_emails_to_person_basic(self):
+        """Test search_emails_to_person without keywords."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="recipient@example.com",
+        ):
+            result = self.toolkit.search_emails_to_person("recipient@example.com")
+
+        # Verify API call
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == 'to:"recipient@example.com" OR cc:"recipient@example.com"'
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+
+    def test_search_emails_to_person_with_keywords(self):
+        """Test search_emails_to_person with keywords."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        # Mock resolve_person_identifier
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="recipient@example.com",
+        ):
+            result = self.toolkit.search_emails_to_person(
+                "recipient@example.com", content="meeting notes"
+            )
+
+        # Verify API call includes keywords
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert (
+            query
+            == 'to:"recipient@example.com" OR cc:"recipient@example.com" meeting notes'
         )
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
 
-        # Verify that the thread contains all expected email summaries
-        assert len(thread_page.emails) == 3
-        assert email_summaries[0] in thread_page.emails
-        assert email_summaries[1] in thread_page.emails
-        assert email_summaries[2] in thread_page.emails
+    def test_search_emails_by_content(self):
+        """Test search_emails_by_content searches both subject and body."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        result = self.toolkit.search_emails_by_content("important announcement")
+
+        # Verify API call uses content directly (searches both subject and body)
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == "important announcement"
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+
+    def test_get_recent_emails_basic(self):
+        """Test get_recent_emails without keywords."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        result = self.toolkit.get_recent_emails(days=7)
+
+        # Verify API call
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == "newer_than:7d"
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+
+    def test_get_recent_emails_with_keywords(self):
+        """Test get_recent_emails - note: this method doesn't support content filtering."""
+        mock_messages = [{"id": "msg1"}]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
+
+        mock_pages = [Mock(spec=EmailPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+
+        result = self.toolkit.get_recent_emails(days=3)
+
+        # Verify API call
+        args, kwargs = self.mock_api_client.search_messages.call_args
+        query = args[0]
+        assert query == "newer_than:3d"
+        assert len(result) == 1  # Verify we got one page back
+        assert isinstance(result[0], EmailPage)  # Verify the type of returned page

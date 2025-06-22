@@ -46,11 +46,11 @@ class TestPeopleService:
     def test_init(self):
         """Test PeopleService initialization."""
         assert self.service.api_client is self.mock_api_client
-        assert self.service.name == "person"
+        assert self.service.name == "people"
 
         # Verify service is registered in context (service auto-registers via ServiceContext)
-        assert "person" in self.mock_context.services
-        assert self.mock_context.services["person"] is self.service
+        assert "people" in self.mock_context.services
+        assert self.mock_context.services["people"] is self.service
 
     def test_root_property(self):
         """Test root property returns context root."""
@@ -390,4 +390,4 @@ class TestPeopleService:
 
     def test_name_property(self):
         """Test name property returns correct service name."""
-        assert self.service.name == "person"
+        assert self.service.name == "people"
