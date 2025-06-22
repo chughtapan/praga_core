@@ -10,7 +10,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
     Optional,
     Sequence,
     Tuple,
@@ -23,7 +22,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
-from praga_core.context import ServerContext
+from praga_core.global_context import ContextMixin
 from praga_core.types import Page
 
 from .tool import PaginatedResponse, Tool
@@ -67,6 +66,9 @@ class RetrieverToolkitMeta(abc.ABC):
 
         # Register any functions that were tagged with @RetrieverToolkit.tool
         self._register_pending_stateless_tools()
+
+        # Register any methods that were tagged with @tool decorator
+        self._register_decorated_tool_methods()
 
     # ========================================================
     # ================  Internal Tool Management  ===========
@@ -262,6 +264,48 @@ class RetrieverToolkitMeta(abc.ABC):
                 max_tokens=cfg.get("max_tokens", 2048),
             )
 
+    def _register_decorated_tool_methods(self) -> None:
+        """Register methods decorated with @tool decorator."""
+        # Find all decorated methods in the class
+        for attr_name in dir(self.__class__):
+            if attr_name.startswith("_"):
+                continue
+
+            class_attr = getattr(self.__class__, attr_name, None)
+            if not class_attr:
+                continue
+
+            # Check if it's a ToolDescriptor or has the @tool markers
+            is_tool_descriptor = isinstance(class_attr, ToolDescriptor)
+            has_tool_markers = hasattr(class_attr, "_praga_is_tool") and hasattr(
+                class_attr, "_praga_tool_config"
+            )
+
+            if not (is_tool_descriptor or has_tool_markers):
+                continue
+
+            # Get the method to register and config
+            if is_tool_descriptor:
+                # For ToolDescriptor, use the original function but bind it to self
+                method_to_register = class_attr.func.__get__(self, self.__class__)
+                config = class_attr._praga_tool_config
+            else:
+                # For regular decorated methods
+                bound_method = getattr(self, attr_name)
+                method_to_register = bound_method
+                config = class_attr._praga_tool_config
+
+            self.register_tool(
+                method=method_to_register,
+                name=config.get("name"),
+                cache=config.get("cache", False),
+                ttl=config.get("ttl"),
+                invalidator=config.get("invalidator"),
+                paginate=config.get("paginate", False),
+                max_docs=config.get("max_docs", 20),
+                max_tokens=config.get("max_tokens", 2048),
+            )
+
     # ========================================================
     # ================  Abstract Methods  ===================
     # ========================================================
@@ -271,10 +315,10 @@ class RetrieverToolkitMeta(abc.ABC):
         pass
 
 
-class RetrieverToolkit(RetrieverToolkitMeta):
+class RetrieverToolkit(RetrieverToolkitMeta, ContextMixin):
+    """Base class for retriever toolkits that use the global context pattern."""
 
-    def __init__(self, context: Optional[ServerContext] = None) -> None:
-        self._context = context
+    def __init__(self) -> None:
         super().__init__()
 
     def make_cache_key(self, fn: ToolFunction, *args: Any, **kwargs: Any) -> str:
@@ -285,12 +329,6 @@ class RetrieverToolkit(RetrieverToolkitMeta):
     @abc.abstractmethod
     def name(self) -> str:
         pass
-
-    @property
-    def context(self) -> ServerContext:
-        if self._context is None:
-            raise RuntimeError(f"Context not set for toolkit: {self.name}")
-        return self._context
 
 
 # ========================================================
@@ -354,7 +392,10 @@ def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
             return False
 
         # Handle both typing.Sequence and collections.abc.Sequence
-        if origin_type in (Sequence, ABCSequence, list, List):
+        # Import List here to ensure we have the right reference
+        from typing import List as TypingList
+
+        if origin_type in (Sequence, ABCSequence, list, TypingList):
             type_args = get_args(return_annotation)
             if len(type_args) == 1:
                 Page_type = type_args[0]
@@ -391,3 +432,104 @@ def _returns_paginated_response(tool_function: ToolFunction) -> bool:
         return False
     except Exception:
         return False
+
+
+# ========================================================
+# ================  Global Tool Decorator  ==============
+# ========================================================
+
+
+class ToolDescriptor:
+    """Descriptor that validates @tool usage and provides the original function."""
+
+    def __init__(self, func: ToolFunction, config: Dict[str, Any]):
+        self.func = func
+        self.config = config
+        self.name: Optional[str] = None
+        self.__name__: str = func.__name__
+        self.__doc__: Optional[str] = func.__doc__
+        self.__annotations__: Dict[str, Any] = getattr(func, "__annotations__", {})
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Called when the descriptor is assigned to a class attribute."""
+        self.name = name
+
+        # Check if the owner class inherits from RetrieverToolkitMeta
+        try:
+            is_retriever_toolkit_subclass = issubclass(owner, RetrieverToolkitMeta)
+        except TypeError:
+            # owner is not a class
+            is_retriever_toolkit_subclass = False
+
+        if not is_retriever_toolkit_subclass:
+            raise TypeError(
+                f"@tool decorator can only be used on RetrieverToolkit classes. "
+                f"Method '{name}' in class '{owner.__name__}' uses @tool "
+                f"but the class does not inherit from RetrieverToolkit."
+            )
+
+    def __get__(self, instance: Any, owner: type) -> Any:
+        """Return the bound method when accessed on an instance."""
+        if instance is None:
+            return self
+        return self.func.__get__(instance, owner)
+
+
+def tool(
+    *,
+    name: str | None = None,
+    cache: bool = False,
+    ttl: timedelta | None = None,
+    invalidator: CacheInvalidator | None = None,
+    paginate: bool = False,
+    max_docs: int = 20,
+    max_tokens: int = 2048,
+) -> Callable[[ToolFunction], ToolFunction]:
+    """
+    Global @tool decorator for methods within RetrieverToolkit classes.
+
+    This decorator can be applied to methods within classes that inherit from
+    RetrieverToolkit. It will automatically register the tool when the class
+    is instantiated.
+
+    Args:
+        name: The name of the tool. If not provided, uses the method's __name__.
+        cache: Whether to cache the tool.
+        ttl: The time to live for the cache.
+        invalidator: A function to invalidate the cache.
+        paginate: Whether to paginate the tool via invoke method.
+        max_docs: The maximum number of Pages to return per page.
+        max_tokens: The maximum number of tokens to return per page.
+
+    Raises:
+        TypeError: If the decorator is applied to a method in a class that
+                  does not inherit from RetrieverToolkit.
+
+    Example:
+        class MyToolkit(RetrieverToolkit):
+            @tool(cache=True, paginate=True)
+            def search_docs(self, query: str) -> List[Page]:
+                return []
+    """
+
+    def decorator(func: ToolFunction) -> ToolFunction:
+        config = {
+            "name": name,
+            "cache": cache,
+            "ttl": ttl,
+            "invalidator": invalidator,
+            "paginate": paginate,
+            "max_docs": max_docs,
+            "max_tokens": max_tokens,
+        }
+
+        # Create a descriptor that validates class inheritance
+        descriptor = ToolDescriptor(func, config)
+
+        # Store the configuration and mark as tool for later registration
+        descriptor._praga_tool_config = config  # type: ignore[attr-defined]
+        descriptor._praga_is_tool = True  # type: ignore[attr-defined]
+
+        return descriptor  # type: ignore[return-value]
+
+    return decorator

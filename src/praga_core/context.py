@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Callable, Dict, List, Optional, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
+
+from .page_cache import PageCache
+from .service import Service
+
+logger = logging.getLogger(__name__)
 
 # Type for page handler functions
 PageHandler = Callable[..., Page]
@@ -13,16 +19,40 @@ T = TypeVar("T", bound=Page)
 class ServerContext:
     """Central server context that acts as single source of truth for caching and state."""
 
-    def __init__(self, root: str = "") -> None:
+    def __init__(self, root: str = "", cache_url: Optional[str] = None) -> None:
         """Initialize server context.
 
         Args:
             root: Root identifier for this context, used in PageURIs
+            cache_url: Optional database URL for PageCache. If None, uses sqlite in-memory database.
         """
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._page_handlers: Dict[str, PageHandler] = {}
-        self._page_cache: Dict[str, Page] = {}
+        self._services: Dict[str, Service] = {}
+
+        # Initialize SQL-based PageCache (always available)
+        if cache_url is None:
+            cache_url = "sqlite:///:memory:"
+        self._page_cache = PageCache(cache_url)
+
+    def register_service(self, name: str, service: Service) -> None:
+        """Register a service with the context."""
+        if name in self._services:
+            raise RuntimeError(f"Service already registered: {name}")
+        self._services[name] = service
+        logger.info(f"Registered service: {name}")
+
+    def get_service(self, name: str) -> Service:
+        """Get a service by name."""
+        if name not in self._services:
+            raise RuntimeError(f"No service registered with name: {name}")
+        return self._services[name]
+
+    @property
+    def services(self) -> Dict[str, Service]:
+        """Get all registered services."""
+        return self._services.copy()
 
     def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
         """Create a PageURI with this context's root.
@@ -58,39 +88,22 @@ class ServerContext:
 
         return decorator
 
-    def _create_page(self, page_uri: PageURI) -> Page:
-        """Create a page using the registered handler for the given type."""
-        if page_uri.type not in self._page_handlers:
-            raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
-
-        handler = self._page_handlers[page_uri.type]
-        # Call handler with just the id - handlers are responsible for creating proper URIs
-        page: Page = handler(page_uri.id)
-        return page
-
-    def _cache_set_page(self, page: Page) -> None:
-        """Store a page in the cache using its URI string."""
-        uri_str = str(page.uri)
-        self._page_cache[uri_str] = page
-
-    def _cache_get_page(self, uri: str | PageURI) -> Optional[Page]:
-        """Get a page from the cache using its URI."""
-        uri_str = str(uri)
-        return self._page_cache.get(uri_str, None)
-
     def get_page(self, page_uri: str | PageURI) -> Page:
-        """Retrieve a document from the cache or create it if not found."""
+        """Retrieve a page by routing to the appropriate service handler.
 
+        The page may be retrieved from cache or created fresh by the service.
+        Cache management is handled by individual services.
+        """
         # Parse URI if it's a string
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
 
-        page = self._cache_get_page(page_uri)
-        if page is None:
-            # Not in cache, create it
-            page = self._create_page(page_uri)
-            self._cache_set_page(page)
-        return page
+        if page_uri.type not in self._page_handlers:
+            raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
+
+        handler = self._page_handlers[page_uri.type]
+        # Call handler with just the id - handlers are responsible for cache management
+        return handler(page_uri.id)
 
     def search(
         self,
@@ -118,7 +131,7 @@ class ServerContext:
         return retriever.search(instruction)
 
     def _resolve_references(self, results: List[PageReference]) -> List[PageReference]:
-        """Resolve references to pages in the cache."""
+        """Resolve references to pages by calling get_page."""
         for ref in results:
             ref.page = self.get_page(ref.uri)
             assert ref.page is not None
@@ -159,3 +172,8 @@ class ServerContext:
         if self._retriever is not None:
             raise RuntimeError("Retriever for this context is already set")
         self._retriever = retriever
+
+    @property
+    def page_cache(self) -> PageCache:
+        """Get access to the SQL-based page cache."""
+        return self._page_cache

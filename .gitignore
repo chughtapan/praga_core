@@ -114,3 +114,6 @@ dmypy.json
 # Secrets
 credentials.json
 token.pickle
+
+# Sqlite files
+*.db
