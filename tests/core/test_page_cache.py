@@ -699,3 +699,429 @@ class TestURIHandling:
         assert retrieved_user2 is not None
         assert retrieved_user1.name == "User 1"
         assert retrieved_user2.name == "User 2"
+
+
+class TestPageURISerialization:
+    """Test PageURI serialization and deserialization in page_cache."""
+
+    def test_convert_page_uris_for_storage_single_uri(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting a single PageURI to string for storage."""
+        uri = PageURI(root="test", type="doc", id="123")
+        result = page_cache._convert_page_uris_for_storage(uri)
+        assert result == str(uri)
+        assert isinstance(result, str)
+
+    def test_convert_page_uris_for_storage_list_of_uris(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting a list of PageURIs to strings for storage."""
+        uris = [
+            PageURI(root="test", type="doc", id="123"),
+            PageURI(root="test", type="doc", id="456"),
+        ]
+        result = page_cache._convert_page_uris_for_storage(uris)
+        expected = [str(uri) for uri in uris]
+        assert result == expected
+        assert all(isinstance(item, str) for item in result)
+
+    def test_convert_page_uris_for_storage_nested_structure(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting nested structures containing PageURIs."""
+        uri1 = PageURI(root="test", type="doc", id="123")
+        uri2 = PageURI(root="test", type="doc", id="456")
+
+        nested_data = {
+            "single_uri": uri1,
+            "uri_list": [uri1, uri2],
+            "regular_data": "some string",
+            "number": 42,
+        }
+
+        result = page_cache._convert_page_uris_for_storage(nested_data)
+
+        assert result["single_uri"] == str(uri1)
+        assert result["uri_list"] == [str(uri1), str(uri2)]
+        assert result["regular_data"] == "some string"
+        assert result["number"] == 42
+
+    def test_convert_page_uris_for_storage_non_uri_values(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that non-PageURI values are returned unchanged."""
+        test_values = [
+            "string",
+            42,
+            3.14,
+            True,
+            None,
+            ["list", "of", "strings"],
+            {"dict": "value"},
+        ]
+
+        for value in test_values:
+            result = page_cache._convert_page_uris_for_storage(value)
+            assert result == value
+
+    def test_convert_page_uris_from_storage_single_uri(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting a string back to PageURI from storage."""
+        from praga_core.types import PageURI
+
+        uri_string = "test/doc:123@1"
+        result = page_cache._convert_page_uris_from_storage(uri_string, PageURI)
+
+        assert isinstance(result, PageURI)
+        assert result.root == "test"
+        assert result.type == "doc"
+        assert result.id == "123"
+
+    def test_convert_page_uris_from_storage_optional_uri(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting Optional[PageURI] from storage."""
+        from typing import Optional
+
+        from praga_core.types import PageURI
+
+        # Test with actual URI string
+        uri_string = "test/doc:123@1"
+        result = page_cache._convert_page_uris_from_storage(
+            uri_string, Optional[PageURI]
+        )
+        assert isinstance(result, PageURI)
+
+        # Test with None
+        result_none = page_cache._convert_page_uris_from_storage(
+            None, Optional[PageURI]
+        )
+        assert result_none is None
+
+    def test_convert_page_uris_from_storage_list_of_uris(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test converting List[PageURI] from storage."""
+        from typing import List
+
+        from praga_core.types import PageURI
+
+        uri_strings = ["test/doc:123@1", "test/doc:456@1"]
+        result = page_cache._convert_page_uris_from_storage(uri_strings, List[PageURI])
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(isinstance(uri, PageURI) for uri in result)
+        assert result[0].id == "123"
+        assert result[1].id == "456"
+
+    def test_convert_page_uris_from_storage_non_uri_types(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that non-PageURI types are returned unchanged."""
+        test_cases = [
+            ("string", str),
+            (42, int),
+            (3.14, float),
+            (True, bool),
+            (["list"], list),
+            ({"dict": "value"}, dict),
+        ]
+
+        for value, field_type in test_cases:
+            result = page_cache._convert_page_uris_from_storage(value, field_type)
+            assert result == value
+
+
+class TestPageWithPageURIFields:
+    """Test pages that contain PageURI fields."""
+
+    class DocumentPage(Page):
+        """Test document page with PageURI fields."""
+
+        title: str
+        content: str
+        author_uri: Optional[PageURI] = None
+        related_docs: list[PageURI] = []
+        parent_doc: Optional[PageURI] = None
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    @pytest.fixture
+    def sample_document_with_uris(self) -> "TestPageWithPageURIFields.DocumentPage":
+        """Provide a sample document with PageURI fields."""
+        return self.DocumentPage(
+            uri=PageURI(root="test", type="document", id="doc1"),
+            title="Test Document",
+            content="This is test content for the document",
+            author_uri=PageURI(root="test", type="user", id="author1"),
+            related_docs=[
+                PageURI(root="test", type="document", id="related1"),
+                PageURI(root="test", type="document", id="related2"),
+            ],
+            parent_doc=PageURI(root="test", type="document", id="parent1"),
+        )
+
+    def test_store_and_retrieve_page_with_page_uris(
+        self,
+        page_cache: PageCache,
+        sample_document_with_uris: "TestPageWithPageURIFields.DocumentPage",
+    ) -> None:
+        """Test storing and retrieving a page with PageURI fields."""
+        # Store the document
+        result = page_cache.store_page(sample_document_with_uris)
+        assert result is True
+
+        # Retrieve the document
+        retrieved_doc = page_cache.get_page(
+            self.DocumentPage, sample_document_with_uris.uri
+        )
+
+        assert retrieved_doc is not None
+        assert retrieved_doc.title == "Test Document"
+        assert retrieved_doc.content == "This is test content for the document"
+
+        # Verify PageURI fields are correctly deserialized
+        assert isinstance(retrieved_doc.author_uri, PageURI)
+        assert retrieved_doc.author_uri.type == "user"
+        assert retrieved_doc.author_uri.id == "author1"
+
+        assert isinstance(retrieved_doc.related_docs, list)
+        assert len(retrieved_doc.related_docs) == 2
+        assert all(isinstance(uri, PageURI) for uri in retrieved_doc.related_docs)
+        assert retrieved_doc.related_docs[0].id == "related1"
+        assert retrieved_doc.related_docs[1].id == "related2"
+
+        assert isinstance(retrieved_doc.parent_doc, PageURI)
+        assert retrieved_doc.parent_doc.id == "parent1"
+
+    def test_store_and_retrieve_page_with_none_page_uris(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test storing and retrieving a page with None PageURI fields."""
+        doc = self.DocumentPage(
+            uri=PageURI(root="test", type="document", id="doc2"),
+            title="Document Without URIs",
+            content="Content without related URIs",
+            author_uri=None,
+            related_docs=[],
+            parent_doc=None,
+        )
+
+        # Store the document
+        result = page_cache.store_page(doc)
+        assert result is True
+
+        # Retrieve the document
+        retrieved_doc = page_cache.get_page(self.DocumentPage, doc.uri)
+
+        assert retrieved_doc is not None
+        assert retrieved_doc.title == "Document Without URIs"
+        assert retrieved_doc.author_uri is None
+        assert retrieved_doc.related_docs == []
+        assert retrieved_doc.parent_doc is None
+
+    def test_update_page_with_page_uris(
+        self,
+        page_cache: PageCache,
+        sample_document_with_uris: "TestPageWithPageURIFields.DocumentPage",
+    ) -> None:
+        """Test updating a page with PageURI fields."""
+        # Store initial document
+        page_cache.store_page(sample_document_with_uris)
+
+        # Create updated version
+        updated_doc = self.DocumentPage(
+            uri=sample_document_with_uris.uri,  # Same URI
+            title="Updated Document",
+            content="Updated content",
+            author_uri=PageURI(root="test", type="user", id="new_author"),
+            related_docs=[
+                PageURI(root="test", type="document", id="new_related1"),
+            ],
+            parent_doc=None,  # Changed to None
+        )
+
+        # Update the document
+        result = page_cache.store_page(updated_doc)
+        assert result is False  # Should be update, not insert
+
+        # Retrieve and verify
+        retrieved_doc = page_cache.get_page(self.DocumentPage, updated_doc.uri)
+
+        assert retrieved_doc is not None
+        assert retrieved_doc.title == "Updated Document"
+        assert retrieved_doc.author_uri.id == "new_author"
+        assert len(retrieved_doc.related_docs) == 1
+        assert retrieved_doc.related_docs[0].id == "new_related1"
+        assert retrieved_doc.parent_doc is None
+
+    def test_find_pages_by_page_uri_fields(self, page_cache: PageCache) -> None:
+        """Test finding pages by PageURI field values."""
+        # Create documents with specific author
+        author_uri = PageURI(root="test", type="user", id="author123")
+
+        doc1 = self.DocumentPage(
+            uri=PageURI(root="test", type="document", id="doc1"),
+            title="Document 1",
+            content="Content 1",
+            author_uri=author_uri,
+        )
+
+        doc2 = self.DocumentPage(
+            uri=PageURI(root="test", type="document", id="doc2"),
+            title="Document 2",
+            content="Content 2",
+            author_uri=author_uri,
+        )
+
+        doc3 = self.DocumentPage(
+            uri=PageURI(root="test", type="document", id="doc3"),
+            title="Document 3",
+            content="Content 3",
+            author_uri=PageURI(root="test", type="user", id="different_author"),
+        )
+
+        # Store all documents
+        page_cache.store_page(doc1)
+        page_cache.store_page(doc2)
+        page_cache.store_page(doc3)
+
+        # Find documents by author_uri (note: stored as string in DB)
+        results = page_cache.find_pages_by_attribute(
+            self.DocumentPage, lambda t: t.author_uri == str(author_uri)
+        )
+
+        assert len(results) == 2
+        titles = {doc.title for doc in results}
+        assert titles == {"Document 1", "Document 2"}
+
+
+class TestGoogleDocsPageURIs:
+    """Test Google Docs specific PageURI handling (simulating real usage)."""
+
+    class GDocHeader(Page):
+        """Simulated Google Docs header page with PageURI fields."""
+
+        document_id: str
+        title: str
+        chunk_count: int
+        chunk_uris: list[PageURI] = []
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.title) // 4
+
+    class GDocChunk(Page):
+        """Simulated Google Docs chunk page with PageURI fields."""
+
+        document_id: str
+        chunk_index: int
+        content: str
+        prev_chunk_uri: Optional[PageURI] = None
+        next_chunk_uri: Optional[PageURI] = None
+        header_uri: PageURI
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_google_docs_end_to_end_scenario(self, page_cache: PageCache) -> None:
+        """Test a realistic Google Docs scenario with headers and chunks."""
+        document_id = "1234567890"
+
+        # Create chunk URIs
+        chunk_uris = [
+            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(0)"),
+            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(1)"),
+            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(2)"),
+        ]
+
+        # Create header with chunk URIs
+        header = self.GDocHeader(
+            uri=PageURI(root="google", type="gdoc_header", id=document_id),
+            document_id=document_id,
+            title="Test Google Doc",
+            chunk_count=3,
+            chunk_uris=chunk_uris,
+        )
+
+        # Create chunks with prev/next links
+        chunks = []
+        for i in range(3):
+            chunk = self.GDocChunk(
+                uri=chunk_uris[i],
+                document_id=document_id,
+                chunk_index=i,
+                content=f"Content of chunk {i}",
+                prev_chunk_uri=chunk_uris[i - 1] if i > 0 else None,
+                next_chunk_uri=chunk_uris[i + 1] if i < 2 else None,
+                header_uri=header.uri,
+            )
+            chunks.append(chunk)
+
+        # Store header and chunks
+        page_cache.store_page(header)
+        for chunk in chunks:
+            page_cache.store_page(chunk)
+
+        # Retrieve and verify header
+        retrieved_header = page_cache.get_page(self.GDocHeader, header.uri)
+        assert retrieved_header is not None
+        assert retrieved_header.title == "Test Google Doc"
+        assert len(retrieved_header.chunk_uris) == 3
+        assert all(isinstance(uri, PageURI) for uri in retrieved_header.chunk_uris)
+
+        # Retrieve and verify chunks
+        for i, chunk_uri in enumerate(chunk_uris):
+            retrieved_chunk = page_cache.get_page(self.GDocChunk, chunk_uri)
+            assert retrieved_chunk is not None
+            assert retrieved_chunk.chunk_index == i
+            assert retrieved_chunk.content == f"Content of chunk {i}"
+
+            # Verify navigation links
+            if i > 0:
+                assert isinstance(retrieved_chunk.prev_chunk_uri, PageURI)
+                assert retrieved_chunk.prev_chunk_uri.id == f"{document_id}({i-1})"
+            else:
+                assert retrieved_chunk.prev_chunk_uri is None
+
+            if i < 2:
+                assert isinstance(retrieved_chunk.next_chunk_uri, PageURI)
+                assert retrieved_chunk.next_chunk_uri.id == f"{document_id}({i+1})"
+            else:
+                assert retrieved_chunk.next_chunk_uri is None
+
+            # Verify header link
+            assert isinstance(retrieved_chunk.header_uri, PageURI)
+            assert retrieved_chunk.header_uri.id == document_id
+
+    def test_find_chunks_by_document_id(self, page_cache: PageCache) -> None:
+        """Test finding all chunks for a specific document."""
+        document_id = "test_document_456"
+
+        # Create and store multiple chunks for the document
+        chunks = []
+        for i in range(3):
+            chunk = self.GDocChunk(
+                uri=PageURI(root="google", type="gdoc_chunk", id=f"{document_id}({i})"),
+                document_id=document_id,
+                chunk_index=i,
+                content=f"Chunk {i} content",
+                header_uri=PageURI(root="google", type="gdoc_header", id=document_id),
+            )
+            chunks.append(chunk)
+            page_cache.store_page(chunk)
+
+        # Find all chunks for this document
+        results = page_cache.find_pages_by_attribute(
+            self.GDocChunk, lambda t: t.document_id == document_id
+        )
+
+        assert len(results) == 3
+        chunk_indices = {chunk.chunk_index for chunk in results}
+        assert chunk_indices == {0, 1, 2}
