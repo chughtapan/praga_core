@@ -9,6 +9,7 @@ from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
+from ..utils import resolve_person_identifier
 from .page import CalendarEventPage
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ class CalendarService(ToolkitService):
     ) -> Tuple[List[PageURI], Optional[str]]:
         """Search events and return list of PageURIs and next page token."""
         try:
+            logger.debug(f"Searching events with query params: {query_params}")
             events, next_page_token = self.api_client.search_events(
                 query_params, page_token=page_token, page_size=page_size
             )
@@ -161,13 +163,18 @@ class CalendarToolkit(RetrieverToolkit):
 
     @tool()
     def get_events_by_date_range(
-        self, start_date: str, num_days: int, cursor: Optional[str] = None
+        self,
+        start_date: str,
+        num_days: int,
+        content: Optional[str] = None,
+        cursor: Optional[str] = None,
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events within a date range.
 
         Args:
             start_date: Start date in YYYY-MM-DD format
             num_days: Number of days to search
+            content: Optional content to search for in event title or description
             cursor: Cursor token for pagination (optional)
         """
         # Convert dates to RFC3339 timestamps
@@ -181,52 +188,66 @@ class CalendarToolkit(RetrieverToolkit):
             "singleEvents": True,
             "orderBy": "startTime",
         }
+
+        # Add content to search query if provided
+        if content:
+            query_params["q"] = content
+
         return self._search_events_paginated_response(query_params, cursor)
 
     @tool()
     def get_events_with_person(
-        self, person: str, cursor: Optional[str] = None
+        self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events where a specific person is involved (as attendee or organizer).
 
         Args:
             person: Email address or name of the person to search for
+            content: Additional content to search for in event title or description (optional)
             cursor: Cursor token for pagination (optional)
         """
         # Resolve person identifier to email address if needed
-        from ..utils import resolve_person_to_email
+        query = resolve_person_identifier(person)
+        query = f'who:"{query}"'
+        if content:
+            query += f" {content}"
 
-        email = resolve_person_to_email(person)
-        if not email:
-            logger.warning(f"Could not resolve person '{person}' to email address")
-            return PaginatedResponse(results=[], next_cursor=None)
-
-        # Search for events with this person (attendee or organizer)
-        now = datetime.utcnow()
-        query_params = {
-            "q": email,
-            "calendarId": "primary",
-            "timeMin": now.isoformat() + "Z",
-            "singleEvents": True,
-            "orderBy": "startTime",
-        }
-        return self._search_events_paginated_response(query_params, cursor)
+        # Search for events matching the query
+        return self._search_events_paginated_response(
+            {
+                "q": query,
+                "pageToken": cursor,
+                "singleEvents": True,
+                "orderBy": "startTime",
+            }
+        )
 
     @tool()
     def get_upcoming_events(
-        self, days: int = 7, cursor: Optional[str] = None
+        self,
+        days: int = 7,
+        content: Optional[str] = None,
+        cursor: Optional[str] = None,
     ) -> PaginatedResponse[CalendarEventPage]:
-        """Get upcoming events for the next N days."""
+        """Get upcoming events for the next N days.
+
+        Args:
+            days: Number of days to look ahead (default: 7)
+            content: Optional content to search for in event title or description
+            cursor: Cursor token for pagination (optional)
+        """
         now = datetime.utcnow()
         end = now + timedelta(days=days)
 
         query_params = {
+            "q": content,
             "calendarId": "primary",
             "timeMin": now.isoformat() + "Z",
             "timeMax": end.isoformat() + "Z",
             "singleEvents": True,
             "orderBy": "startTime",
         }
+
         return self._search_events_paginated_response(query_params, cursor)
 
     @tool()

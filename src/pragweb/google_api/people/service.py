@@ -532,7 +532,7 @@ class PeopleService(ToolkitService):
 
     @property
     def name(self) -> str:
-        return "person"
+        return "people"
 
 
 class PeopleToolkit(RetrieverToolkit):
@@ -547,24 +547,6 @@ class PeopleToolkit(RetrieverToolkit):
     @property
     def name(self) -> str:
         return "PeopleToolkit"
-
-    @tool()
-    def lookup_person(self, identifier: str) -> List[PersonPage]:
-        """Look up people by identifier (name or email).
-
-        Args:
-            identifier: Name, email, or partial name to search for
-        """
-        return self.people_service.lookup_people(identifier)
-
-    @tool()
-    def create_person(self, identifier: str) -> List[PersonPage]:
-        """Create person entries by searching across Google APIs.
-
-        Args:
-            identifier: Name or email to search for across Google services
-        """
-        return self.people_service.create_person(identifier)
 
     @tool()
     def get_person_by_email(self, email: str) -> List[PersonPage]:
