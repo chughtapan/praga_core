@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from chonkie import RecursiveChunker
 
@@ -267,13 +267,19 @@ class GoogleDocsService(ToolkitService):
             # Take first 50 characters and add ellipsis
             return content[:47].strip() + "..."
 
-    def search_document_headers(
-        self, query: str = "", page_token: Optional[str] = None, page_size: int = 20
+    def search_documents(
+        self,
+        search_params: Dict[str, Any],
+        page_token: Optional[str] = None,
+        page_size: int = 20,
     ) -> Tuple[List[PageURI], Optional[str]]:
-        """Search documents and return header URIs (using Drive API for discovery)."""
+        """Generic document search method that delegates to API client."""
         try:
+            # Delegate directly to API client
             files, next_page_token = self.api_client.search_documents(
-                query=query, page_token=page_token, page_size=page_size
+                search_params=search_params,
+                page_token=page_token,
+                page_size=page_size,
             )
 
             logger.debug(
@@ -290,73 +296,6 @@ class GoogleDocsService(ToolkitService):
 
         except Exception as e:
             logger.error(f"Error searching documents: {e}")
-            raise
-
-    def search_document_headers_by_title(
-        self, title_query: str, page_token: Optional[str] = None, page_size: int = 20
-    ) -> Tuple[List[PageURI], Optional[str]]:
-        """Search documents by title."""
-        try:
-            files, next_page_token = self.api_client.search_documents_by_title(
-                title_query=title_query, page_token=page_token, page_size=page_size
-            )
-
-            uris = [
-                PageURI(root=self.context.root, type="gdoc_header", id=file["id"])
-                for file in files
-            ]
-
-            return uris, next_page_token
-
-        except Exception as e:
-            logger.error(f"Error searching documents by title: {e}")
-            raise
-
-    def search_document_headers_by_owner(
-        self,
-        owner_identifier: str,
-        page_token: Optional[str] = None,
-        page_size: int = 20,
-    ) -> Tuple[List[PageURI], Optional[str]]:
-        """Search documents by owner (email or name)."""
-        try:
-            # Resolve person identifier to email address if needed
-            resolved_identifier = resolve_person_identifier(owner_identifier)
-            files, next_page_token = self.api_client.search_documents_by_owner(
-                owner_email=resolved_identifier,
-                page_token=page_token,
-                page_size=page_size,
-            )
-
-            uris = [
-                PageURI(root=self.context.root, type="gdoc_header", id=file["id"])
-                for file in files
-            ]
-
-            return uris, next_page_token
-
-        except Exception as e:
-            logger.error(f"Error searching documents by owner: {e}")
-            raise
-
-    def search_recent_document_headers(
-        self, days: int = 7, page_token: Optional[str] = None, page_size: int = 20
-    ) -> Tuple[List[PageURI], Optional[str]]:
-        """Search for recently modified documents."""
-        try:
-            files, next_page_token = self.api_client.search_recent_documents(
-                days=days, page_token=page_token, page_size=page_size
-            )
-
-            uris = [
-                PageURI(root=self.context.root, type="gdoc_header", id=file["id"])
-                for file in files
-            ]
-
-            return uris, next_page_token
-
-        except Exception as e:
-            logger.error(f"Error searching recent documents: {e}")
             raise
 
     def search_chunks_in_document(
@@ -433,18 +372,16 @@ class GoogleDocsToolkit(RetrieverToolkit):
     def name(self) -> str:
         return "GoogleDocsToolkit"
 
-    def _search_document_headers_paginated_response(
+    def _search_documents_paginated_response(
         self,
-        search_method: Callable[..., Tuple[List[PageURI], Optional[str]]],
-        *args: Any,
+        search_params: Dict[str, Any],
         cursor: Optional[str] = None,
         page_size: int = 10,
-        **kwargs: Any,
     ) -> PaginatedResponse[GDocHeader]:
-        """Search document headers and return a paginated response."""
+        """Search documents and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = search_method(
-            *args, page_token=cursor, page_size=page_size, **kwargs
+        uris, next_page_token = self.google_docs_service.search_documents(
+            search_params, cursor, page_size
         )
 
         # Resolve URIs to pages using context (this will trigger ingestion if needed)
@@ -471,10 +408,8 @@ class GoogleDocsToolkit(RetrieverToolkit):
             title_query: Search query for document titles
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_document_headers_paginated_response(
-            self.google_docs_service.search_document_headers_by_title,
-            title_query,
-            cursor=cursor,
+        return self._search_documents_paginated_response(
+            {"title_query": title_query}, cursor=cursor
         )
 
     @tool()
@@ -487,8 +422,8 @@ class GoogleDocsToolkit(RetrieverToolkit):
             topic_query: Search query for document content/topics
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_document_headers_paginated_response(
-            self.google_docs_service.search_document_headers, topic_query, cursor=cursor
+        return self._search_documents_paginated_response(
+            {"query": topic_query}, cursor=cursor
         )
 
     @tool()
@@ -501,10 +436,10 @@ class GoogleDocsToolkit(RetrieverToolkit):
             owner_identifier: Email address or name of the document owner
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_document_headers_paginated_response(
-            self.google_docs_service.search_document_headers_by_owner,
-            owner_identifier,
-            cursor=cursor,
+        # Resolve person identifier to email address if needed
+        resolved_owner = resolve_person_identifier(owner_identifier)
+        return self._search_documents_paginated_response(
+            {"owner_email": resolved_owner}, cursor=cursor
         )
 
     @tool()
@@ -517,11 +452,7 @@ class GoogleDocsToolkit(RetrieverToolkit):
             days: Number of days to look back for recent modifications (default: 7)
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_document_headers_paginated_response(
-            self.google_docs_service.search_recent_document_headers,
-            days,  # Pass as positional argument
-            cursor=cursor,
-        )
+        return self._search_documents_paginated_response({"days": days}, cursor=cursor)
 
     @tool()
     def search_all_documents(
@@ -532,11 +463,7 @@ class GoogleDocsToolkit(RetrieverToolkit):
         Args:
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_document_headers_paginated_response(
-            self.google_docs_service.search_document_headers,
-            "",  # Empty query to get all documents
-            cursor=cursor,
-        )
+        return self._search_documents_paginated_response({"query": ""}, cursor=cursor)
 
     @tool()
     def search_chunks_in_document(

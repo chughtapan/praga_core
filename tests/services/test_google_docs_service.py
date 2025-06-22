@@ -230,19 +230,19 @@ class TestGoogleDocsService:
         result = self.service._get_chunk_title(content)
         assert result == "This is a very long sentence that exceeds fifty..."
 
-    def test_search_document_headers(self):
-        """Test searching document headers."""
+    def test_search_documents_generic(self):
+        """Test searching documents with generic method."""
         mock_files = [
             {"id": "doc1", "name": "Document 1"},
             {"id": "doc2", "name": "Document 2"},
         ]
         self.mock_api_client.search_documents.return_value = (mock_files, "next_token")
 
-        uris, next_token = self.service.search_document_headers("test query")
+        uris, next_token = self.service.search_documents({"query": "test query"})
 
         # Verify API call
         self.mock_api_client.search_documents.assert_called_once_with(
-            query="test query", page_token=None, page_size=20
+            search_params={"query": "test query"}, page_token=None, page_size=20
         )
 
         # Verify URIs created
@@ -251,70 +251,60 @@ class TestGoogleDocsService:
         assert uris[1] == PageURI(root="test-root", type="gdoc_header", id="doc2")
         assert next_token == "next_token"
 
-    def test_search_document_headers_by_title(self):
+    def test_search_documents_by_title(self):
         """Test searching documents by title."""
         mock_files = [{"id": "doc1", "name": "Test Document"}]
-        self.mock_api_client.search_documents_by_title.return_value = (mock_files, None)
+        self.mock_api_client.search_documents.return_value = (mock_files, None)
 
-        uris, next_token = self.service.search_document_headers_by_title("Test")
+        uris, next_token = self.service.search_documents({"title_query": "Test"})
 
-        self.mock_api_client.search_documents_by_title.assert_called_once_with(
-            title_query="Test", page_token=None, page_size=20
+        self.mock_api_client.search_documents.assert_called_once_with(
+            search_params={"title_query": "Test"}, page_token=None, page_size=20
         )
         assert len(uris) == 1
         assert next_token is None
 
-    def test_search_document_headers_by_owner(self):
+    def test_search_documents_by_owner(self):
         """Test searching documents by owner with email."""
         mock_files = [{"id": "doc1", "name": "Owned Document"}]
-        self.mock_api_client.search_documents_by_owner.return_value = (mock_files, None)
+        self.mock_api_client.search_documents.return_value = (mock_files, None)
 
-        # Mock resolve_person_identifier to return the same email
-        with patch(
-            "pragweb.google_api.docs.service.resolve_person_identifier"
-        ) as mock_resolve:
-            mock_resolve.return_value = "owner@example.com"
-
-            uris, next_token = self.service.search_document_headers_by_owner(
-                "owner@example.com"
-            )
-
-        mock_resolve.assert_called_once_with("owner@example.com")
-        self.mock_api_client.search_documents_by_owner.assert_called_once_with(
-            owner_email="owner@example.com", page_token=None, page_size=20
+        # Service layer should not do person identifier resolution anymore
+        uris, next_token = self.service.search_documents(
+            {"owner_email": "owner@example.com"}
         )
-        assert len(uris) == 1
 
-    def test_search_document_headers_by_owner_with_name(self):
-        """Test searching documents by owner with person name."""
-        mock_files = [{"id": "doc1", "name": "Owned Document"}]
-        self.mock_api_client.search_documents_by_owner.return_value = (mock_files, None)
-
-        # Mock resolve_person_identifier to resolve name to email
-        with patch(
-            "pragweb.google_api.docs.service.resolve_person_identifier"
-        ) as mock_resolve:
-            mock_resolve.return_value = "John Doe OR john.doe@example.com"
-
-            uris, next_token = self.service.search_document_headers_by_owner("John Doe")
-
-        mock_resolve.assert_called_once_with("John Doe")
-        self.mock_api_client.search_documents_by_owner.assert_called_once_with(
-            owner_email="John Doe OR john.doe@example.com",
+        self.mock_api_client.search_documents.assert_called_once_with(
+            search_params={"owner_email": "owner@example.com"},
             page_token=None,
             page_size=20,
         )
         assert len(uris) == 1
 
-    def test_search_recent_document_headers(self):
+    def test_search_documents_by_owner_with_name(self):
+        """Test searching documents by owner with person name."""
+        mock_files = [{"id": "doc1", "name": "Owned Document"}]
+        self.mock_api_client.search_documents.return_value = (mock_files, None)
+
+        # Service layer should not do person identifier resolution anymore
+        uris, next_token = self.service.search_documents({"owner_email": "John Doe"})
+
+        self.mock_api_client.search_documents.assert_called_once_with(
+            search_params={"owner_email": "John Doe"},
+            page_token=None,
+            page_size=20,
+        )
+        assert len(uris) == 1
+
+    def test_search_recent_documents(self):
         """Test searching recent documents."""
         mock_files = [{"id": "doc1", "name": "Recent Document"}]
-        self.mock_api_client.search_recent_documents.return_value = (mock_files, None)
+        self.mock_api_client.search_documents.return_value = (mock_files, None)
 
-        uris, next_token = self.service.search_recent_document_headers(days=14)
+        uris, next_token = self.service.search_documents({"days": 14})
 
-        self.mock_api_client.search_recent_documents.assert_called_once_with(
-            days=14, page_token=None, page_size=20
+        self.mock_api_client.search_documents.assert_called_once_with(
+            search_params={"days": 14}, page_token=None, page_size=20
         )
         assert len(uris) == 1
 
@@ -424,7 +414,7 @@ class TestGoogleDocsToolkit:
 
         # Mock service search method
         mock_uris = [Mock(spec=PageURI), Mock(spec=PageURI)]
-        self.mock_service.search_document_headers_by_title.return_value = (
+        self.mock_service.search_documents.return_value = (
             mock_uris,
             "next_token",
         )
@@ -432,8 +422,8 @@ class TestGoogleDocsToolkit:
         result = self.toolkit.search_documents_by_title("test title")
 
         # Verify service method called
-        self.mock_service.search_document_headers_by_title.assert_called_once_with(
-            "test title", page_token=None, page_size=10
+        self.mock_service.search_documents.assert_called_once_with(
+            {"title_query": "test title"}, None, 10
         )
 
         # Verify result structure
@@ -446,12 +436,12 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
-        self.mock_service.search_document_headers.return_value = (mock_uris, None)
+        self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_documents_by_topic("test topic")
 
-        self.mock_service.search_document_headers.assert_called_once_with(
-            "test topic", page_token=None, page_size=10
+        self.mock_service.search_documents.assert_called_once_with(
+            {"query": "test topic"}, None, 10
         )
         assert result.results == mock_headers
         assert result.next_cursor is None
@@ -462,15 +452,22 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
-        self.mock_service.search_document_headers_by_owner.return_value = (
+        self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
         )
 
-        result = self.toolkit.search_documents_by_owner("owner@example.com")
+        # Mock resolve_person_identifier
+        with patch(
+            "pragweb.google_api.docs.service.resolve_person_identifier"
+        ) as mock_resolve:
+            mock_resolve.return_value = "owner@example.com"
 
-        self.mock_service.search_document_headers_by_owner.assert_called_once_with(
-            "owner@example.com", page_token=None, page_size=10
+            result = self.toolkit.search_documents_by_owner("owner@example.com")
+
+        mock_resolve.assert_called_once_with("owner@example.com")
+        self.mock_service.search_documents.assert_called_once_with(
+            {"owner_email": "owner@example.com"}, None, 10
         )
         assert result.results == mock_headers
 
@@ -480,15 +477,22 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
-        self.mock_service.search_document_headers_by_owner.return_value = (
+        self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
         )
 
-        result = self.toolkit.search_documents_by_owner("John Doe")
+        # Mock resolve_person_identifier to resolve name to email query
+        with patch(
+            "pragweb.google_api.docs.service.resolve_person_identifier"
+        ) as mock_resolve:
+            mock_resolve.return_value = "John Doe OR john.doe@example.com"
 
-        self.mock_service.search_document_headers_by_owner.assert_called_once_with(
-            "John Doe", page_token=None, page_size=10
+            result = self.toolkit.search_documents_by_owner("John Doe")
+
+        mock_resolve.assert_called_once_with("John Doe")
+        self.mock_service.search_documents.assert_called_once_with(
+            {"owner_email": "John Doe OR john.doe@example.com"}, None, 10
         )
         assert result.results == mock_headers
 
@@ -498,15 +502,15 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
-        self.mock_service.search_recent_document_headers.return_value = (
+        self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
         )
 
         result = self.toolkit.search_recently_modified_documents(days=14)
 
-        self.mock_service.search_recent_document_headers.assert_called_once_with(
-            14, page_token=None, page_size=10
+        self.mock_service.search_documents.assert_called_once_with(
+            {"days": 14}, None, 10
         )
         assert result.results == mock_headers
 
@@ -516,12 +520,12 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
-        self.mock_service.search_document_headers.return_value = (mock_uris, None)
+        self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_all_documents()
 
-        self.mock_service.search_document_headers.assert_called_once_with(
-            "", page_token=None, page_size=10
+        self.mock_service.search_documents.assert_called_once_with(
+            {"query": ""}, None, 10
         )
         assert result.results == mock_headers
 
@@ -542,7 +546,7 @@ class TestGoogleDocsToolkit:
     def test_pagination_no_more_pages(self):
         """Test pagination when no more pages are available."""
         # Mock that there are no more pages
-        self.mock_service.search_document_headers_by_title.return_value = ([], None)
+        self.mock_service.search_documents.return_value = ([], None)
 
         result = self.toolkit.search_documents_by_title("test", cursor="some_cursor")
 
@@ -552,7 +556,7 @@ class TestGoogleDocsToolkit:
     def test_pagination_with_cursor(self):
         """Test pagination using cursor."""
         # Mock service returns results with next cursor
-        self.mock_service.search_document_headers_by_title.return_value = (
+        self.mock_service.search_documents.return_value = (
             [Mock(spec=PageURI)],
             "next_cursor_token",
         )
@@ -561,8 +565,8 @@ class TestGoogleDocsToolkit:
         result = self.toolkit.search_documents_by_title("test", cursor="current_cursor")
 
         # Should be called once with the cursor
-        self.mock_service.search_document_headers_by_title.assert_called_once_with(
-            "test", page_token="current_cursor", page_size=10
+        self.mock_service.search_documents.assert_called_once_with(
+            {"title_query": "test"}, "current_cursor", 10
         )
         assert len(result.results) == 1
         assert result.next_cursor == "next_cursor_token"

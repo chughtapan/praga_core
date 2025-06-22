@@ -118,98 +118,50 @@ class GoogleAPIClient:
 
     def search_documents(
         self,
-        query: str = "",
+        search_params: Dict[str, Any],
         page_token: Optional[str] = None,
         page_size: int = 20,
-        order_by: str = "modifiedTime desc",
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search Google Docs documents with pagination."""
-        # Build Drive API query for Google Docs
-        drive_query = (
-            "mimeType='application/vnd.google-apps.document' and trashed=false"
-        )
+        """Search Google Docs documents with pagination using flexible parameters."""
+        # Start with base query for Google Docs
+        drive_query_parts = [
+            "mimeType='application/vnd.google-apps.document'",
+            "trashed=false",
+        ]
 
-        if query.strip():
-            # Add fullText search if query provided
-            drive_query += f" and fullText contains '{query}'"
+        # Add specific search criteria based on parameters
+        if "query" in search_params and search_params["query"].strip():
+            drive_query_parts.append(f"fullText contains '{search_params['query']}'")
 
-        # Search for files with pagination
-        search_params = {
+        if "title_query" in search_params:
+            drive_query_parts.append(f"name contains '{search_params['title_query']}'")
+
+        if "owner_email" in search_params:
+            drive_query_parts.append(f"'{search_params['owner_email']}' in owners")
+
+        if "days" in search_params:
+            from datetime import datetime, timedelta
+
+            recent_date = (
+                datetime.now() - timedelta(days=search_params["days"])
+            ).isoformat() + "Z"
+            drive_query_parts.append(f"modifiedTime > '{recent_date}'")
+
+        # Combine all query parts
+        drive_query = " and ".join(drive_query_parts)
+
+        # Set up search parameters
+        api_params = {
             "q": drive_query,
             "pageSize": page_size,
             "fields": "nextPageToken,files(id,name,modifiedTime)",
-            "orderBy": order_by,
+            "orderBy": search_params.get("order_by", "modifiedTime desc"),
         }
         if page_token:
-            search_params["pageToken"] = page_token
+            api_params["pageToken"] = page_token
 
-        results = self._drive.files().list(**search_params).execute()
-        files = results.get("files", [])
-        next_token = results.get("nextPageToken")
-
-        return files, next_token
-
-    def search_documents_by_title(
-        self, title_query: str, page_token: Optional[str] = None, page_size: int = 20
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search Google Docs documents by title."""
-        drive_query = f"mimeType='application/vnd.google-apps.document' and trashed=false and name contains '{title_query}'"
-
-        search_params = {
-            "q": drive_query,
-            "pageSize": page_size,
-            "fields": "nextPageToken,files(id,name,modifiedTime)",
-            "orderBy": "modifiedTime desc",
-        }
-        if page_token:
-            search_params["pageToken"] = page_token
-
-        results = self._drive.files().list(**search_params).execute()
-        files = results.get("files", [])
-        next_token = results.get("nextPageToken")
-
-        return files, next_token
-
-    def search_documents_by_owner(
-        self, owner_email: str, page_token: Optional[str] = None, page_size: int = 20
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search Google Docs documents by owner email."""
-        drive_query = f"mimeType='application/vnd.google-apps.document' and trashed=false and '{owner_email}' in owners"
-
-        search_params = {
-            "q": drive_query,
-            "pageSize": page_size,
-            "fields": "nextPageToken,files(id,name,modifiedTime)",
-            "orderBy": "modifiedTime desc",
-        }
-        if page_token:
-            search_params["pageToken"] = page_token
-
-        results = self._drive.files().list(**search_params).execute()
-        files = results.get("files", [])
-        next_token = results.get("nextPageToken")
-
-        return files, next_token
-
-    def search_recent_documents(
-        self, days: int = 7, page_token: Optional[str] = None, page_size: int = 20
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search for recently modified Google Docs documents."""
-        from datetime import datetime, timedelta
-
-        recent_date = (datetime.now() - timedelta(days=days)).isoformat() + "Z"
-        drive_query = f"mimeType='application/vnd.google-apps.document' and trashed=false and modifiedTime > '{recent_date}'"
-
-        search_params = {
-            "q": drive_query,
-            "pageSize": page_size,
-            "fields": "nextPageToken,files(id,name,modifiedTime)",
-            "orderBy": "modifiedTime desc",
-        }
-        if page_token:
-            search_params["pageToken"] = page_token
-
-        results = self._drive.files().list(**search_params).execute()
+        # Execute search
+        results = self._drive.files().list(**api_params).execute()
         files = results.get("files", [])
         next_token = results.get("nextPageToken")
 
