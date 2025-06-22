@@ -27,6 +27,16 @@ class GoogleAPIClient:
         )
         return result  # type: ignore
 
+    def get_thread(self, thread_id: str) -> Dict[str, Any]:
+        """Get a Gmail thread by ID with all messages."""
+        result = (
+            self._gmail.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+        return result  # type: ignore
+
     def search_messages(
         self, query: str, page_token: Optional[str] = None, page_size: int = 20
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:

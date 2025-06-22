@@ -96,6 +96,30 @@ class TestGoogleAPIClient:
         )
         assert result == mock_message
 
+    def test_get_thread(self):
+        """Test get_thread method."""
+        # Setup mock response
+        mock_thread = {
+            "id": "thread456",
+            "messages": [
+                {"id": "msg1", "payload": {"headers": []}},
+                {"id": "msg2", "payload": {"headers": []}},
+            ],
+        }
+        self.mock_gmail_service.users().threads().get().execute.return_value = (
+            mock_thread
+        )
+
+        result = self.client.get_thread("thread456")
+
+        # Verify the get method was called with correct parameters
+        self.mock_gmail_service.users().threads().get.assert_called_with(
+            userId="me", id="thread456", format="full"
+        )
+        assert result == mock_thread
+        assert len(result["messages"]) == 2
+        assert result["id"] == "thread456"
+
     def test_search_messages_basic(self):
         """Test search_messages with basic query."""
         # Setup mock response
@@ -287,3 +311,16 @@ class TestGoogleAPIClientErrorHandling:
 
         with pytest.raises(Exception, match="API Error"):
             self.client.search_messages("test")
+
+    def test_get_thread_api_error(self):
+        """Test get_thread handles API errors."""
+        mock_gmail_service = MagicMock()
+        self.mock_auth_manager.get_gmail_service.return_value = mock_gmail_service
+
+        # Simulate API error
+        mock_gmail_service.users().threads().get().execute.side_effect = Exception(
+            "Thread API Error"
+        )
+
+        with pytest.raises(Exception, match="Thread API Error"):
+            self.client.get_thread("thread456")

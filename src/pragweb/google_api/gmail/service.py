@@ -3,14 +3,14 @@
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
-from .page import EmailPage
+from .page import EmailPage, EmailSummary, EmailThreadPage
 from .utils import GmailParser
 
 logger = logging.getLogger(__name__)
@@ -31,54 +31,132 @@ class GmailService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler(self.name)
+        @self.context.handler("email")
         def handle_email(email_id: str) -> EmailPage:
-            return self.create_page(email_id)
+            return self.create_email_page(email_id)
 
-    def create_page(self, email_id: str) -> EmailPage:
-        """Create an EmailPage from a Gmail message ID - matches old EmailHandler.handle_email logic exactly."""
-        # 1. Fetch message from Gmail API using shared client
-        try:
-            message = self.api_client.get_message(email_id)
-        except Exception as e:
-            raise ValueError(f"Failed to fetch email {email_id}: {e}")
+        @self.context.handler("email_thread")
+        def handle_thread(thread_id: str) -> EmailThreadPage:
+            return self.create_thread_page(thread_id)
 
-        # 2. Extract headers
+    def _parse_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Parse common email content from a Gmail message.
+
+        Returns a dict with parsed fields: subject, sender, recipients, cc_list, body, time.
+        """
+        # Extract headers
         headers = {
             h["name"]: h["value"] for h in message.get("payload", {}).get("headers", [])
         }
 
+        # Parse basic fields
         subject = headers.get("Subject", "")
         sender = headers.get("From", "")
         recipients = headers.get("To", "").split(",") if headers.get("To") else []
         cc_list = headers.get("Cc", "").split(",") if headers.get("Cc") else []
 
+        # Clean up recipient lists
         recipients = [r.strip() for r in recipients if r.strip()]
         cc_list = [cc.strip() for cc in cc_list if cc.strip()]
 
-        # 3. Extract body content using parser (exact same as old handler)
+        # Extract body using parser
         body = self.parser.extract_body(message.get("payload", {}))
 
-        # 4. Parse date (exact same as old handler)
+        # Parse timestamp
         date_str = headers.get("Date", "")
         email_time = parsedate_to_datetime(date_str) if date_str else datetime.now()
 
-        # 5. Create permalink (exact same as old handler)
+        return {
+            "subject": subject,
+            "sender": sender,
+            "recipients": recipients,
+            "cc_list": cc_list,
+            "body": body,
+            "time": email_time,
+        }
+
+    def create_email_page(self, email_id: str) -> EmailPage:
+        """Create an EmailPage from a Gmail message ID."""
+        # Fetch message from Gmail API
+        try:
+            message = self.api_client.get_message(email_id)
+        except Exception as e:
+            raise ValueError(f"Failed to fetch email {email_id}: {e}")
+
+        # Parse message content using helper
+        parsed = self._parse_message_content(message)
+
+        # Get thread ID and create permalink
         thread_id = message.get("threadId", email_id)
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
-        # 6. Create URI and return complete document
+        # Create URI and return complete document
         uri = PageURI(root=self.context.root, type="email", id=email_id, version=1)
         return EmailPage(
             uri=uri,
             message_id=email_id,
             thread_id=thread_id,
-            subject=subject,
-            sender=sender,
-            recipients=recipients,
-            cc_list=cc_list,
-            body=body,
-            time=email_time,
+            subject=parsed["subject"],
+            sender=parsed["sender"],
+            recipients=parsed["recipients"],
+            cc_list=parsed["cc_list"],
+            body=parsed["body"],
+            time=parsed["time"],
+            permalink=permalink,
+        )
+
+    def create_thread_page(self, thread_id: str) -> EmailThreadPage:
+        """Create an EmailThreadPage from a Gmail thread ID."""
+        try:
+            thread_data = self.api_client.get_thread(thread_id)
+        except Exception as e:
+            raise ValueError(f"Failed to fetch thread {thread_id}: {e}")
+
+        messages = thread_data.get("messages", [])
+        if not messages:
+            raise ValueError(f"Thread {thread_id} contains no messages")
+
+        # Create EmailSummary objects for all emails in the thread
+        email_summaries = []
+        thread_subject = ""
+
+        for i, message in enumerate(messages):
+            # Parse message content using helper
+            parsed = self._parse_message_content(message)
+
+            # Get subject from first message
+            if i == 0:
+                thread_subject = parsed["subject"]
+
+            # Create URI for this email
+            email_uri = PageURI(
+                root=self.context.root, type="email", id=message["id"], version=1
+            )
+
+            # Create EmailSummary
+            email_summary = EmailSummary(
+                uri=email_uri,
+                sender=parsed["sender"],
+                recipients=parsed["recipients"],
+                cc_list=parsed["cc_list"],
+                body=parsed["body"],
+                time=parsed["time"],
+            )
+
+            email_summaries.append(email_summary)
+
+        # Create thread permalink
+        permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
+
+        # Create URI and return complete thread document
+        uri = PageURI(
+            root=self.context.root, type="email_thread", id=thread_id, version=1
+        )
+        return EmailThreadPage(
+            uri=uri,
+            thread_id=thread_id,
+            subject=thread_subject,
+            emails=email_summaries,
             permalink=permalink,
         )
 
@@ -97,7 +175,7 @@ class GmailService(ToolkitService):
 
             # Convert to PageURIs
             uris = [
-                PageURI(root=self.context.root, type=self.name, id=msg["id"])
+                PageURI(root=self.context.root, type="email", id=msg["id"])
                 for msg in messages
             ]
 
