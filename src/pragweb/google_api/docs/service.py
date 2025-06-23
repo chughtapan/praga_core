@@ -32,6 +32,8 @@ class GoogleDocsService(ToolkitService):
 
         # Register handlers using decorators
         self._register_handlers()
+        self.context.page_cache.register_page_type(GDocHeader)
+        self.context.page_cache.register_page_type(GDocChunk)
         logger.info("Google Docs service initialized and handlers registered")
 
     def _register_handlers(self) -> None:
@@ -50,8 +52,6 @@ class GoogleDocsService(ToolkitService):
         page_cache = self.context.page_cache
 
         # Register page types with cache
-        page_cache.register_page_type(GDocHeader)
-        page_cache.register_page_type(GDocChunk)
 
         # Construct URI from document_id
         header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
@@ -68,10 +68,6 @@ class GoogleDocsService(ToolkitService):
     def handle_chunk_request(self, chunk_id: str) -> GDocChunk:
         """Handle a Google Docs chunk page request - get from cache or ingest if not exists."""
         page_cache = self.context.page_cache
-
-        # Register page types with cache
-        page_cache.register_page_type(GDocHeader)
-        page_cache.register_page_type(GDocChunk)
 
         # Construct URI from chunk_id
         chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
