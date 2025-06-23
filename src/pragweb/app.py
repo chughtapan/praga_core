@@ -9,6 +9,7 @@ from praga_core import ServerContext, set_global_context
 from praga_core.agents import ReactAgent
 from pragweb.google_api.calendar import CalendarService
 from pragweb.google_api.client import GoogleAPIClient
+from pragweb.google_api.docs import GoogleDocsService
 from pragweb.google_api.gmail import GmailService
 from pragweb.google_api.people import PeopleService
 
@@ -34,6 +35,7 @@ def setup_global_context() -> None:
     gmail_service = GmailService(google_client)
     calendar_service = CalendarService(google_client)
     people_service = PeopleService(google_client)
+    google_docs_service = GoogleDocsService(google_client)
 
     # Collect all toolkits from registered services
     logger.info("Collecting toolkits...")
@@ -41,6 +43,7 @@ def setup_global_context() -> None:
         gmail_service.toolkit,
         calendar_service.toolkit,
         people_service.toolkit,
+        google_docs_service.toolkit,
     ]
 
     # Set up agent with collected toolkits

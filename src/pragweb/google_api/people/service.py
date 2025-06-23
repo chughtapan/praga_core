@@ -45,7 +45,7 @@ class PeopleService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler(self.name)
+        @self.context.handler("person")
         def handle_person(person_id: str) -> PersonPage:
             return self.handle_person_request(person_id)
 

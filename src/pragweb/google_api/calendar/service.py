@@ -216,9 +216,10 @@ class CalendarToolkit(RetrieverToolkit):
         return self._search_events_paginated_response(
             {
                 "q": query,
-                "pageToken": cursor,
+                "calendarId": "primary",
                 "singleEvents": True,
                 "orderBy": "startTime",
+                "pageToken": cursor,
             }
         )
 

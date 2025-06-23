@@ -117,6 +117,12 @@ def _get_sql_type(field_type: Any, field_info: Any) -> Any:
             return Text
         return String
 
+    # Handle PageURI as string (special case)
+    from .types import PageURI
+
+    if base_type == PageURI:
+        return String
+
     # Map basic Python types to SQLAlchemy types
     type_mapping = {
         int: Integer,
@@ -324,6 +330,45 @@ class PageCache:
 
         logger.debug(f"Registered page type {type_name}")
 
+    def _convert_page_uris_for_storage(self, value: Any) -> Any:
+        """Convert PageURI objects to strings for database storage."""
+        from .types import PageURI
+
+        if isinstance(value, PageURI):
+            return str(value)
+        elif isinstance(value, list):
+            return [self._convert_page_uris_for_storage(item) for item in value]
+        elif isinstance(value, dict):
+            return {k: self._convert_page_uris_for_storage(v) for k, v in value.items()}
+        else:
+            return value
+
+    def _convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
+        """Convert strings back to PageURI objects after database retrieval."""
+        from .types import PageURI
+
+        # Get the base type, handling Optional/Union
+        base_type = _get_base_type(field_type)
+
+        if base_type == PageURI and isinstance(value, str):
+            return PageURI.parse(value)
+        elif get_origin(field_type) is list:
+            # Handle List[PageURI]
+            args = get_args(field_type)
+            if args and args[0] == PageURI and isinstance(value, list):
+                return [
+                    PageURI.parse(item) if isinstance(item, str) else item
+                    for item in value
+                ]
+        elif isinstance(value, dict):
+            # Handle nested dictionaries (though less common for PageURI)
+            return {
+                k: self._convert_page_uris_from_storage(v, field_type)
+                for k, v in value.items()
+            }
+
+        return value
+
     def store_page(self, page: Page) -> bool:
         """Store a page in the cache.
 
@@ -351,7 +396,9 @@ class PageCache:
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
                         value = getattr(page, field_name)
-                        setattr(existing, field_name, value)
+                        # Convert PageURI objects to strings
+                        converted_value = self._convert_page_uris_for_storage(value)
+                        setattr(existing, field_name, converted_value)
                 existing.updated_at = datetime.now(timezone.utc)
                 session.commit()
                 return False
@@ -360,7 +407,11 @@ class PageCache:
                 page_data = {"uri": str(page.uri)}
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
-                        page_data[field_name] = getattr(page, field_name)
+                        value = getattr(page, field_name)
+                        # Convert PageURI objects to strings
+                        page_data[field_name] = self._convert_page_uris_for_storage(
+                            value
+                        )
 
                 page_entity = table_class(**page_data)
                 session.add(page_entity)
@@ -393,9 +444,14 @@ class PageCache:
             if entity:
                 # Convert database entity back to Page instance
                 page_data = {"uri": PageURI.parse(entity.uri)}
-                for field_name in page_type.model_fields:
+                for field_name, field_info in page_type.model_fields.items():
                     if field_name not in ("uri",):
-                        page_data[field_name] = getattr(entity, field_name)
+                        value = getattr(entity, field_name)
+                        # Convert strings back to PageURI objects
+                        converted_value = self._convert_page_uris_from_storage(
+                            value, field_info.annotation
+                        )
+                        page_data[field_name] = converted_value
 
                 return page_type(**page_data)
             return None
@@ -469,9 +525,14 @@ class PageCache:
             # Convert database entities back to Page instances
             for entity in entities:
                 page_data = {"uri": PageURI.parse(entity.uri)}
-                for field_name in page_type.model_fields:
+                for field_name, field_info in page_type.model_fields.items():
                     if field_name not in ("uri",):
-                        page_data[field_name] = getattr(entity, field_name)
+                        value = getattr(entity, field_name)
+                        # Convert strings back to PageURI objects
+                        converted_value = self._convert_page_uris_from_storage(
+                            value, field_info.annotation
+                        )
+                        page_data[field_name] = converted_value
 
                 results.append(page_type(**page_data))
 
