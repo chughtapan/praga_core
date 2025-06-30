@@ -19,6 +19,9 @@ class AppConfig(BaseModel):
 
     # Database and Cache Configuration
     page_cache_url: str = Field(description="Database URL for page cache storage")
+    secrets_database_url: str = Field(
+        description="Database URL for secrets storage",
+    )
 
     # AI/Agent Configuration
     retriever_agent_model: str = Field(
@@ -35,7 +38,6 @@ class AppConfig(BaseModel):
     google_credentials_file: str = Field(
         description="Path to Google API credentials file"
     )
-    google_token_file: str = Field(description="Path to store Google API token")
 
     # Logging Configuration
     log_level: str = Field(description="Logging level")
@@ -69,11 +71,6 @@ class AppConfig(BaseModel):
             raise ValueError("retriever_max_iterations must be positive")
         return v
 
-    def get_google_secrets_dir(self) -> Optional[str]:
-        """Get the directory containing Google credentials, if credentials file has a directory."""
-        credentials_dir = os.path.dirname(self.google_credentials_file)
-        return credentials_dir if credentials_dir else None
-
 
 def load_default_config() -> AppConfig:
     """Load configuration from environment variables with defaults."""
@@ -81,16 +78,17 @@ def load_default_config() -> AppConfig:
     load_dotenv()
 
     # Create config from environment variables with defaults
+    page_cache_url = os.getenv("PAGE_CACHE_URL", "sqlite:///praga_cache.db")
     return AppConfig(
         server_root=os.getenv("SERVER_ROOT", "google"),
-        page_cache_url=os.getenv("PAGE_CACHE_URL", "sqlite:///praga_cache.db"),
+        page_cache_url=page_cache_url,
+        secrets_database_url=os.getenv("SECRETS_DATABASE_URL", page_cache_url),
         retriever_agent_model=os.getenv("RETRIEVER_AGENT_MODEL", "gpt-4o-mini"),
         retriever_max_iterations=int(os.getenv("RETRIEVER_MAX_ITERATIONS", "10")),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         google_credentials_file=os.getenv(
             "GOOGLE_CREDENTIALS_FILE", "credentials.json"
         ),
-        google_token_file=os.getenv("GOOGLE_TOKEN_FILE", "token.pickle"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
 
