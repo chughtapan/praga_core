@@ -8,6 +8,7 @@ from typing import Any, List, Optional, Tuple
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
+from pragweb.summarization import SummarizationService
 
 from ..client import GoogleAPIClient
 from ..utils import resolve_person_identifier
@@ -20,13 +21,16 @@ logger = logging.getLogger(__name__)
 class GmailService(ToolkitService):
     """Service for Gmail API interactions and EmailPage creation."""
 
-    def __init__(self, api_client: GoogleAPIClient) -> None:
+    def __init__(self, api_client: GoogleAPIClient, summarization_service: Optional[SummarizationService] = None) -> None:
         super().__init__()
         self.api_client = api_client
         self.parser = GmailParser()
+        self.summarization_service = summarization_service or SummarizationService()
 
         # Register handlers using decorators
         self._register_handlers()
+        self.context.page_cache.register_page_type(EmailPage)
+        self.context.page_cache.register_page_type(EmailThreadPage)
         logger.info("Gmail service initialized and handlers registered")
 
     def _register_handlers(self) -> None:
@@ -119,6 +123,7 @@ class GmailService(ToolkitService):
 
         # Create EmailSummary objects for all emails in the thread
         email_summaries = []
+        email_data_for_summary = []
         thread_subject = ""
 
         for i, message in enumerate(messages):
@@ -134,17 +139,30 @@ class GmailService(ToolkitService):
                 root=self.context.root, type="email", id=message["id"], version=1
             )
 
-            # Create EmailSummary
+            # Create EmailSummary (without body for performance)
             email_summary = EmailSummary(
                 uri=email_uri,
                 sender=parsed["sender"],
                 recipients=parsed["recipients"],
                 cc_list=parsed["cc_list"],
-                body=parsed["body"],
+                subject=parsed["subject"],
                 time=parsed["time"],
             )
 
             email_summaries.append(email_summary)
+
+            # Collect email data for summary generation (including body)
+            email_data_for_summary.append({
+                'sender': parsed["sender"],
+                'subject': parsed["subject"],
+                'body': parsed["body"],
+                'time': parsed["time"]
+            })
+
+        # Generate LLM-based summary of the email thread
+        thread_summary = self.summarization_service.summarize_email_thread(
+            thread_subject, email_data_for_summary
+        )
 
         # Create thread permalink
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
@@ -157,6 +175,7 @@ class GmailService(ToolkitService):
             uri=uri,
             thread_id=thread_id,
             subject=thread_subject,
+            summary=thread_summary,
             emails=email_summaries,
             permalink=permalink,
         )
@@ -184,6 +203,38 @@ class GmailService(ToolkitService):
 
         except Exception as e:
             logger.error(f"Error searching emails: {e}")
+            raise
+
+    def search_email_threads(
+        self, query: str, page_token: Optional[str] = None, page_size: int = 20
+    ) -> Tuple[List[PageURI], Optional[str]]:
+        """Search email threads and return list of thread PageURIs and next page token."""
+        try:
+            messages, next_page_token = self.api_client.search_messages(
+                query, page_token=page_token, page_size=page_size
+            )
+
+            logger.debug(
+                f"Gmail API returned {len(messages)} message IDs, next_token: {bool(next_page_token)}"
+            )
+
+            # Extract unique thread IDs from messages
+            thread_ids = set()
+            for msg in messages:
+                if "threadId" in msg:
+                    thread_ids.add(msg["threadId"])
+
+            # Convert to thread PageURIs
+            uris = [
+                PageURI(root=self.context.root, type="email_thread", id=thread_id)
+                for thread_id in thread_ids
+            ]
+
+            logger.debug(f"Found {len(uris)} unique threads from {len(messages)} messages")
+            return uris, next_page_token
+
+        except Exception as e:
+            logger.error(f"Error searching email threads: {e}")
             raise
 
     @property
@@ -229,6 +280,32 @@ class GmailToolkit(RetrieverToolkit):
                 raise TypeError(f"Expected EmailPage but got {type(page_obj)}")
             pages.append(page_obj)
         logger.debug(f"Successfully resolved {len(pages)} email pages")
+
+        return PaginatedResponse(
+            results=pages,
+            next_cursor=next_page_token,
+        )
+
+    def _search_email_threads_paginated_response(
+        self,
+        query: str,
+        cursor: Optional[str] = None,
+        page_size: int = 10,
+    ) -> PaginatedResponse[EmailThreadPage]:
+        """Search email threads and return a paginated response."""
+        # Get the page data using the cursor directly
+        uris, next_page_token = self.gmail_service.search_email_threads(
+            query, cursor, page_size
+        )
+
+        # Resolve URIs to pages using context - throw errors, don't fail silently
+        pages: List[EmailThreadPage] = []
+        for uri in uris:
+            page_obj = self.context.get_page(uri)
+            if not isinstance(page_obj, EmailThreadPage):
+                raise TypeError(f"Expected EmailThreadPage but got {type(page_obj)}")
+            pages.append(page_obj)
+        logger.debug(f"Successfully resolved {len(pages)} email thread pages")
 
         return PaginatedResponse(
             results=pages,
@@ -281,8 +358,8 @@ class GmailToolkit(RetrieverToolkit):
     @tool()
     def search_emails_by_content(
         self, content: str, cursor: Optional[str] = None
-    ) -> PaginatedResponse[EmailPage]:
-        """Search emails by content in subject line or body.
+    ) -> PaginatedResponse[EmailThreadPage]:
+        """Search email threads by content in subject line or body.
 
         Args:
             content: Text to search for in subject or body
@@ -290,7 +367,7 @@ class GmailToolkit(RetrieverToolkit):
         """
         # Gmail search without specific field searches both subject and body
         query = content
-        return self._search_emails_paginated_response(query, cursor)
+        return self._search_email_threads_paginated_response(query, cursor)
 
     @tool()
     def get_recent_emails(

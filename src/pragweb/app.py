@@ -12,6 +12,7 @@ from pragweb.google_api.client import GoogleAPIClient
 from pragweb.google_api.docs import GoogleDocsService
 from pragweb.google_api.gmail import GmailService
 from pragweb.google_api.people import PeopleService
+from pragweb.summarization import SummarizationService
 
 load_dotenv()
 logging.basicConfig(level=logging.DEBUG)
@@ -30,12 +31,15 @@ def setup_global_context() -> None:
     # Create single Google API client
     google_client = GoogleAPIClient()
 
+    # Create shared summarization service
+    summarization_service = SummarizationService()
+
     # Initialize services (they auto-register with global context)
     logger.info("Initializing services...")
-    gmail_service = GmailService(google_client)
+    gmail_service = GmailService(google_client, summarization_service)
     calendar_service = CalendarService(google_client)
     people_service = PeopleService(google_client)
-    google_docs_service = GoogleDocsService(google_client)
+    google_docs_service = GoogleDocsService(google_client, summarization_service=summarization_service)
 
     # Collect all toolkits from registered services
     logger.info("Collecting toolkits...")

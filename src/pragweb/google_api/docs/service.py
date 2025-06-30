@@ -9,6 +9,7 @@ from chonkie import RecursiveChunker
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
+from pragweb.summarization import SummarizationService
 
 from ..client import GoogleAPIClient
 from ..utils import resolve_person_identifier
@@ -20,9 +21,10 @@ logger = logging.getLogger(__name__)
 class GoogleDocsService(ToolkitService):
     """Service for managing Google Docs data and page creation using Google Docs API."""
 
-    def __init__(self, api_client: GoogleAPIClient, chunk_size: int = 4000) -> None:
+    def __init__(self, api_client: GoogleAPIClient, chunk_size: int = 4000, summarization_service: Optional[SummarizationService] = None) -> None:
         super().__init__()
         self.api_client = api_client
+        self.summarization_service = summarization_service or SummarizationService()
 
         # Initialize Chonkie chunker with configurable chunk size
         self.chunker = RecursiveChunker(
@@ -194,11 +196,9 @@ class GoogleDocsService(ToolkitService):
         # Create chunk URIs for header
         chunk_uris = [chunk.uri for chunk in chunk_pages]
 
-        # Create summary (first 500 chars + chunk info)
-        summary = full_content[:500]
-        if len(full_content) > 500:
-            summary += "..."
-        summary += f" [{chunk_count} chunks]"
+        # Generate LLM-based summary
+        llm_summary = self.summarization_service.summarize_document(title, full_content)
+        summary = f"{llm_summary} [{chunk_count} chunks]"
 
         # Create and store header page
         header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)

@@ -43,7 +43,7 @@ class EmailSummary(BaseModel):
     cc_list: List[str] = Field(
         default_factory=list, description="List of CC recipients"
     )
-    body: str = Field(description="Email body content")
+    subject: str = Field(description="Email subject (may differ from thread subject)")
     time: datetime = Field(description="Email timestamp")
 
 
@@ -52,6 +52,7 @@ class EmailThreadPage(Page):
 
     thread_id: str = Field(description="Gmail thread ID", exclude=True)
     subject: str = Field(description="Thread subject (usually from first email)")
+    summary: str = Field(description="LLM-generated summary of the email thread")
     emails: List[EmailSummary] = Field(
         description="List of compressed email summaries in this thread"
     )
