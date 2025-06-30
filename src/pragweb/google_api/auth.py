@@ -8,6 +8,8 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
 
+from pragweb.config import get_current_config
+
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -24,16 +26,15 @@ class GoogleAuthManager:
     _instance: Optional["GoogleAuthManager"] = None
     _initialized = False
 
-    def __new__(cls, secrets_dir: str = "") -> "GoogleAuthManager":
+    def __new__(cls) -> "GoogleAuthManager":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, secrets_dir: str = ""):
+    def __init__(self) -> None:
         if self._initialized:
             return
 
-        self.secrets_dir = secrets_dir
         self._creds = None
         self._gmail_service = None
         self._calendar_service = None
@@ -44,15 +45,11 @@ class GoogleAuthManager:
 
     def _get_credentials_path(self) -> str:
         """Get path to credentials file."""
-        if self.secrets_dir:
-            return os.path.join(self.secrets_dir, "credentials.json")
-        return "credentials.json"
+        return get_current_config().google_credentials_file
 
     def _get_token_path(self) -> str:
         """Get path to token file."""
-        if self.secrets_dir:
-            return os.path.join(self.secrets_dir, "token.pickle")
-        return "token.pickle"
+        return get_current_config().google_token_file
 
     def _authenticate(self) -> None:
         """Authenticate with Google APIs."""

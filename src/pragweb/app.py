@@ -3,18 +3,16 @@
 import argparse
 import logging
 
-from dotenv import load_dotenv
-
 from praga_core import ServerContext, set_global_context
 from praga_core.agents import ReactAgent
+from pragweb.config import get_current_config
 from pragweb.google_api.calendar import CalendarService
 from pragweb.google_api.client import GoogleAPIClient
 from pragweb.google_api.docs import GoogleDocsService
 from pragweb.google_api.gmail import GmailService
 from pragweb.google_api.people import PeopleService
 
-load_dotenv()
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=getattr(logging, get_current_config().log_level))
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +21,11 @@ def setup_global_context() -> None:
     """Set up global context and initialize all components."""
     logger.info("Setting up global context...")
 
+    # Get current configuration
+    config = get_current_config()
+
     # Create and set global context with SQL cache
-    context = ServerContext(root="google", cache_url="sqlite:///praga_cache.db")
+    context = ServerContext(root=config.server_root, cache_url=config.page_cache_url)
     set_global_context(context)
 
     # Create single Google API client
@@ -49,9 +50,9 @@ def setup_global_context() -> None:
     # Set up agent with collected toolkits
     logger.info("Setting up React agent...")
     agent = ReactAgent(
-        model="gpt-4o-mini",
+        model=config.retriever_agent_model,
         toolkits=all_toolkits,
-        max_iterations=10,
+        max_iterations=config.retriever_max_iterations,
     )
 
     # Set retriever on global context
