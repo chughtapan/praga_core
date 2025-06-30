@@ -6,7 +6,7 @@ import logging
 from dotenv import load_dotenv
 
 from praga_core import ServerContext, set_global_context
-from praga_core.agents import ReactAgent
+from praga_core.agents import OrchestratorAgent, ReactAgent
 from pragweb.google_api.calendar import CalendarService
 from pragweb.google_api.client import GoogleAPIClient
 from pragweb.google_api.docs import GoogleDocsService
@@ -37,25 +37,48 @@ def setup_global_context() -> None:
     people_service = PeopleService(google_client)
     google_docs_service = GoogleDocsService(google_client)
 
-    # Collect all toolkits from registered services
-    logger.info("Collecting toolkits...")
-    all_toolkits = [
-        gmail_service.toolkit,
-        calendar_service.toolkit,
-        people_service.toolkit,
-        google_docs_service.toolkit,
-    ]
+    # Create individual service agents
+    logger.info("Setting up individual service agents...")
 
-    # Set up agent with collected toolkits
-    logger.info("Setting up React agent...")
-    agent = ReactAgent(
+    gmail_agent = ReactAgent(
         model="gpt-4o-mini",
-        toolkits=all_toolkits,
+        toolkits=[gmail_service.toolkit],
         max_iterations=10,
     )
 
-    # Set retriever on global context
-    context.retriever = agent
+    calendar_agent = ReactAgent(
+        model="gpt-4o-mini",
+        toolkits=[calendar_service.toolkit],
+        max_iterations=10,
+    )
+
+    people_agent = ReactAgent(
+        model="gpt-4o-mini",
+        toolkits=[people_service.toolkit],
+        max_iterations=10,
+    )
+
+    docs_agent = ReactAgent(
+        model="gpt-4o-mini",
+        toolkits=[google_docs_service.toolkit],
+        max_iterations=10,
+    )
+
+    # Set up orchestrator agent
+    logger.info("Setting up orchestrator agent...")
+    orchestrator_agent = OrchestratorAgent(
+        agents={
+            "gmail": gmail_agent,
+            "calendar": calendar_agent,
+            "people": people_agent,
+            "docs": docs_agent,
+        },
+        reasoning_model="o4-mini",
+        execution_model="gpt-4.1-mini",
+    )
+
+    # Set orchestrator as the main retriever
+    context.retriever = orchestrator_agent
 
     logger.info("✅ Global context setup complete!")
 

@@ -5,7 +5,7 @@ A framework for building document retrieval toolkits and agents for LLM applicat
 Includes LLMRP (LLM Retrieval Protocol) implementation for standardized document retrieval over HTTP.
 """
 
-from .agents import ReactAgent, RetrieverToolkit
+from .agents import OrchestratorAgent, ReactAgent, RetrieverToolkit
 from .context import ServerContext
 from .global_context import (
     ContextMixin,
@@ -31,6 +31,7 @@ __all__ = [
     "set_global_context",
     "clear_global_context",
     "ReactAgent",
+    "OrchestratorAgent",
     "RetrieverAgentBase",
     "RetrieverToolkit",
     "Page",
