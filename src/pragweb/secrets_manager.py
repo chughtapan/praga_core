@@ -1,11 +1,11 @@
 """Secure secrets management for OAuth tokens and credentials."""
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy import TIMESTAMP, String, Text, create_engine
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -79,11 +79,6 @@ class SecretsManager:
 
         logger.info("SecretsManager initialized with database")
 
-    @property
-    def engine(self) -> Engine:
-        """Get the SQLAlchemy engine instance."""
-        return self._engine
-
     def _get_session(self) -> Session:
         """Get a new database session."""
         return self._session_factory()
@@ -109,8 +104,6 @@ class SecretsManager:
             scopes: List of granted scopes
             extra_data: Additional token metadata
         """
-        import json
-
         with self._get_session() as session:
             # Check if token already exists
             existing_token = (
@@ -132,7 +125,6 @@ class SecretsManager:
                 existing_token.updated_at = datetime.now(timezone.utc)
                 logger.info(f"Updated OAuth token for service: {service_name}")
             else:
-                # Create new token
                 new_token = OAuthToken(
                     service_name=service_name,
                     access_token=access_token,
@@ -156,8 +148,6 @@ class SecretsManager:
         Returns:
             Dictionary containing token data or None if not found
         """
-        import json
-
         with self._get_session() as session:
             token = (
                 session.query(OAuthToken).filter_by(service_name=service_name).first()
@@ -181,90 +171,9 @@ class SecretsManager:
                 "updated_at": token.updated_at,
             }
 
-    def delete_oauth_token(self, service_name: str) -> bool:
-        """Delete OAuth token for a service.
-
-        Args:
-            service_name: Name of the service
-
-        Returns:
-            True if token was deleted, False if it didn't exist
-        """
-        with self._get_session() as session:
-            token = (
-                session.query(OAuthToken).filter_by(service_name=service_name).first()
-            )
-
-            if token:
-                session.delete(token)
-                session.commit()
-                logger.info(f"Deleted OAuth token for service: {service_name}")
-                return True
-            else:
-                logger.warning(f"No OAuth token found for service: {service_name}")
-                return False
-
-    def token_exists(self, service_name: str) -> bool:
-        """Check if an OAuth token exists for a service.
-
-        Args:
-            service_name: Name of the service
-
-        Returns:
-            True if token exists, False otherwise
-        """
-        with self._get_session() as session:
-            exists = (
-                session.query(OAuthToken).filter_by(service_name=service_name).first()
-            ) is not None
-            return exists
-
-    def is_token_expired(self, service_name: str) -> Optional[bool]:
-        """Check if a token is expired.
-
-        Args:
-            service_name: Name of the service
-
-        Returns:
-            True if expired, False if valid, None if token doesn't exist
-        """
-        token_data = self.get_oauth_token(service_name)
-        if not token_data:
-            return None
-
-        expires_at = token_data.get("expires_at")
-        if not expires_at:
-            # No expiration time means token doesn't expire
-            return False
-
-        now = datetime.now(timezone.utc)
-        # Add small buffer (1 minute) to account for clock skew
-        buffer_time = now.replace(second=now.second + 60)
-        return bool(expires_at <= buffer_time)
-
-    def list_services(self) -> list[str]:
-        """Get list of all services with stored tokens.
-
-        Returns:
-            List of service names
-        """
-        with self._get_session() as session:
-            services = session.query(OAuthToken.service_name).all()
-            return [service[0] for service in services]
-
 
 def get_secrets_manager(database_url: Optional[str] = None) -> SecretsManager:
-    """Get the singleton SecretsManager instance.
-
-    Args:
-        database_url: Database URL (required for first initialization, ignored for subsequent calls)
-
-    Returns:
-        SecretsManager instance
-
-    Raises:
-        ValueError: If database_url is not provided for first initialization
-    """
+    """Get the singleton SecretsManager instance."""
     if SecretsManager._instance is None:
         if database_url is None:
             raise ValueError("database_url is required for first initialization")

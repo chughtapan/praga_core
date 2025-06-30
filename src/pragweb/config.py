@@ -19,9 +19,8 @@ class AppConfig(BaseModel):
 
     # Database and Cache Configuration
     page_cache_url: str = Field(description="Database URL for page cache storage")
-    secrets_database_url: Optional[str] = Field(
-        default=None,
-        description="Database URL for secrets storage (defaults to page_cache_url if not specified)",
+    secrets_database_url: str = Field(
+        description="Database URL for secrets storage",
     )
 
     # AI/Agent Configuration
@@ -72,18 +71,6 @@ class AppConfig(BaseModel):
             raise ValueError("retriever_max_iterations must be positive")
         return v
 
-    def get_google_secrets_dir(self) -> Optional[str]:
-        """Get the directory containing Google credentials, if credentials file has a directory."""
-        credentials_dir = os.path.dirname(self.google_credentials_file)
-        return credentials_dir if credentials_dir else None
-
-    def get_secrets_database_url(self) -> str:
-        """Get the effective secrets database URL.
-
-        Returns secrets_database_url if specified, otherwise falls back to page_cache_url.
-        """
-        return self.secrets_database_url or self.page_cache_url
-
 
 def load_default_config() -> AppConfig:
     """Load configuration from environment variables with defaults."""
@@ -91,10 +78,11 @@ def load_default_config() -> AppConfig:
     load_dotenv()
 
     # Create config from environment variables with defaults
+    page_cache_url = os.getenv("PAGE_CACHE_URL", "sqlite:///praga_cache.db")
     return AppConfig(
         server_root=os.getenv("SERVER_ROOT", "google"),
-        page_cache_url=os.getenv("PAGE_CACHE_URL", "sqlite:///praga_cache.db"),
-        secrets_database_url=os.getenv("SECRETS_DATABASE_URL"),
+        page_cache_url=page_cache_url,
+        secrets_database_url=os.getenv("SECRETS_DATABASE_URL", page_cache_url),
         retriever_agent_model=os.getenv("RETRIEVER_AGENT_MODEL", "gpt-4o-mini"),
         retriever_max_iterations=int(os.getenv("RETRIEVER_MAX_ITERATIONS", "10")),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
