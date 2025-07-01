@@ -10,7 +10,8 @@ from typing import Any, Optional
 
 import pytest
 
-from praga_core.page_cache import PageCache
+from praga_core.page_cache import PageCache, PageCacheError
+from praga_core.page_cache.schema import PageRelationships
 from praga_core.types import Page, PageURI
 
 
@@ -19,9 +20,9 @@ def clear_global_registry() -> None:
 
     This function is used for testing to ensure clean state between test runs.
     """
-    from praga_core.page_cache import _TABLE_REGISTRY, Base
+    from praga_core.page_cache.schema import Base, clear_table_registry
 
-    _TABLE_REGISTRY.clear()
+    clear_table_registry()
     Base.metadata.clear()
 
 
@@ -182,19 +183,23 @@ class TestPageStorage:
     def test_store_duplicate_page(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
-        """Test storing the same page twice."""
+        """Test storing the same page twice (should fail)."""
+
         # Store first time
         result1 = page_cache.store_page(sample_user)
         assert result1 is True
 
-        # Store second time (should update)
-        result2 = page_cache.store_page(sample_user)
-        assert result2 is False  # Returns False for updates
+        # Store second time (should raise error)
+        with pytest.raises(
+            PageCacheError, match="already exists and cannot be updated"
+        ):
+            page_cache.store_page(sample_user)
 
     def test_update_existing_page(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
-        """Test updating an existing page."""
+        """Test updating an existing page (should fail)."""
+
         # Store initial page
         page_cache.store_page(sample_user)
 
@@ -203,15 +208,17 @@ class TestPageStorage:
             uri=sample_user.uri, name="Updated User", email=sample_user.email, age=31
         )
 
-        # Store update
-        result = page_cache.store_page(updated_user)
-        assert result is False  # Returns False for updates
+        # Try to store update (should fail)
+        with pytest.raises(
+            PageCacheError, match="already exists and cannot be updated"
+        ):
+            page_cache.store_page(updated_user)
 
-        # Verify update
+        # Verify original page is unchanged
         stored_page = page_cache.get_page(UserPage, sample_user.uri)
         assert stored_page is not None
-        assert stored_page.name == "Updated User"
-        assert stored_page.age == 31
+        assert stored_page.name == sample_user.name  # Original name
+        assert stored_page.age == sample_user.age  # Original age
 
     def test_store_pages_different_types(
         self, page_cache: PageCache, sample_user: UserPage, sample_post: PostPage
@@ -438,31 +445,6 @@ class TestDateTimeHandling:
         assert retrieved_event.end_time == sample_event.end_time
         assert retrieved_event.location == sample_event.location
 
-    def test_update_datetime_fields(
-        self, page_cache: PageCache, sample_event: EventPage
-    ) -> None:
-        """Test updating datetime fields."""
-        page_cache.store_page(sample_event)
-
-        # Create updated event
-        updated_event = EventPage(
-            uri=sample_event.uri,
-            title="Updated Event",
-            start_time=datetime(2024, 1, 2, 14, 0),
-            end_time=datetime(2024, 1, 2, 15, 0),
-            location="New Location",
-        )
-
-        page_cache.store_page(updated_event)
-
-        # Verify update
-        retrieved_event = page_cache.get_page(EventPage, sample_event.uri)
-        assert retrieved_event is not None
-        assert retrieved_event.title == "Updated Event"
-        assert retrieved_event.start_time == datetime(2024, 1, 2, 14, 0)
-        assert retrieved_event.end_time == datetime(2024, 1, 2, 15, 0)
-        assert retrieved_event.location == "New Location"
-
     def test_find_by_datetime(self, page_cache: PageCache) -> None:
         """Test finding pages by datetime values."""
         # Create events with different times
@@ -527,28 +509,6 @@ class TestOptionalFields:
         assert retrieved_user is not None
         assert retrieved_user.name == "User Without Age"
         assert retrieved_user.email == "noage@example.com"
-        assert retrieved_user.age is None
-
-    def test_update_optional_field_to_none(self, page_cache: PageCache) -> None:
-        """Test updating an optional field to None."""
-        # Store user with age
-        user = UserPage(
-            uri=PageURI(root="test", type="user", id="user_age_change"),
-            name="User",
-            email="user@example.com",
-            age=30,
-        )
-        page_cache.store_page(user)
-
-        # Update age to None
-        updated_user = UserPage(
-            uri=user.uri, name="User", email="user@example.com", age=None
-        )
-        page_cache.store_page(updated_user)
-
-        # Verify update
-        retrieved_user = page_cache.get_page(UserPage, user.uri)
-        assert retrieved_user is not None
         assert retrieved_user.age is None
 
 
@@ -656,21 +616,16 @@ class TestURIHandling:
         """Test that URI is used as primary key."""
         page_cache.store_page(sample_user)
 
-        # Try to store another page with same URI (should update)
+        # Try to store another page with same URI (should fail)
         duplicate_user = UserPage(
             uri=sample_user.uri,  # Same URI
             name="Different Name",
             email="different@example.com",
         )
-
-        result = page_cache.store_page(duplicate_user)
-        assert result is False  # Should be update, not insert
-
-        # Verify the page was updated
-        retrieved_user = page_cache.get_page(UserPage, sample_user.uri)
-        assert retrieved_user is not None
-        assert retrieved_user.name == "Different Name"
-        assert retrieved_user.email == "different@example.com"
+        with pytest.raises(
+            PageCacheError, match="already exists and cannot be updated"
+        ):
+            page_cache.store_page(duplicate_user)
 
     def test_different_uris_different_records(self, page_cache: PageCache) -> None:
         """Test that different URIs create different records."""
@@ -831,7 +786,7 @@ class TestPageURISerialization:
         ]
 
         for value, field_type in test_cases:
-            result = page_cache._convert_page_uris_from_storage(value, field_type)
+            result = page_cache.convert_page_uris_from_storage(value, field_type)
             assert result == value
 
 
@@ -923,41 +878,6 @@ class TestPageWithPageURIFields:
         assert retrieved_doc.title == "Document Without URIs"
         assert retrieved_doc.author_uri is None
         assert retrieved_doc.related_docs == []
-        assert retrieved_doc.parent_doc is None
-
-    def test_update_page_with_page_uris(
-        self,
-        page_cache: PageCache,
-        sample_document_with_uris: "TestPageWithPageURIFields.DocumentPage",
-    ) -> None:
-        """Test updating a page with PageURI fields."""
-        # Store initial document
-        page_cache.store_page(sample_document_with_uris)
-
-        # Create updated version
-        updated_doc = self.DocumentPage(
-            uri=sample_document_with_uris.uri,  # Same URI
-            title="Updated Document",
-            content="Updated content",
-            author_uri=PageURI(root="test", type="user", id="new_author"),
-            related_docs=[
-                PageURI(root="test", type="document", id="new_related1"),
-            ],
-            parent_doc=None,  # Changed to None
-        )
-
-        # Update the document
-        result = page_cache.store_page(updated_doc)
-        assert result is False  # Should be update, not insert
-
-        # Retrieve and verify
-        retrieved_doc = page_cache.get_page(self.DocumentPage, updated_doc.uri)
-
-        assert retrieved_doc is not None
-        assert retrieved_doc.title == "Updated Document"
-        assert retrieved_doc.author_uri.id == "new_author"
-        assert len(retrieved_doc.related_docs) == 1
-        assert retrieved_doc.related_docs[0].id == "new_related1"
         assert retrieved_doc.parent_doc is None
 
     def test_find_pages_by_page_uri_fields(self, page_cache: PageCache) -> None:
@@ -1127,14 +1047,746 @@ class TestGoogleDocsPageURIs:
         assert chunk_indices == {0, 1, 2}
 
 
+class TestProvenanceTracking:
+    """Test provenance tracking functionality."""
+
+    class EmailPage(Page):
+        """Test email page."""
+
+        subject: str
+        content: str
+        sender: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = (len(self.subject) + len(self.content)) // 4
+
+    class ThreadPage(Page):
+        """Test email thread page."""
+
+        title: str
+        message_count: int
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.title) // 4
+
+    class GoogleDocPage(Page):
+        """Test Google Docs page."""
+
+        title: str
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = (len(self.title) + len(self.content)) // 4
+
+    class ChunkPage(Page):
+        """Test chunk page derived from Google Doc."""
+
+        chunk_index: int
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_store_page_with_parent_uri_parameter(self, page_cache: PageCache) -> None:
+        """Test storing a page with parent_uri specified as parameter."""
+        # Store parent first
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child with parent_uri parameter
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="This is a test",
+        )
+
+        result = page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+        assert result is True
+
+        # Verify parent_uri was set
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent_doc.uri
+
+    def test_store_page_with_parent_uri_on_page(self, page_cache: PageCache) -> None:
+        """Test storing a page with parent_uri set on the page instance."""
+        # Store parent first
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child with parent_uri on page
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="This is a test",
+            parent_uri=parent_doc.uri,
+        )
+
+        result = page_cache.store_page(chunk)
+        assert result is True
+
+        # Verify parent_uri was preserved
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent_doc.uri
+
+    def test_parent_uri_parameter_overrides_page_parent_uri(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that parent_uri parameter overrides page's parent_uri."""
+
+        # Store two potential parents
+        parent1 = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document 1",
+            content="Content 1",
+        )
+        parent2 = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc2", version=1),
+            title="Document 2",
+            content="Content 2",
+        )
+        page_cache.store_page(parent1)
+        page_cache.store_page(parent2)
+
+        # Create child with parent_uri set to parent1
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk",
+            parent_uri=parent1.uri,
+        )
+
+        # Store with parent_uri parameter set to parent2 (should override)
+        result = page_cache.store_page(chunk, parent_uri=parent2.uri)
+        assert result is True
+
+        # Verify parent_uri was overridden
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent2.uri
+
+    def test_store_page_no_parent_tracking(self, page_cache: PageCache) -> None:
+        """Test storing a page without any parent tracking (should work as before)."""
+        # Create email and thread without parent-child relationship
+        email = self.EmailPage(
+            uri=PageURI(root="test", type="email", id="email1", version=1),
+            subject="Test Email",
+            content="Test content",
+            sender="test@example.com",
+        )
+
+        thread = self.ThreadPage(
+            uri=PageURI(root="test", type="thread", id="thread1", version=1),
+            title="Test Thread",
+            message_count=5,
+        )
+
+        result1 = page_cache.store_page(email)
+        result2 = page_cache.store_page(thread)
+
+        assert result1 is True
+        assert result2 is True
+
+    def test_provenance_precheck_parent_not_exist(self, page_cache: PageCache) -> None:
+        """Test that storing fails when parent doesn't exist."""
+        from praga_core import ProvenanceError
+
+        nonexistent_parent = PageURI(
+            root="test", type="gdoc", id="nonexistent", version=1
+        )
+
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk",
+        )
+
+        with pytest.raises(
+            ProvenanceError, match="Parent page .* does not exist in cache"
+        ):
+            page_cache.store_page(chunk, parent_uri=nonexistent_parent)
+
+    def test_provenance_precheck_child_already_exists(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that storing fails when child already exists."""
+        from praga_core import ProvenanceError
+
+        # Store parent
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child first time
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk",
+        )
+        page_cache.store_page(chunk)
+
+        # Try to store with parent relationship (should fail because child exists)
+        with pytest.raises(
+            ProvenanceError, match="Child page .* already exists in cache"
+        ):
+            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_same_page_type(self, page_cache: PageCache) -> None:
+        """Test that storing fails when parent and child are same page type."""
+        from praga_core import ProvenanceError
+
+        # Store parent doc
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Parent Document",
+            content="Parent content",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Try to store another doc as child (same type - should fail)
+        child_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc2", version=1),
+            title="Child Document",
+            content="Child content",
+        )
+
+        with pytest.raises(
+            ProvenanceError, match="Parent and child cannot be the same page type"
+        ):
+            page_cache.store_page(child_doc, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_parent_version_number(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that storing fails when parent has invalid version number."""
+        from praga_core import ProvenanceError
+
+        # Store parent with version 0 (should still be stored)
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=0),
+            title="Test Document",
+            content="This is a test document",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Try to use it as parent (should fail due to version 0)
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk",
+        )
+
+        with pytest.raises(
+            ProvenanceError, match="Parent URI must have a fixed version number"
+        ):
+            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_cycle_detection(self, page_cache: PageCache) -> None:
+        """Test cycle detection in provenance relationships."""
+        from praga_core import ProvenanceError
+
+        # Create chain: doc_a -> chunk_b -> doc_c
+        doc_a = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc_a", version=1),
+            title="Document A",
+            content="Content A",
+        )
+        page_cache.store_page(doc_a)
+
+        chunk_b = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk_b", version=1),
+            chunk_index=0,
+            content="Chunk B",
+            parent_uri=doc_a.uri,
+        )
+        page_cache.store_page(chunk_b)
+
+        doc_c = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc_c", version=1),
+            title="Document C",
+            content="Content C",
+        )
+        page_cache.store_page(doc_c, parent_uri=chunk_b.uri)
+
+        # Test cycle detection by calling the method directly with a simulated cycle scenario
+        # Create a scenario where the visited set would contain the parent_uri
+        with pytest.raises(ProvenanceError, match="would create a cycle"):
+            # Directly test cycle detection by simulating a scenario where
+            # doc_a would have chunk_b as parent, but chunk_b already has doc_a in its ancestry
+            page_cache._check_for_cycles(chunk_b.uri, doc_a.uri, visited={doc_a.uri})
+
+    def test_get_children(self, page_cache: PageCache) -> None:
+        """Test getting children of a parent page."""
+        # Store parent doc
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Parent Document",
+            content="Parent content",
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store multiple chunks as children
+        chunks = []
+        for i in range(3):
+            chunk = self.ChunkPage(
+                uri=PageURI(root="test", type="chunk", id=f"chunk{i}", version=1),
+                chunk_index=i,
+                content=f"Chunk {i} content",
+                parent_uri=parent_doc.uri,
+            )
+            page_cache.store_page(chunk)
+            chunks.append(chunk)
+
+        # Get children
+        children = page_cache.get_children(parent_doc.uri)
+
+        assert len(children) == 3
+        child_uris = {child.uri for child in children}
+        expected_uris = {chunk.uri for chunk in chunks}
+        assert child_uris == expected_uris
+
+    def test_get_children_no_children(self, page_cache: PageCache) -> None:
+        """Test getting children when page has no children."""
+        # Store page without children
+        page = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document",
+            content="Content",
+        )
+        page_cache.store_page(page)
+
+        children = page_cache.get_children(page.uri)
+        assert len(children) == 0
+
+    def test_get_provenance_chain(self, page_cache: PageCache) -> None:
+        """Test getting the full provenance chain."""
+        # Store grandparent document
+        grandparent = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="grandparent", version=1),
+            title="Grandparent Document",
+            content="Grandparent content",
+        )
+        page_cache.store_page(grandparent)
+
+        # Store parent chunk with grandparent as parent
+        parent = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="parent", version=1),
+            chunk_index=0,
+            content="Parent chunk",
+            parent_uri=grandparent.uri,
+        )
+        page_cache.store_page(parent)
+
+        # Store child document with parent chunk as parent (different types, so allowed)
+        child = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="child", version=1),
+            title="Child Document",
+            content="Child content",
+        )
+        page_cache.store_page(child, parent_uri=parent.uri)
+
+        # Get provenance chain for child
+        chain = page_cache.get_provenance_chain(child.uri)
+
+        assert len(chain) == 3
+        assert chain[0].uri == grandparent.uri
+        assert chain[1].uri == parent.uri
+        assert chain[2].uri == child.uri
+
+    def test_get_provenance_chain_no_parent(self, page_cache: PageCache) -> None:
+        """Test getting provenance chain for page with no parent."""
+        # Store page without parent
+        page = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document",
+            content="Content",
+        )
+        page_cache.store_page(page)
+
+        chain = page_cache.get_provenance_chain(page.uri)
+
+        assert len(chain) == 1
+        assert chain[0].uri == page.uri
+
+    def test_get_provenance_chain_nonexistent_page(self, page_cache: PageCache) -> None:
+        """Test getting provenance chain for non-existent page."""
+        nonexistent_uri = PageURI(
+            root="test", type="chunk", id="nonexistent", version=1
+        )
+
+        chain = page_cache.get_provenance_chain(nonexistent_uri)
+        assert len(chain) == 0
+
+    def test_example_google_docs_scenario(self, page_cache: PageCache) -> None:
+        """Test the Google Docs example scenario from the requirements."""
+        # Store the Google Doc
+        gdoc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="my_doc", version=1),
+            title="My Google Document",
+            content="This is a long document that will be chunked.",
+        )
+        page_cache.store_page(gdoc)
+
+        # Store chunks derived from the Google Doc
+        chunks = []
+        for i in range(3):
+            chunk = self.ChunkPage(
+                uri=PageURI(
+                    root="test", type="chunk", id=f"my_doc_chunk_{i}", version=1
+                ),
+                chunk_index=i,
+                content=f"Chunk {i} of the document",
+                parent_uri=gdoc.uri,
+            )
+            page_cache.store_page(chunk)
+            chunks.append(chunk)
+
+        # Verify relationships
+        children = page_cache.get_children(gdoc.uri)
+        assert len(children) == 3
+
+        # Verify each chunk has the correct parent
+        for i, chunk in enumerate(chunks):
+            stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+            assert stored_chunk is not None
+            assert stored_chunk.parent_uri == gdoc.uri
+            assert stored_chunk.chunk_index == i
+
+    def test_example_email_thread_scenario(self, page_cache: PageCache) -> None:
+        """Test the email thread example scenario from the requirements."""
+        # Store emails and threads separately (no parent-child relationship)
+        emails = []
+        for i in range(3):
+            email = self.EmailPage(
+                uri=PageURI(root="test", type="email", id=f"email_{i}", version=1),
+                subject=f"Email Subject {i}",
+                content=f"Email content {i}",
+                sender=f"user{i}@example.com",
+            )
+            page_cache.store_page(email)
+            emails.append(email)
+
+        thread = self.ThreadPage(
+            uri=PageURI(root="test", type="thread", id="thread_1", version=1),
+            title="Email Thread",
+            message_count=len(emails),
+        )
+        page_cache.store_page(thread)
+
+        # Verify no parent-child relationships exist
+        for email in emails:
+            stored_email = page_cache.get_page(self.EmailPage, email.uri)
+            assert stored_email is not None
+            assert stored_email.parent_uri is None
+
+        stored_thread = page_cache.get_page(self.ThreadPage, thread.uri)
+        assert stored_thread is not None
+        assert stored_thread.parent_uri is None
+
+        # Verify no children relationships
+        assert len(page_cache.get_children(thread.uri)) == 0
+        for email in emails:
+            assert len(page_cache.get_children(email.uri)) == 0
+
+
+class TestPageRelationshipsTable:
+    """Test the PageRelationships table functionality and optimization."""
+
+    class DocPage(Page):
+        """Test document page."""
+
+        title: str
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    class SectionPage(Page):
+        """Test section page."""
+
+        title: str
+        section_content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.section_content) // 4
+
+    def test_relationships_table_created(self, page_cache: PageCache) -> None:
+        """Test that the PageRelationships table is created automatically."""
+
+        # Check that the table exists in the database
+        with page_cache.get_session() as session:
+            # This should not raise an error if table exists
+            result = session.query(PageRelationships).count()
+            assert result == 0  # Should be empty initially
+
+    def test_relationship_stored_when_page_has_parent(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that relationships are stored in the PageRelationships table."""
+
+        # Store parent page
+        parent = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="parent", version=1),
+            title="Parent Document",
+            content="Parent content",
+        )
+        page_cache.store_page(parent)
+
+        # Store child page with parent relationship
+        child = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="child", version=1),
+            title="Child Section",
+            section_content="Child content",
+        )
+        page_cache.store_page(child, parent_uri=parent.uri)
+
+        # Verify relationship was stored in the relationships table
+        with page_cache.get_session() as session:
+            relationships = session.query(PageRelationships).all()
+            assert len(relationships) == 1
+
+            rel = relationships[0]
+            assert rel.source_uri == str(child.uri)
+            assert rel.target_uri == str(parent.uri)
+            assert rel.relationship_type == "parent"
+            assert rel.created_at is not None
+
+    def test_relationship_immutable_with_different_versions(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that relationships work with different page versions."""
+
+        # Store two parent pages
+        parent1 = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="parent1", version=1),
+            title="Parent 1",
+            content="Parent 1 content",
+        )
+        parent2 = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="parent2", version=1),
+            title="Parent 2",
+            content="Parent 2 content",
+        )
+        page_cache.store_page(parent1)
+        page_cache.store_page(parent2)
+
+        # Store child with first parent
+        child1 = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="child", version=1),
+            title="Child Section",
+            section_content="Child content",
+        )
+        page_cache.store_page(child1, parent_uri=parent1.uri)
+
+        # Store different version of child with second parent (different URI due to version)
+        child2 = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="child", version=2),
+            title="Child Section v2",
+            section_content="Updated content",
+        )
+        page_cache.store_page(child2, parent_uri=parent2.uri)
+
+        # Verify both relationships exist independently
+        with page_cache.get_session() as session:
+            relationships = session.query(PageRelationships).all()
+            assert len(relationships) == 2
+
+            # Find relationships by source
+            child1_rel = next(
+                r for r in relationships if r.source_uri == str(child1.uri)
+            )
+            child2_rel = next(
+                r for r in relationships if r.source_uri == str(child2.uri)
+            )
+
+            assert child1_rel.target_uri == str(parent1.uri)
+            assert child2_rel.target_uri == str(parent2.uri)
+
+    def test_pages_without_parent_have_no_relationships(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that pages stored without a parent have no relationships."""
+
+        # Store a page without parent
+        page_without_parent = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="orphan", version=1),
+            title="Orphan Page",
+            content="Content without parent",
+        )
+        page_cache.store_page(page_without_parent)
+
+        # Store another page with a parent
+        parent = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="parent", version=1),
+            title="Parent",
+            section_content="Parent content",
+        )
+        child = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="child", version=1),
+            title="Child",
+            content="Child content",
+        )
+        page_cache.store_page(parent)
+        page_cache.store_page(child, parent_uri=parent.uri)
+
+        # Verify only one relationship exists (for the child with parent)
+        with page_cache.get_session() as session:
+            relationships = session.query(PageRelationships).all()
+            assert len(relationships) == 1
+            assert relationships[0].source_uri == str(child.uri)
+            assert relationships[0].target_uri == str(parent.uri)
+
+            # Verify orphan page has no relationships
+            orphan_relationships = (
+                session.query(PageRelationships)
+                .filter_by(source_uri=str(page_without_parent.uri))
+                .count()
+            )
+            assert orphan_relationships == 0
+
+    def test_get_children_uses_relationships_table(self, page_cache: PageCache) -> None:
+        """Test that get_children uses the relationships table efficiently."""
+        # Store parent
+        parent = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="parent", version=1),
+            title="Parent Document",
+            content="Parent content",
+        )
+        page_cache.store_page(parent)
+
+        # Store multiple children
+        children = []
+        for i in range(3):
+            child = self.SectionPage(
+                uri=PageURI(root="test", type="section", id=f"child{i}", version=1),
+                title=f"Child {i}",
+                section_content=f"Child {i} content",
+            )
+            page_cache.store_page(child, parent_uri=parent.uri)
+            children.append(child)
+
+        # Get children using the optimized method
+        retrieved_children = page_cache.get_children(parent.uri)
+
+        # Verify all children are returned
+        assert len(retrieved_children) == 3
+        child_titles = {child.title for child in retrieved_children}
+        expected_titles = {"Child 0", "Child 1", "Child 2"}
+        assert child_titles == expected_titles
+
+    def test_get_provenance_chain_uses_relationships_table(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that get_provenance_chain uses the relationships table efficiently."""
+        # Create a chain: grandparent -> parent -> child
+        grandparent = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="grandparent", version=1),
+            title="Grandparent",
+            content="Grandparent content",
+        )
+        parent = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="parent", version=1),
+            title="Parent",
+            section_content="Parent content",
+        )
+        child = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="child", version=1),
+            title="Child",
+            content="Child content",
+        )
+
+        page_cache.store_page(grandparent)
+        page_cache.store_page(parent, parent_uri=grandparent.uri)
+        page_cache.store_page(child, parent_uri=parent.uri)
+
+        # Get provenance chain
+        chain = page_cache.get_provenance_chain(child.uri)
+
+        # Verify chain is correct
+        assert len(chain) == 3
+        assert chain[0].title == "Grandparent"
+        assert chain[1].title == "Parent"
+        assert chain[2].title == "Child"
+
+    def test_relationships_table_indexes_exist(self, page_cache: PageCache) -> None:
+        """Test that the relationships table has proper indexes for performance."""
+
+        # Get the table object
+        table = PageRelationships.__table__
+
+        # Check that indexes exist
+        index_names = {idx.name for idx in table.indexes}
+        assert "idx_relationships_target" in index_names
+        assert "idx_relationships_source" in index_names
+
+    def test_multiple_relationship_types_supported(self, page_cache: PageCache) -> None:
+        """Test that the relationships table can support different relationship types."""
+
+        # Store parent and child
+        parent = self.DocPage(
+            uri=PageURI(root="test", type="doc", id="parent", version=1),
+            title="Parent",
+            content="Parent content",
+        )
+        child = self.SectionPage(
+            uri=PageURI(root="test", type="section", id="child", version=1),
+            title="Child",
+            section_content="Child content",
+        )
+
+        page_cache.store_page(parent)
+        page_cache.store_page(child, parent_uri=parent.uri)
+
+        # Manually add a different relationship type for future extensibility
+        with page_cache.get_session() as session:
+            custom_rel = PageRelationships(
+                source_uri=str(child.uri),
+                relationship_type="references",
+                target_uri=str(parent.uri),
+            )
+            session.add(custom_rel)
+            session.commit()
+
+            # Verify both relationships exist
+            relationships = (
+                session.query(PageRelationships)
+                .filter_by(source_uri=str(child.uri))
+                .all()
+            )
+            assert len(relationships) == 2
+            rel_types = {rel.relationship_type for rel in relationships}
+            assert rel_types == {"parent", "references"}
+
+
 class TestPageCacheDefaultVersionFunctionality:
     """Test default version functionality in PageCache."""
 
-    def test_store_page_with_default_version_raises_error(self, page_cache: PageCache) -> None:
+    def test_store_page_with_default_version_raises_error(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that storing a page with default version raises an error."""
-        from praga_core.types import DEFAULT_VERSION
         import pytest
-        
+
+        from praga_core.types import DEFAULT_VERSION
+
         # Create page with default version URI
         user = UserPage(
             uri=PageURI(root="test", type="user", id="user1", version=DEFAULT_VERSION),
@@ -1142,15 +1794,17 @@ class TestPageCacheDefaultVersionFunctionality:
             email="test@example.com",
             age=30,
         )
-        
+
         # Should raise ValueError
         with pytest.raises(ValueError, match="Cannot store page with default version"):
             page_cache.store_page(user)
 
-    def test_retrieve_default_version_gets_highest_version(self, page_cache: PageCache) -> None:
+    def test_retrieve_default_version_gets_highest_version(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that requesting default version returns the highest actual version."""
         from praga_core.types import DEFAULT_VERSION
-        
+
         # Store multiple versions
         user_v1 = UserPage(
             uri=PageURI(root="test", type="user", id="user1", version=1),
@@ -1162,22 +1816,28 @@ class TestPageCacheDefaultVersionFunctionality:
             name="User v3",
             email="test@example.com",
         )
-        
+
         page_cache.store_page(user_v1)
         page_cache.store_page(user_v3)
 
         # Request default version should return v3 (highest)
-        default_uri = PageURI(root="test", type="user", id="user1", version=DEFAULT_VERSION)
+        default_uri = PageURI(
+            root="test", type="user", id="user1", version=DEFAULT_VERSION
+        )
         retrieved = page_cache.get_page(UserPage, default_uri)
-        
+
         assert retrieved is not None
         assert retrieved.name == "User v3"  # Should get version 3
         assert retrieved.uri.version == 3  # Page should have actual version
 
-    def test_retrieve_default_version_for_nonexistent_page(self, page_cache: PageCache) -> None:
+    def test_retrieve_default_version_for_nonexistent_page(
+        self, page_cache: PageCache
+    ) -> None:
         """Test getting default version for a page that doesn't exist."""
         from praga_core.types import DEFAULT_VERSION
-        
-        uri = PageURI(root="test", type="user", id="nonexistent", version=DEFAULT_VERSION)
+
+        uri = PageURI(
+            root="test", type="user", id="nonexistent", version=DEFAULT_VERSION
+        )
         result = page_cache.get_page(UserPage, uri)
         assert result is None

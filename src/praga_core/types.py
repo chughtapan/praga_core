@@ -29,7 +29,10 @@ class PageURI(BaseModel):
     root: str = Field(description="Root identifier for the server/context")
     type: str = Field(description="Type of the page")
     id: str = Field(description="Unique identifier within the type")
-    version: int = Field(description="Version number of the page, or 0 for latest", default=DEFAULT_VERSION)
+    version: int = Field(
+        description="Version number of the page, or 0 for latest",
+        default=DEFAULT_VERSION,
+    )
 
     def __init__(
         self, root: str, type: str, id: str, version: int = DEFAULT_VERSION, **data: Any
@@ -132,6 +135,11 @@ class Page(BaseModel, ABC):
 
     uri: Annotated[PageURI, BeforeValidator(PageURI.parse)] = Field(
         description="Structured URI for the page"
+    )
+    parent_uri: Optional[Annotated[PageURI, BeforeValidator(PageURI.parse)]] = Field(
+        None,
+        description="Optional parent page URI for provenance tracking",
+        exclude=True,
     )
     _metadata: PageMetadata = PrivateAttr(
         default_factory=lambda: PageMetadata(token_count=None)
