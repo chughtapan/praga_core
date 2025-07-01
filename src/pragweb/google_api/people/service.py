@@ -151,7 +151,11 @@ class PeopleService(ToolkitService):
                 continue
 
             # Check for existing person with this email but different name
-            existing_person_with_email = self._get_existing_person_by_email(email)
+            page_cache = self.context.page_cache
+            matches = page_cache.find_pages_by_attribute(
+                PersonPage, lambda t: t.email == email.lower()
+            )
+            existing_person_with_email = matches[0] if matches else None
             if existing_person_with_email:
                 # Check for name divergence
                 existing_full_name = (
@@ -407,13 +411,7 @@ class PeopleService(ToolkitService):
             
         return True
 
-    def _get_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
-        """Get existing person by email address."""
-        page_cache = self.context.page_cache
-        matches = page_cache.find_pages_by_attribute(
-            PersonPage, lambda t: t.email == email.lower()
-        )
-        return matches[0] if matches else None
+
 
     def _store_and_create_page(self, person_info: Dict[str, Any]) -> PersonPage:
         """Store person information and create PersonPage."""
@@ -466,8 +464,8 @@ class PeopleToolkit(RetrieverToolkit):
         return "PeopleToolkit"
 
     @tool()
-    def get_person_record(self, identifier: str) -> List[PersonPage]:
-        """Get person record by email, full name, or first name.
+    def get_or_create_person(self, identifier: str) -> List[PersonPage]:
+        """Get or create person record by email, full name, or first name.
         
         Tries to lookup existing record first, then creates new record if not found.
         
@@ -479,31 +477,3 @@ class PeopleToolkit(RetrieverToolkit):
         """
         result = self.people_service.get_person_record(identifier)
         return [result] if result else []
-
-    @tool()
-    def get_person_by_email(self, email: str) -> List[PersonPage]:
-        """Get a specific person by email address.
-
-        Args:
-            email: Email address to search for
-            
-        Returns:
-            List containing PersonPage if found, empty list otherwise
-        """
-        result = self.people_service._get_existing_person_by_email(email)
-        return [result] if result else []
-
-    @tool()
-    def find_or_create_person(self, identifier: str) -> List[PersonPage]:
-        """Find existing person or create new one if not found.
-
-        Args:
-            identifier: Name or email to search for
-        """
-        # Try to find existing first
-        existing = self.people_service.lookup_people(identifier)
-        if existing:
-            return existing
-
-        # Create new if not found
-        return self.people_service.create_person(identifier)

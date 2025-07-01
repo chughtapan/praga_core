@@ -149,10 +149,11 @@ class TestPeopleService:
                 with patch.object(self.service, "_extract_people_from_directory", return_value=[]):
                     with patch.object(self.service, "_extract_people_from_gmail_contacts", return_value=[]):
                         with patch.object(self.service, "_is_real_person", return_value=True):
-                            with patch.object(self.service, "_get_existing_person_by_email", return_value=None):
-                                mock_person_page = Mock(spec=PersonPage)
-                                with patch.object(self.service, "_store_and_create_page", return_value=mock_person_page):
-                                    result = self.service.create_person("john@example.com")
+                            # Mock page cache to return no existing person
+                            self.mock_page_cache.find_pages_by_attribute.return_value = []
+                            mock_person_page = Mock(spec=PersonPage)
+                            with patch.object(self.service, "_store_and_create_page", return_value=mock_person_page):
+                                result = self.service.create_person("john@example.com")
 
         assert result == [mock_person_page]
 
@@ -188,19 +189,21 @@ class TestPeopleService:
             existing_person.full_name = "Jane Smith"
             existing_person.email = "john@example.com"
 
-            with patch.object(self.service, "_get_existing_person_by_email", return_value=existing_person):
-                mock_person_info = {
-                    "first_name": "John",
-                    "last_name": "Doe",
-                    "email": "john@example.com",
-                    "source": SourceType.PEOPLE_API
-                }
-                with patch.object(self.service, "_extract_people_info_from_google_people", return_value=[mock_person_info]):
-                    with patch.object(self.service, "_extract_people_from_directory", return_value=[]):
-                        with patch.object(self.service, "_extract_people_from_gmail_contacts", return_value=[]):
-                            with patch.object(self.service, "_is_real_person", return_value=True):
-                                with pytest.raises(ValueError, match="Name divergence detected"):
-                                    self.service.create_person("john@example.com")
+            # Mock page cache to return existing person
+            self.mock_page_cache.find_pages_by_attribute.return_value = [existing_person]
+            
+            mock_person_info = {
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john@example.com",
+                "source": SourceType.PEOPLE_API
+            }
+            with patch.object(self.service, "_extract_people_info_from_google_people", return_value=[mock_person_info]):
+                with patch.object(self.service, "_extract_people_from_directory", return_value=[]):
+                    with patch.object(self.service, "_extract_people_from_gmail_contacts", return_value=[]):
+                        with patch.object(self.service, "_is_real_person", return_value=True):
+                            with pytest.raises(ValueError, match="Name divergence detected"):
+                                self.service.create_person("john@example.com")
 
     def test_extract_people_info_from_google_people(self):
         """Test _extract_people_info_from_google_people returns person info."""
@@ -332,42 +335,15 @@ class TestPeopleService:
         assert result.source_enum == SourceType.PEOPLE_API
         self.mock_page_cache.store_page.assert_called_once_with(result)
 
-    def test_toolkit_get_person_record(self):
-        """Test toolkit get_person_record method."""
+    def test_toolkit_get_or_create_person(self):
+        """Test toolkit get_or_create_person method."""
         toolkit = self.service.toolkit
         mock_person = Mock(spec=PersonPage)
         
         with patch.object(self.service, "get_person_record", return_value=mock_person):
-            result = toolkit.get_person_record("test@example.com")
+            result = toolkit.get_or_create_person("test@example.com")
             assert result == [mock_person]
 
         with patch.object(self.service, "get_person_record", return_value=None):
-            result = toolkit.get_person_record("test@example.com")
+            result = toolkit.get_or_create_person("test@example.com")
             assert result == []
-
-    def test_toolkit_get_person_by_email(self):
-        """Test toolkit get_person_by_email method."""
-        toolkit = self.service.toolkit
-        mock_person = Mock(spec=PersonPage)
-        
-        with patch.object(self.service, "_get_existing_person_by_email", return_value=mock_person):
-            result = toolkit.get_person_by_email("test@example.com")
-            assert result == [mock_person]
-
-        with patch.object(self.service, "_get_existing_person_by_email", return_value=None):
-            result = toolkit.get_person_by_email("test@example.com")
-            assert result == []
-
-    def test_toolkit_find_or_create_person(self):
-        """Test toolkit find_or_create_person method."""
-        toolkit = self.service.toolkit
-        mock_people = [Mock(spec=PersonPage)]
-        
-        with patch.object(self.service, "lookup_people", return_value=mock_people):
-            result = toolkit.find_or_create_person("test@example.com")
-            assert result == mock_people
-
-        with patch.object(self.service, "lookup_people", return_value=[]):
-            with patch.object(self.service, "create_person", return_value=mock_people):
-                result = toolkit.find_or_create_person("test@example.com")
-                assert result == mock_people
