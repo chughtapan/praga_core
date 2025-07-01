@@ -169,3 +169,7 @@ class GoogleAuthManager:
         if self._drive_service is None:
             self._drive_service = build("drive", "v3", credentials=self._creds)
         return self._drive_service
+
+    def get_admin_service(self) -> Any:
+        """Get Google Admin Directory service."""
+        return build("admin", "directory_v1", credentials=self._creds)

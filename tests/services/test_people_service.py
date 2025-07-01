@@ -7,7 +7,7 @@ import pytest
 from praga_core import clear_global_context, set_global_context
 from praga_core.types import PageURI
 from pragweb.google_api.people.page import PersonPage, SourceType
-from pragweb.google_api.people.service import PeopleService, PersonInfo
+from pragweb.google_api.people.service import PeopleService
 
 
 class TestPeopleService:
@@ -128,12 +128,12 @@ class TestPeopleService:
 
     def test_create_new_record_from_people_api(self):
         """Test create_new_record from People API (explicit source)."""
-        mock_person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe", 
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        mock_person_info = {
+            "first_name": "John",
+            "last_name": "Doe", 
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         with patch.object(self.service, "_search_explicit_sources", return_value=mock_person_info):
             with patch.object(self.service, "_is_real_person", return_value=True):
@@ -145,12 +145,12 @@ class TestPeopleService:
 
     def test_create_new_record_from_emails(self):
         """Test create_new_record from emails (implicit source)."""
-        mock_person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com", 
-            source=SourceType.EMAILS
-        )
+        mock_person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com", 
+            "source": SourceType.EMAILS
+        }
         
         with patch.object(self.service, "_search_explicit_sources", return_value=None):
             with patch.object(self.service, "_search_implicit_sources", return_value=mock_person_info):
@@ -170,12 +170,12 @@ class TestPeopleService:
 
     def test_create_new_record_not_real_person(self):
         """Test create_new_record raises error for automated accounts."""
-        mock_person_info = PersonInfo(
-            first_name="No Reply",
-            last_name="",
-            email="noreply@example.com",
-            source=SourceType.EMAILS
-        )
+        mock_person_info = {
+            "first_name": "No Reply",
+            "last_name": "",
+            "email": "noreply@example.com",
+            "source": SourceType.EMAILS
+        }
         
         with patch.object(self.service, "_search_explicit_sources", return_value=mock_person_info):
             with patch.object(self.service, "_is_real_person", return_value=False):
@@ -184,12 +184,12 @@ class TestPeopleService:
 
     def test_create_new_record_existing_person_same_email(self):
         """Test create_new_record returns existing person with same email and name."""
-        mock_person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        mock_person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         existing_person = Mock(spec=PersonPage)
         existing_person.full_name = "John Doe"
@@ -221,6 +221,29 @@ class TestPeopleService:
             assert result["email"] == "john@example.com"
             assert result["source"] == SourceType.PEOPLE_API
 
+    def test_search_directory_api(self):
+        """Test _search_directory_api returns person info."""
+        mock_user = {
+            "primaryEmail": "john@example.com",
+            "name": {
+                "fullName": "John Doe",
+                "givenName": "John",
+                "familyName": "Doe"
+            }
+        }
+        
+        mock_admin_service = Mock()
+        mock_admin_service.users().get().execute.return_value = mock_user
+        self.mock_api_client.auth_manager.get_admin_service.return_value = mock_admin_service
+        
+        result = self.service._search_directory_api("john@example.com")
+        
+        assert result is not None
+        assert result["first_name"] == "John"
+        assert result["last_name"] == "Doe"
+        assert result["email"] == "john@example.com"
+        assert result["source"] == SourceType.DIRECTORY_API
+
     def test_search_emails(self):
         """Test _search_emails returns person info."""
         mock_message = {"id": "123"}
@@ -246,22 +269,22 @@ class TestPeopleService:
 
     def test_is_real_person_valid(self):
         """Test _is_real_person returns True for valid person."""
-        person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john.doe@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john.doe@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         assert self.service._is_real_person(person_info) is True
 
     def test_is_real_person_automated(self):
         """Test _is_real_person returns False for automated accounts."""
-        person_info = PersonInfo(
-            first_name="No Reply",
-            last_name="",
-            email="noreply@example.com",
-            source=SourceType.EMAILS
-        )
+        person_info = {
+            "first_name": "No Reply",
+            "last_name": "",
+            "email": "noreply@example.com",
+            "source": SourceType.EMAILS
+        }
         assert self.service._is_real_person(person_info) is False
 
     def test_validate_name_consistency_same_names(self):
@@ -269,12 +292,12 @@ class TestPeopleService:
         existing_person = Mock(spec=PersonPage)
         existing_person.full_name = "John Doe"
         
-        person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         # Should not raise exception
         self.service._validate_name_consistency(existing_person, person_info)
@@ -284,36 +307,36 @@ class TestPeopleService:
         existing_person = Mock(spec=PersonPage)
         existing_person.full_name = "Jane Smith"
         
-        person_info = PersonInfo(
-            first_name="John", 
-            last_name="Doe",
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John", 
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         with pytest.raises(ValueError, match="Name divergence detected"):
             self.service._validate_name_consistency(existing_person, person_info)
 
     def test_matches_identifier_email(self):
         """Test _matches_identifier for email identifiers."""
-        person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         assert self.service._matches_identifier(person_info, "john@example.com") is True
         assert self.service._matches_identifier(person_info, "other@example.com") is False
 
     def test_matches_identifier_name(self):
         """Test _matches_identifier for name identifiers."""
-        person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe", 
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John",
+            "last_name": "Doe", 
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
         
         assert self.service._matches_identifier(person_info, "John") is True
         assert self.service._matches_identifier(person_info, "John Doe") is True
@@ -321,12 +344,12 @@ class TestPeopleService:
 
     def test_create_and_store_person(self):
         """Test _create_and_store_person creates PersonPage with source_enum."""
-        person_info = PersonInfo(
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com",
-            source=SourceType.PEOPLE_API
-        )
+        person_info = {
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "source": SourceType.PEOPLE_API
+        }
 
         self.mock_page_cache.store_page = Mock()
 

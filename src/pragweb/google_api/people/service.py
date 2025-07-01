@@ -4,8 +4,7 @@ import hashlib
 import logging
 import re
 from email.utils import parseaddr
-from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict, Union
+from typing import Any, Dict, List, Optional, Union
 
 from praga_core.agents import RetrieverToolkit, tool
 from praga_core.types import PageURI
@@ -15,27 +14,6 @@ from ..client import GoogleAPIClient
 from .page import PersonPage, SourceType
 
 logger = logging.getLogger(__name__)
-
-
-class PersonRecord(TypedDict):
-    """Type for person record with all required fields."""
-    name: str
-    email: str
-    source_enum: SourceType
-
-
-class PersonInfo(TypedDict):
-    """Type for internal person information during processing."""
-    first_name: str
-    last_name: str
-    email: str
-    source: SourceType
-
-
-class PersonInfoWithExisting(TypedDict):
-    """Type for person information dictionary with existing person."""
-
-    existing: PersonPage
 
 
 class PeopleService(ToolkitService):
@@ -176,14 +154,14 @@ class PeopleService(ToolkitService):
         # Create and store new person
         return self._create_and_store_person(person_info)
 
-    def _search_explicit_sources(self, identifier: str) -> Optional[PersonInfo]:
+    def _search_explicit_sources(self, identifier: str) -> Optional[Dict[str, Any]]:
         """Search explicit sources (People API, Directory API) for person information.
         
         Args:
             identifier: Search identifier
             
         Returns:
-            PersonInfo if found, None otherwise
+            Person info dict if found, None otherwise
         """
         # Search People API first
         person_info = self._search_people_api(identifier)
@@ -197,18 +175,18 @@ class PeopleService(ToolkitService):
             
         return None
 
-    def _search_implicit_sources(self, identifier: str) -> Optional[PersonInfo]:
+    def _search_implicit_sources(self, identifier: str) -> Optional[Dict[str, Any]]:
         """Search implicit sources (Emails) for person information.
         
         Args:
             identifier: Search identifier
             
         Returns:
-            PersonInfo if found, None otherwise
+            Person info dict if found, None otherwise
         """
         return self._search_emails(identifier)
 
-    def _search_people_api(self, identifier: str) -> Optional[PersonInfo]:
+    def _search_people_api(self, identifier: str) -> Optional[Dict[str, Any]]:
         """Search Google People API for person information."""
         try:
             results = self.api_client.search_contacts(identifier)
@@ -223,22 +201,41 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error searching People API: {e}")
             return None
 
-    def _search_directory_api(self, identifier: str) -> Optional[PersonInfo]:
-        """Search Directory API for person information.
-        
-        Note: This is a placeholder for Directory API integration.
-        In a real implementation, this would search the organization's directory.
-        """
+    def _search_directory_api(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """Search Google Directory API for person information."""
         try:
-            # Placeholder for Directory API search
-            # In real implementation, this would call directory service
-            logger.debug(f"Directory API search not implemented for: {identifier}")
+            # Use Directory API to search for users in the organization
+            directory_service = self.api_client.auth_manager.get_admin_service()
+            
+            # Search by email if identifier looks like email
+            if self._is_email_address(identifier):
+                try:
+                    user = directory_service.users().get(userKey=identifier).execute()
+                    return self._extract_person_from_directory_user(user, SourceType.DIRECTORY_API)
+                except Exception:
+                    # User not found by exact email, continue to name search
+                    pass
+            
+            # Search by name
+            search_query = f"name:{identifier}"
+            users_result = directory_service.users().list(
+                domain=self._get_organization_domain(),
+                query=search_query,
+                maxResults=10
+            ).execute()
+            
+            users = users_result.get('users', [])
+            for user in users:
+                person_info = self._extract_person_from_directory_user(user, SourceType.DIRECTORY_API)
+                if person_info and self._matches_identifier(person_info, identifier):
+                    return person_info
+                    
             return None
         except Exception as e:
             logger.debug(f"Error searching Directory API: {e}")
             return None
 
-    def _search_emails(self, identifier: str) -> Optional[PersonInfo]:
+    def _search_emails(self, identifier: str) -> Optional[Dict[str, Any]]:
         """Search emails for person information."""
         try:
             # Search Gmail messages for the identifier
@@ -258,7 +255,7 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error searching emails: {e}")
             return None
 
-    def _extract_person_from_people_api(self, person: Dict[str, Any], identifier: str) -> Optional[PersonInfo]:
+    def _extract_person_from_people_api(self, person: Dict[str, Any], identifier: str) -> Optional[Dict[str, Any]]:
         """Extract person information from People API result."""
         try:
             person_data = person.get("person", {})
@@ -286,7 +283,21 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error extracting from People API: {e}")
             return None
 
-    def _extract_person_from_email(self, message_data: Dict[str, Any], identifier: str) -> Optional[PersonInfo]:
+    def _extract_person_from_directory_user(self, user: Dict[str, Any], source: SourceType) -> Dict[str, Any]:
+        """Extract person information from Directory API user object."""
+        primary_email = user.get("primaryEmail", "")
+        name_obj = user.get("name", {})
+        display_name = name_obj.get("fullName", "")
+        
+        # Fallback to first + last name if no display name
+        if not display_name:
+            first_name = name_obj.get("givenName", "")
+            last_name = name_obj.get("familyName", "")
+            display_name = f"{first_name} {last_name}".strip()
+        
+        return self._parse_name_and_email(display_name, primary_email, source)
+
+    def _extract_person_from_email(self, message_data: Dict[str, Any], identifier: str) -> Optional[Dict[str, Any]]:
         """Extract person information from email message headers."""
         try:
             headers = message_data.get("payload", {}).get("headers", [])
@@ -307,8 +318,8 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error extracting from email: {e}")
             return None
 
-    def _parse_name_and_email(self, display_name: str, email: str, source: SourceType) -> PersonInfo:
-        """Parse display name and email into PersonInfo."""
+    def _parse_name_and_email(self, display_name: str, email: str, source: SourceType) -> Dict[str, Any]:
+        """Parse display name and email into person info dict."""
         display_name = display_name.strip()
         
         # Remove email from display name if present
@@ -330,14 +341,14 @@ class PeopleService(ToolkitService):
             first_name = email_local
             last_name = ""
             
-        return PersonInfo(
-            first_name=first_name,
-            last_name=last_name,
-            email=email.lower(),
-            source=source,
-        )
+        return {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email.lower(),
+            "source": source,
+        }
 
-    def _matches_identifier(self, person_info: PersonInfo, identifier: str) -> bool:
+    def _matches_identifier(self, person_info: Dict[str, Any], identifier: str) -> bool:
         """Check if person info matches the search identifier."""
         identifier_lower = identifier.lower()
         
@@ -353,7 +364,7 @@ class PeopleService(ToolkitService):
                 identifier_lower in first_name or
                 first_name in identifier_lower)
 
-    def _is_real_person(self, person_info: PersonInfo) -> bool:
+    def _is_real_person(self, person_info: Dict[str, Any]) -> bool:
         """Check if person info represents a real person or automated system."""
         email = person_info["email"].lower()
         first_name = person_info["first_name"].lower()
@@ -389,7 +400,7 @@ class PeopleService(ToolkitService):
         )
         return matches[0] if matches else None
 
-    def _validate_name_consistency(self, existing_person: PersonPage, new_person_info: PersonInfo) -> None:
+    def _validate_name_consistency(self, existing_person: PersonPage, new_person_info: Dict[str, Any]) -> None:
         """Validate that names are consistent for the same email address."""
         existing_full_name = existing_person.full_name.lower().strip() if existing_person.full_name else ""
         new_full_name = f"{new_person_info['first_name']} {new_person_info['last_name']}".lower().strip()
@@ -400,7 +411,7 @@ class PeopleService(ToolkitService):
                 f"existing='{existing_person.full_name}' vs new='{new_full_name.title()}'"
             )
 
-    def _create_and_store_person(self, person_info: PersonInfo) -> PersonPage:
+    def _create_and_store_person(self, person_info: Dict[str, Any]) -> PersonPage:
         """Create and store a new PersonPage from person info."""
         person_id = self._generate_person_id(person_info["email"])
         
@@ -423,6 +434,12 @@ class PeopleService(ToolkitService):
     def _generate_person_id(self, email: str) -> str:
         """Generate a consistent person ID from email."""
         return hashlib.md5(email.encode()).hexdigest()
+
+    def _get_organization_domain(self) -> str:
+        """Get the organization domain for Directory API searches."""
+        # This would typically come from configuration
+        # For now, we'll extract from a known admin email or use a default
+        return "example.com"  # Replace with actual domain logic
 
     def _is_email_address(self, text: str) -> bool:
         """Check if text looks like an email address."""
