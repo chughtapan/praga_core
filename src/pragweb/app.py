@@ -11,6 +11,7 @@ from pragweb.google_api.client import GoogleAPIClient
 from pragweb.google_api.docs import GoogleDocsService
 from pragweb.google_api.gmail import GmailService
 from pragweb.google_api.people import PeopleService
+from pragweb.slack import SlackService
 
 logging.basicConfig(level=getattr(logging, get_current_config().log_level))
 
@@ -37,6 +38,7 @@ def setup_global_context() -> None:
     calendar_service = CalendarService(google_client)
     people_service = PeopleService(google_client)
     google_docs_service = GoogleDocsService(google_client)
+    slack_service = SlackService()
 
     # Collect all toolkits from registered services
     logger.info("Collecting toolkits...")
@@ -45,6 +47,7 @@ def setup_global_context() -> None:
         calendar_service.toolkit,
         people_service.toolkit,
         google_docs_service.toolkit,
+        slack_service.toolkit,
     ]
 
     # Set up agent with collected toolkits

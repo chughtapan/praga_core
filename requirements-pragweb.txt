@@ -6,3 +6,5 @@ tqdm>=4.65.0
 python-dotenv>=1.1.0
 bs4==0.0.2
 chonkie>=1.0.0
+slack-sdk>=3.21.0
+uvicorn>=0.15.0

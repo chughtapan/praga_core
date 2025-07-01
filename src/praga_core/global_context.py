@@ -100,5 +100,5 @@ class ServiceContext(Service, ContextMixin):
 
     @property
     def page_cache(self) -> PageCache:
-        """Access the global PageCache instance."""
+        """Access the context's PageCache directly."""
         return self.context.page_cache

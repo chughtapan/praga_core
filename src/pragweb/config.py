@@ -39,6 +39,14 @@ class AppConfig(BaseModel):
         description="Path to Google API credentials file"
     )
 
+    # Slack API Configuration
+    slack_client_id: Optional[str] = Field(
+        default=None, description="Slack app client ID"
+    )
+    slack_client_secret: Optional[str] = Field(
+        default=None, description="Slack app client secret"
+    )
+
     # Logging Configuration
     log_level: str = Field(description="Logging level")
 
@@ -89,6 +97,8 @@ def load_default_config() -> AppConfig:
         google_credentials_file=os.getenv(
             "GOOGLE_CREDENTIALS_FILE", "credentials.json"
         ),
+        slack_client_id=os.getenv("SLACK_CLIENT_ID"),
+        slack_client_secret=os.getenv("SLACK_CLIENT_SECRET"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
     )
 

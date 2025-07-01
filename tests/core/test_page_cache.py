@@ -5,10 +5,11 @@ including page storage, retrieval, SqlAlchemy queries, and error handling.
 """
 
 import tempfile
-from datetime import datetime
-from typing import Any, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, List, Optional
 
 import pytest
+from pydantic import BaseModel, Field, ValidationError
 
 from praga_core.page_cache import PageCache
 from praga_core.types import Page, PageURI
@@ -704,29 +705,25 @@ class TestURIHandling:
 class TestPageURISerialization:
     """Test PageURI serialization and deserialization in page_cache."""
 
-    def test_convert_page_uris_for_storage_single_uri(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_serialize_for_storage_single_uri(self, page_cache: PageCache) -> None:
         """Test converting a single PageURI to string for storage."""
         uri = PageURI(root="test", type="doc", id="123")
-        result = page_cache._convert_page_uris_for_storage(uri)
+        result = page_cache._serialize_for_storage(uri)
         assert result == str(uri)
         assert isinstance(result, str)
 
-    def test_convert_page_uris_for_storage_list_of_uris(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_serialize_for_storage_list_of_uris(self, page_cache: PageCache) -> None:
         """Test converting a list of PageURIs to strings for storage."""
         uris = [
             PageURI(root="test", type="doc", id="123"),
             PageURI(root="test", type="doc", id="456"),
         ]
-        result = page_cache._convert_page_uris_for_storage(uris)
+        result = page_cache._serialize_for_storage(uris)
         expected = [str(uri) for uri in uris]
         assert result == expected
         assert all(isinstance(item, str) for item in result)
 
-    def test_convert_page_uris_for_storage_nested_structure(
+    def test_serialize_for_storage_nested_structure(
         self, page_cache: PageCache
     ) -> None:
         """Test converting nested structures containing PageURIs."""
@@ -740,16 +737,14 @@ class TestPageURISerialization:
             "number": 42,
         }
 
-        result = page_cache._convert_page_uris_for_storage(nested_data)
+        result = page_cache._serialize_for_storage(nested_data)
 
         assert result["single_uri"] == str(uri1)
         assert result["uri_list"] == [str(uri1), str(uri2)]
         assert result["regular_data"] == "some string"
         assert result["number"] == 42
 
-    def test_convert_page_uris_for_storage_non_uri_values(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_serialize_for_storage_non_uri_values(self, page_cache: PageCache) -> None:
         """Test that non-PageURI values are returned unchanged."""
         test_values = [
             "string",
@@ -762,26 +757,22 @@ class TestPageURISerialization:
         ]
 
         for value in test_values:
-            result = page_cache._convert_page_uris_for_storage(value)
+            result = page_cache._serialize_for_storage(value)
             assert result == value
 
-    def test_convert_page_uris_from_storage_single_uri(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_deserialize_from_storage_single_uri(self, page_cache: PageCache) -> None:
         """Test converting a string back to PageURI from storage."""
         from praga_core.types import PageURI
 
         uri_string = "test/doc:123@1"
-        result = page_cache._convert_page_uris_from_storage(uri_string, PageURI)
+        result = page_cache._deserialize_from_storage(uri_string, PageURI)
 
         assert isinstance(result, PageURI)
         assert result.root == "test"
         assert result.type == "doc"
         assert result.id == "123"
 
-    def test_convert_page_uris_from_storage_optional_uri(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_deserialize_from_storage_optional_uri(self, page_cache: PageCache) -> None:
         """Test converting Optional[PageURI] from storage."""
         from typing import Optional
 
@@ -789,27 +780,21 @@ class TestPageURISerialization:
 
         # Test with actual URI string
         uri_string = "test/doc:123@1"
-        result = page_cache._convert_page_uris_from_storage(
-            uri_string, Optional[PageURI]
-        )
+        result = page_cache._deserialize_from_storage(uri_string, Optional[PageURI])
         assert isinstance(result, PageURI)
 
         # Test with None
-        result_none = page_cache._convert_page_uris_from_storage(
-            None, Optional[PageURI]
-        )
+        result_none = page_cache._deserialize_from_storage(None, Optional[PageURI])
         assert result_none is None
 
-    def test_convert_page_uris_from_storage_list_of_uris(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_deserialize_from_storage_list_of_uris(self, page_cache: PageCache) -> None:
         """Test converting List[PageURI] from storage."""
         from typing import List
 
         from praga_core.types import PageURI
 
         uri_strings = ["test/doc:123@1", "test/doc:456@1"]
-        result = page_cache._convert_page_uris_from_storage(uri_strings, List[PageURI])
+        result = page_cache._deserialize_from_storage(uri_strings, List[PageURI])
 
         assert isinstance(result, list)
         assert len(result) == 2
@@ -817,7 +802,7 @@ class TestPageURISerialization:
         assert result[0].id == "123"
         assert result[1].id == "456"
 
-    def test_convert_page_uris_from_storage_non_uri_types(
+    def test_deserialize_from_storage_non_uri_types(
         self, page_cache: PageCache
     ) -> None:
         """Test that non-PageURI types are returned unchanged."""
@@ -831,7 +816,7 @@ class TestPageURISerialization:
         ]
 
         for value, field_type in test_cases:
-            result = page_cache._convert_page_uris_from_storage(value, field_type)
+            result = page_cache._deserialize_from_storage(value, field_type)
             assert result == value
 
 
@@ -1125,3 +1110,506 @@ class TestGoogleDocsPageURIs:
         assert len(results) == 3
         chunk_indices = {chunk.chunk_index for chunk in results}
         assert chunk_indices == {0, 1, 2}
+
+
+class TestPydanticModelSerialization:
+    """Test Pydantic model serialization and deserialization in PageCache."""
+
+    class SlackMessageSummary(BaseModel):
+        """Test Pydantic model with datetime fields (like SlackMessageSummary)."""
+
+        display_name: str = Field(description="User who sent the message")
+        text: str = Field(description="Message text content")
+        timestamp: datetime = Field(description="Message timestamp")
+
+    class SlackThreadPage(Page):
+        """Test page with list of Pydantic models."""
+
+        thread_ts: str = Field(description="Thread timestamp", exclude=True)
+        channel_name: str = Field(description="Channel name")
+        messages: List["TestPydanticModelSerialization.SlackMessageSummary"] = Field(
+            description="Messages in thread"
+        )
+        message_count: int = Field(description="Number of messages")
+        participants: List[str] = Field(description="Participants")
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(data.get("channel_name", "")) // 4
+
+    class BlogPost(Page):
+        """Test page with optional Pydantic model field."""
+
+        title: str = Field(description="Post title")
+        content: str = Field(description="Post content")
+        author: Optional["TestPydanticModelSerialization.SlackMessageSummary"] = Field(
+            None, description="Author info"
+        )
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(data.get("content", "")) // 4
+
+    def test_serialize_for_storage_pydantic_model(self, page_cache: PageCache) -> None:
+        """Test serializing a Pydantic model for storage."""
+        message = self.SlackMessageSummary(
+            display_name="Alice",
+            text="Hello world",
+            timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+        )
+
+        result = page_cache._serialize_for_storage(message)
+
+        assert isinstance(result, dict)
+        assert result["display_name"] == "Alice"
+        assert result["text"] == "Hello world"
+        # datetime should be serialized as ISO string in JSON mode
+        assert result["timestamp"] == "2023-06-15T10:30:00Z"
+
+    def test_serialize_for_storage_list_of_pydantic_models(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test serializing a list of Pydantic models for storage."""
+        messages = [
+            self.SlackMessageSummary(
+                display_name="Alice",
+                text="First message",
+                timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+            ),
+            self.SlackMessageSummary(
+                display_name="Bob",
+                text="Second message",
+                timestamp=datetime(2023, 6, 15, 10, 31, 0, tzinfo=timezone.utc),
+            ),
+        ]
+
+        result = page_cache._serialize_for_storage(messages)
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(isinstance(item, dict) for item in result)
+        assert result[0]["display_name"] == "Alice"
+        assert result[1]["display_name"] == "Bob"
+        assert result[0]["timestamp"] == "2023-06-15T10:30:00Z"
+        assert result[1]["timestamp"] == "2023-06-15T10:31:00Z"
+
+    def test_deserialize_from_storage_pydantic_model(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test deserializing a Pydantic model from storage."""
+        stored_data = {
+            "display_name": "Alice",
+            "text": "Hello world",
+            "timestamp": "2023-06-15T10:30:00Z",
+        }
+
+        result = page_cache._deserialize_from_storage(
+            stored_data, self.SlackMessageSummary
+        )
+
+        assert isinstance(result, self.SlackMessageSummary)
+        assert result.display_name == "Alice"
+        assert result.text == "Hello world"
+        assert result.timestamp == datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+    def test_deserialize_from_storage_list_of_pydantic_models(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test deserializing a list of Pydantic models from storage."""
+        from typing import List
+
+        stored_data = [
+            {
+                "display_name": "Alice",
+                "text": "First message",
+                "timestamp": "2023-06-15T10:30:00Z",
+            },
+            {
+                "display_name": "Bob",
+                "text": "Second message",
+                "timestamp": "2023-06-15T10:31:00Z",
+            },
+        ]
+
+        result = page_cache._deserialize_from_storage(
+            stored_data, List[self.SlackMessageSummary]
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(isinstance(item, self.SlackMessageSummary) for item in result)
+        assert result[0].display_name == "Alice"
+        assert result[1].display_name == "Bob"
+        assert result[0].timestamp == datetime(
+            2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc
+        )
+        assert result[1].timestamp == datetime(
+            2023, 6, 15, 10, 31, 0, tzinfo=timezone.utc
+        )
+
+    def test_deserialize_from_storage_optional_pydantic_model(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test deserializing Optional[PydanticModel] from storage."""
+        from typing import Optional
+
+        # Test with actual data
+        stored_data = {
+            "display_name": "Alice",
+            "text": "Hello",
+            "timestamp": "2023-06-15T10:30:00Z",
+        }
+
+        result = page_cache._deserialize_from_storage(
+            stored_data, Optional[self.SlackMessageSummary]
+        )
+
+        assert isinstance(result, self.SlackMessageSummary)
+        assert result.display_name == "Alice"
+
+        # Test with None
+        result_none = page_cache._deserialize_from_storage(
+            None, Optional[self.SlackMessageSummary]
+        )
+        assert result_none is None
+
+    def test_is_pydantic_model_type(self, page_cache: PageCache) -> None:
+        """Test the _is_pydantic_model_type helper method."""
+        from pydantic import BaseModel
+
+        # Should return True for Pydantic models
+        assert page_cache._is_pydantic_model_type(self.SlackMessageSummary) is True
+        assert page_cache._is_pydantic_model_type(BaseModel) is True
+
+        # Should return False for non-Pydantic types
+        assert page_cache._is_pydantic_model_type(str) is False
+        assert page_cache._is_pydantic_model_type(int) is False
+        assert page_cache._is_pydantic_model_type(dict) is False
+        assert page_cache._is_pydantic_model_type(list) is False
+        assert page_cache._is_pydantic_model_type(None) is False
+
+    def test_store_and_retrieve_page_with_pydantic_models(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test end-to-end storage and retrieval of page with Pydantic model fields."""
+        messages = [
+            self.SlackMessageSummary(
+                display_name="Alice",
+                text="Thread starter message",
+                timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+            ),
+            self.SlackMessageSummary(
+                display_name="Bob",
+                text="Reply to thread",
+                timestamp=datetime(2023, 6, 15, 10, 31, 0, tzinfo=timezone.utc),
+            ),
+            self.SlackMessageSummary(
+                display_name="Charlie",
+                text="Another reply",
+                timestamp=datetime(2023, 6, 15, 10, 32, 0, tzinfo=timezone.utc),
+            ),
+        ]
+
+        thread_page = self.SlackThreadPage(
+            uri=PageURI(root="test", type="slack_thread", id="thread123"),
+            thread_ts="1687009800.001",
+            channel_name="general",
+            messages=messages,
+            message_count=3,
+            participants=["Alice", "Bob", "Charlie"],
+        )
+
+        # Store the page
+        result = page_cache.store_page(thread_page)
+        assert result is True
+
+        # Retrieve the page
+        retrieved_page = page_cache.get_page(self.SlackThreadPage, thread_page.uri)
+
+        assert retrieved_page is not None
+        assert retrieved_page.channel_name == "general"
+        assert retrieved_page.message_count == 3
+        assert retrieved_page.participants == ["Alice", "Bob", "Charlie"]
+
+        # Verify Pydantic models are properly deserialized
+        assert isinstance(retrieved_page.messages, list)
+        assert len(retrieved_page.messages) == 3
+        assert all(
+            isinstance(msg, self.SlackMessageSummary) for msg in retrieved_page.messages
+        )
+
+        # Check first message
+        msg1 = retrieved_page.messages[0]
+        assert msg1.display_name == "Alice"
+        assert msg1.text == "Thread starter message"
+        assert msg1.timestamp == datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
+
+        # Check second message
+        msg2 = retrieved_page.messages[1]
+        assert msg2.display_name == "Bob"
+        assert msg2.text == "Reply to thread"
+        assert msg2.timestamp == datetime(2023, 6, 15, 10, 31, 0, tzinfo=timezone.utc)
+
+    def test_update_page_with_pydantic_models(self, page_cache: PageCache) -> None:
+        """Test updating a page with modified Pydantic model fields."""
+        initial_message = self.SlackMessageSummary(
+            display_name="Alice",
+            text="Initial message",
+            timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+        )
+
+        thread_page = self.SlackThreadPage(
+            uri=PageURI(root="test", type="slack_thread", id="thread456"),
+            thread_ts="1687009800.002",
+            channel_name="general",
+            messages=[initial_message],
+            message_count=1,
+            participants=["Alice"],
+        )
+
+        # Store initial page
+        page_cache.store_page(thread_page)
+
+        # Update with additional messages
+        updated_messages = [
+            initial_message,
+            self.SlackMessageSummary(
+                display_name="Bob",
+                text="Added reply",
+                timestamp=datetime(2023, 6, 15, 10, 31, 0, tzinfo=timezone.utc),
+            ),
+        ]
+
+        updated_page = self.SlackThreadPage(
+            uri=thread_page.uri,  # Same URI
+            thread_ts="1687009800.002",
+            channel_name="general",
+            messages=updated_messages,
+            message_count=2,
+            participants=["Alice", "Bob"],
+        )
+
+        # Update the page
+        result = page_cache.store_page(updated_page)
+        assert result is False  # Should be update, not insert
+
+        # Retrieve and verify
+        retrieved_page = page_cache.get_page(self.SlackThreadPage, thread_page.uri)
+
+        assert retrieved_page is not None
+        assert retrieved_page.message_count == 2
+        assert len(retrieved_page.messages) == 2
+        assert retrieved_page.participants == ["Alice", "Bob"]
+
+        # Verify both messages are present and correctly deserialized
+        assert retrieved_page.messages[0].display_name == "Alice"
+        assert retrieved_page.messages[0].text == "Initial message"
+        assert retrieved_page.messages[1].display_name == "Bob"
+        assert retrieved_page.messages[1].text == "Added reply"
+
+    def test_find_pages_by_pydantic_model_content(self, page_cache: PageCache) -> None:
+        """Test finding pages based on content within Pydantic model fields."""
+        # Create pages with different message contents
+        thread1 = self.SlackThreadPage(
+            uri=PageURI(root="test", type="slack_thread", id="thread1"),
+            thread_ts="1687009800.001",
+            channel_name="general",
+            messages=[
+                self.SlackMessageSummary(
+                    display_name="Alice",
+                    text="urgent task needs attention",
+                    timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+                )
+            ],
+            message_count=1,
+            participants=["Alice"],
+        )
+
+        thread2 = self.SlackThreadPage(
+            uri=PageURI(root="test", type="slack_thread", id="thread2"),
+            thread_ts="1687009800.002",
+            channel_name="general",
+            messages=[
+                self.SlackMessageSummary(
+                    display_name="Bob",
+                    text="casual conversation about lunch",
+                    timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+                )
+            ],
+            message_count=1,
+            participants=["Bob"],
+        )
+
+        # Store both pages
+        page_cache.store_page(thread1)
+        page_cache.store_page(thread2)
+
+        # Find pages by channel name (direct field)
+        results = page_cache.find_pages_by_attribute(
+            self.SlackThreadPage, lambda t: t.channel_name == "general"
+        )
+
+        assert len(results) == 2
+        thread_ids = {page.uri.id for page in results}
+        assert thread_ids == {"thread1", "thread2"}
+
+    def test_optional_pydantic_model_field(self, page_cache: PageCache) -> None:
+        """Test storing and retrieving pages with optional Pydantic model fields."""
+        # Test with None author
+        post_without_author = self.BlogPost(
+            uri=PageURI(root="test", type="blog_post", id="post1"),
+            title="Anonymous Post",
+            content="This post has no author information",
+            author=None,
+        )
+
+        # Test with author
+        author_info = self.SlackMessageSummary(
+            display_name="Alice",
+            text="Author bio",
+            timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+        )
+
+        post_with_author = self.BlogPost(
+            uri=PageURI(root="test", type="blog_post", id="post2"),
+            title="Authored Post",
+            content="This post has author information",
+            author=author_info,
+        )
+
+        # Store both posts
+        page_cache.store_page(post_without_author)
+        page_cache.store_page(post_with_author)
+
+        # Retrieve post without author
+        retrieved_post1 = page_cache.get_page(self.BlogPost, post_without_author.uri)
+        assert retrieved_post1 is not None
+        assert retrieved_post1.title == "Anonymous Post"
+        assert retrieved_post1.author is None
+
+        # Retrieve post with author
+        retrieved_post2 = page_cache.get_page(self.BlogPost, post_with_author.uri)
+        assert retrieved_post2 is not None
+        assert retrieved_post2.title == "Authored Post"
+        assert isinstance(retrieved_post2.author, self.SlackMessageSummary)
+        assert retrieved_post2.author.display_name == "Alice"
+        assert retrieved_post2.author.text == "Author bio"
+        assert retrieved_post2.author.timestamp == datetime(
+            2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc
+        )
+
+    def test_nested_pydantic_models(self, page_cache: PageCache) -> None:
+        """Test storing complex nested structures with Pydantic models."""
+        nested_data = {
+            "thread_info": {
+                "messages": [
+                    self.SlackMessageSummary(
+                        display_name="Alice",
+                        text="Nested message",
+                        timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+                    )
+                ],
+                "metadata": {"channel": "general", "priority": "high"},
+            },
+            "regular_field": "simple value",
+        }
+
+        # Test serialization
+        serialized = page_cache._serialize_for_storage(nested_data)
+
+        assert isinstance(serialized, dict)
+        assert serialized["regular_field"] == "simple value"
+        assert isinstance(serialized["thread_info"], dict)
+        assert isinstance(serialized["thread_info"]["messages"], list)
+        assert isinstance(serialized["thread_info"]["messages"][0], dict)
+        assert serialized["thread_info"]["messages"][0]["display_name"] == "Alice"
+        assert (
+            serialized["thread_info"]["messages"][0]["timestamp"]
+            == "2023-06-15T10:30:00Z"
+        )
+
+    def test_datetime_timezone_handling(self, page_cache: PageCache) -> None:
+        """Test proper timezone handling in Pydantic model serialization."""
+        # Test with UTC timezone
+        utc_message = self.SlackMessageSummary(
+            display_name="Alice",
+            text="UTC message",
+            timestamp=datetime(2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc),
+        )
+
+        # Test with different timezone
+        est_tz = timezone(timedelta(hours=-5))
+        est_message = self.SlackMessageSummary(
+            display_name="Bob",
+            text="EST message",
+            timestamp=datetime(2023, 6, 15, 5, 30, 0, tzinfo=est_tz),
+        )
+
+        # Serialize both
+        utc_serialized = page_cache._serialize_for_storage(utc_message)
+        est_serialized = page_cache._serialize_for_storage(est_message)
+
+        assert utc_serialized["timestamp"] == "2023-06-15T10:30:00Z"
+        assert est_serialized["timestamp"] == "2023-06-15T05:30:00-05:00"
+
+        # Deserialize both
+        utc_deserialized = page_cache._deserialize_from_storage(
+            utc_serialized, self.SlackMessageSummary
+        )
+        est_deserialized = page_cache._deserialize_from_storage(
+            est_serialized, self.SlackMessageSummary
+        )
+
+        assert utc_deserialized.timestamp == datetime(
+            2023, 6, 15, 10, 30, 0, tzinfo=timezone.utc
+        )
+        assert est_deserialized.timestamp == datetime(
+            2023, 6, 15, 5, 30, 0, tzinfo=est_tz
+        )
+
+
+class TestPydanticModelErrorScenarios:
+    """Test error handling for Pydantic model serialization."""
+
+    class InvalidMessage(BaseModel):
+        """Test model with validation that can fail."""
+
+        display_name: str
+        score: int = Field(ge=0, le=100)  # Must be between 0 and 100
+
+    def test_invalid_pydantic_model_data(self, page_cache: PageCache) -> None:
+        """Test handling of invalid data during Pydantic model deserialization."""
+        invalid_data = {
+            "display_name": "Alice",
+            "score": 150,  # Invalid - exceeds max value
+        }
+
+        # Should raise ValidationError during deserialization
+        with pytest.raises(ValidationError):
+            page_cache._deserialize_from_storage(invalid_data, self.InvalidMessage)
+
+    def test_missing_required_fields(self, page_cache: PageCache) -> None:
+        """Test handling of missing required fields in Pydantic models."""
+        incomplete_data = {
+            "display_name": "Alice"
+            # Missing required 'score' field
+        }
+
+        with pytest.raises(ValidationError):
+            page_cache._deserialize_from_storage(incomplete_data, self.InvalidMessage)
+
+    def test_wrong_data_type_for_pydantic_model(self, page_cache: PageCache) -> None:
+        """Test handling wrong data types during deserialization."""
+        # Pass a string instead of dict for Pydantic model
+        result = page_cache._deserialize_from_storage("not_a_dict", self.InvalidMessage)
+
+        # Should return the original value unchanged since it's not a dict
+        assert result == "not_a_dict"
+
+    def test_non_pydantic_type_with_dict_data(self, page_cache: PageCache) -> None:
+        """Test that non-Pydantic types don't get processed as Pydantic models."""
+        dict_data = {"key": "value"}
+
+        # Should return unchanged since str is not a Pydantic model type
+        result = page_cache._deserialize_from_storage(dict_data, str)
+        assert result == dict_data
