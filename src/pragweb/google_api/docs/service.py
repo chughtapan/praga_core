@@ -140,6 +140,11 @@ class GoogleDocsService(ToolkitService):
         # Create permalink
         permalink = f"https://docs.google.com/document/d/{document_id}/edit"
 
+        # Create header URI that will be used as parent for chunks
+        header_uri = PageURI(
+            root=self.context.root, type="gdoc_header", id=document_id
+        )
+
         # Store chunks in page cache first
         chunk_pages = []
         for i, chunk in enumerate(chunks):
@@ -166,11 +171,6 @@ class GoogleDocsService(ToolkitService):
                     id=f"{document_id}({i + 1})",
                 )
 
-            # Create header URI
-            header_uri = PageURI(
-                root=self.context.root, type="gdoc_header", id=document_id
-            )
-
             # Create chunk page
             chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
             chunk_page = GDocChunk(
@@ -187,8 +187,6 @@ class GoogleDocsService(ToolkitService):
                 permalink=permalink,
             )
 
-            # Store chunk in page cache
-            self.context.page_cache.store_page(chunk_page)
             chunk_pages.append(chunk_page)
 
         # Create chunk URIs for header
@@ -200,8 +198,7 @@ class GoogleDocsService(ToolkitService):
             summary += "..."
         summary += f" [{chunk_count} chunks]"
 
-        # Create and store header page
-        header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
+        # Create and store header page first (to satisfy parent existence requirement)
         header_page = GDocHeader(
             uri=header_uri,
             document_id=document_id,
@@ -216,8 +213,12 @@ class GoogleDocsService(ToolkitService):
             permalink=permalink,
         )
 
-        # Store header in page cache
+        # Store header in page cache first
         self.context.page_cache.store_page(header_page)
+
+        # Now store chunks with header as parent for provenance tracking
+        for chunk_page in chunk_pages:
+            self.context.page_cache.store_page(chunk_page, parent_uri=header_uri)
 
         logger.info(
             f"Successfully ingested document {document_id} with {chunk_count} chunks"
