@@ -1,4 +1,4 @@
-"""Tests for existing PeopleService before refactoring."""
+"""Tests for the rewritten PeopleService."""
 
 from unittest.mock import Mock, patch
 
@@ -6,8 +6,8 @@ import pytest
 
 from praga_core import clear_global_context, set_global_context
 from praga_core.types import PageURI
-from pragweb.google_api.people.page import PersonPage
-from pragweb.google_api.people.service import PeopleService
+from pragweb.google_api.people.page import PersonPage, SourceType
+from pragweb.google_api.people.service import PeopleService, PersonInfo
 
 
 class TestPeopleService:
@@ -17,25 +17,21 @@ class TestPeopleService:
         """Set up test environment."""
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
-        self.mock_context.services = {}  # Mock services dictionary
+        self.mock_context.services = {}
         self.mock_page_cache = Mock()
         self.mock_context.page_cache = self.mock_page_cache
 
-        # Mock the register_service method to actually register
         def mock_register_service(name, service):
             self.mock_context.services[name] = service
 
         self.mock_context.register_service = mock_register_service
-
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
-
-        # Mock the client methods
         self.mock_api_client.search_contacts = Mock()
         self.mock_api_client.search_messages = Mock()
-        self.mock_api_client.search_events = Mock()
+        self.mock_api_client.get_message = Mock()
 
         self.service = PeopleService(self.mock_api_client)
 
@@ -47,14 +43,8 @@ class TestPeopleService:
         """Test PeopleService initialization."""
         assert self.service.api_client is self.mock_api_client
         assert self.service.name == "people"
-
-        # Verify service is registered in context (service auto-registers via ServiceContext)
         assert "people" in self.mock_context.services
         assert self.mock_context.services["people"] is self.service
-
-    def test_root_property(self):
-        """Test root property returns context root."""
-        assert self.service.context.root == "test-root"
 
     def test_handle_person_request_cached(self):
         """Test handle_person_request returns cached person."""
@@ -63,7 +53,6 @@ class TestPeopleService:
 
         result = self.service.handle_person_request("person123")
 
-        # Verify cache lookup
         expected_uri = PageURI(root="test-root", type="person", id="person123")
         self.mock_page_cache.get_page.assert_called_once_with(PersonPage, expected_uri)
         assert result is mock_person
@@ -72,322 +61,298 @@ class TestPeopleService:
         """Test handle_person_request raises error when person not found."""
         self.mock_page_cache.get_page.return_value = None
 
-        with pytest.raises(
-            RuntimeError, match="Invalid request: Person person123 not found"
-        ):
+        with pytest.raises(RuntimeError, match="Invalid request: Person person123 not found"):
             self.service.handle_person_request("person123")
 
-    def test_lookup_people_by_email(self):
-        """Test lookup_people by email address."""
-        mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
-        self.mock_page_cache.find_pages_by_attribute.return_value = mock_people
+    def test_get_person_record_existing(self):
+        """Test get_person_record returns existing person."""
+        mock_person = Mock(spec=PersonPage)
+        with patch.object(self.service, "lookup_existing_record", return_value=mock_person):
+            result = self.service.get_person_record("test@example.com")
+            assert result is mock_person
 
-        result = self.service.lookup_people("test@example.com")
+    def test_get_person_record_create_new(self):
+        """Test get_person_record creates new person when not found."""
+        mock_person = Mock(spec=PersonPage)
+        with patch.object(self.service, "lookup_existing_record", return_value=None):
+            with patch.object(self.service, "create_new_record", return_value=mock_person):
+                result = self.service.get_person_record("test@example.com")
+                assert result is mock_person
 
-        # Should match by email first (most specific)
-        self.mock_page_cache.find_pages_by_attribute.assert_called_once()
-        call_args = self.mock_page_cache.find_pages_by_attribute.call_args
-        assert call_args[0][0] == PersonPage
-        # Test the lambda function matches email
-        lambda_func = call_args[0][1]
-        mock_person_attrs = Mock()
-        mock_person_attrs.email = "test@example.com"
-        assert lambda_func(mock_person_attrs) is True
+    def test_get_person_record_creation_fails(self):
+        """Test get_person_record returns None when creation fails."""
+        with patch.object(self.service, "lookup_existing_record", return_value=None):
+            with patch.object(self.service, "create_new_record", side_effect=ValueError("Not found")):
+                result = self.service.get_person_record("test@example.com")
+                assert result is None
 
-        assert result == mock_people
-
-    def test_lookup_people_by_full_name(self):
-        """Test lookup_people by full name when email match fails."""
-        # First call (email) returns empty, second call (full name) returns results
-        self.mock_page_cache.find_pages_by_attribute.side_effect = [
-            [],
-            [Mock(spec=PersonPage)],
-        ]
-
-        result = self.service.lookup_people("John Doe")
-
-        # Should try email first, then full name
-        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
-        assert len(result) == 1
-
-    def test_lookup_people_by_first_name(self):
-        """Test lookup_people by first name when other matches fail."""
-        # Email and full name return empty, first name returns results
-        mock_people = [Mock(spec=PersonPage)]
-        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], mock_people]
-
-        result = self.service.lookup_people("John")
-
-        # Should try full name first (since it's not an email), then first name
-        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
-        assert result == mock_people
-
-    def test_create_person_existing(self):
-        """Test create_person returns existing people if found."""
-        mock_people = [Mock(spec=PersonPage)]
-        with patch.object(self.service, "lookup_people", return_value=mock_people):
-            result = self.service.create_person("John Doe")
-
-        assert result == mock_people
-
-    def test_create_person_new_from_google_people(self):
-        """Test create_person from Google People API."""
-        # No existing people
-        with patch.object(self.service, "lookup_people", return_value=[]):
-            # Mock Google People API response
-            with patch.object(
-                self.service, "_extract_people_info_from_google_people"
-            ) as mock_google_people:
-                with patch.object(
-                    self.service, "_extract_people_from_gmail_contacts", return_value=[]
-                ):
-                    with patch.object(
-                        self.service,
-                        "_extract_people_from_calendar_contacts",
-                        return_value=[],
-                    ):
-                        mock_person_info = {
-                            "first_name": "John",
-                            "last_name": "Doe",
-                            "email": "john@example.com",
-                            "source": "google_people",
-                        }
-                        mock_google_people.return_value = [mock_person_info]
-
-                        # Mock _is_real_person and _store_and_create_page
-                        with patch.object(
-                            self.service, "_is_real_person", return_value=True
-                        ):
-                            with patch.object(
-                                self.service,
-                                "_get_existing_person_by_email",
-                                return_value=None,
-                            ):
-                                mock_person_page = Mock(spec=PersonPage)
-                                with patch.object(
-                                    self.service,
-                                    "_store_and_create_page",
-                                    return_value=mock_person_page,
-                                ):
-                                    result = self.service.create_person(
-                                        "john@example.com"
-                                    )
-
-        assert result == [mock_person_page]
-
-    def test_create_person_no_sources(self):
-        """Test create_person raises error when no sources found."""
-        with patch.object(self.service, "lookup_people", return_value=[]):
-            with patch.object(
-                self.service, "_extract_people_info_from_google_people", return_value=[]
-            ):
-                with patch.object(
-                    self.service, "_extract_people_from_gmail_contacts", return_value=[]
-                ):
-                    with patch.object(
-                        self.service,
-                        "_extract_people_from_calendar_contacts",
-                        return_value=[],
-                    ):
-                        with pytest.raises(
-                            ValueError, match="Could not find any real people"
-                        ):
-                            self.service.create_person("nonexistent@example.com")
-
-    def test_create_person_filters_non_real_people(self):
-        """Test create_person filters out non-real people."""
-        with patch.object(self.service, "lookup_people", return_value=[]):
-            mock_person_info = {
-                "first_name": "No Reply",
-                "last_name": "",
-                "email": "noreply@example.com",
-                "source": "gmail",
-            }
-            with patch.object(
-                self.service,
-                "_extract_people_info_from_google_people",
-                return_value=[mock_person_info],
-            ):
-                with patch.object(
-                    self.service, "_extract_people_from_gmail_contacts", return_value=[]
-                ):
-                    with patch.object(
-                        self.service,
-                        "_extract_people_from_calendar_contacts",
-                        return_value=[],
-                    ):
-                        with pytest.raises(
-                            ValueError, match="Could not find any real people"
-                        ):
-                            self.service.create_person("noreply@example.com")
-
-    def test_create_person_name_divergence_error(self):
-        """Test create_person raises error when names diverge for same email."""
-        with patch.object(self.service, "lookup_people", return_value=[]):
-            # Mock existing person with different name
-            existing_person = Mock(spec=PersonPage)
-            existing_person.full_name = "Jane Smith"
-            existing_person.email = "john@example.com"
-
-            with patch.object(
-                self.service,
-                "_get_existing_person_by_email",
-                return_value=existing_person,
-            ):
-                mock_person_info = {
-                    "first_name": "John",
-                    "last_name": "Doe",
-                    "email": "john@example.com",
-                    "source": "google_people",
-                }
-                with patch.object(
-                    self.service,
-                    "_extract_people_info_from_google_people",
-                    return_value=[mock_person_info],
-                ):
-                    with patch.object(
-                        self.service,
-                        "_extract_people_from_gmail_contacts",
-                        return_value=[],
-                    ):
-                        with patch.object(
-                            self.service,
-                            "_extract_people_from_calendar_contacts",
-                            return_value=[],
-                        ):
-                            with patch.object(
-                                self.service, "_is_real_person", return_value=True
-                            ):
-                                with pytest.raises(
-                                    ValueError, match="Name divergence detected"
-                                ):
-                                    self.service.create_person("john@example.com")
-
-    def test_is_real_person_valid(self):
-        """Test _is_real_person returns True for valid person."""
-        person_info = {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "source": "google_people",
-        }
-        assert self.service._is_real_person(person_info) is True
-
-    def test_is_real_person_automated_email(self):
-        """Test _is_real_person returns False for automated emails."""
-        person_info = {
-            "first_name": "No Reply",
-            "last_name": "",
-            "email": "noreply@example.com",
-            "source": "gmail",
-        }
-        assert self.service._is_real_person(person_info) is False
-
-        person_info["email"] = "do-not-reply@example.com"
-        assert self.service._is_real_person(person_info) is False
-
-        person_info["email"] = "automated@example.com"
-        assert self.service._is_real_person(person_info) is False
-
-    def test_get_existing_person_by_email(self):
-        """Test _get_existing_person_by_email finds existing person."""
+    def test_lookup_existing_record_by_email(self):
+        """Test lookup_existing_record finds person by email."""
         mock_person = Mock(spec=PersonPage)
         self.mock_page_cache.find_pages_by_attribute.return_value = [mock_person]
 
-        result = self.service._get_existing_person_by_email("test@example.com")
-        assert result is mock_person
+        result = self.service.lookup_existing_record("test@example.com")
 
-    def test_get_existing_person_by_email_not_found(self):
-        """Test _get_existing_person_by_email returns None when not found."""
+        assert result is mock_person
+        self.mock_page_cache.find_pages_by_attribute.assert_called_once()
+
+    def test_lookup_existing_record_by_full_name(self):
+        """Test lookup_existing_record finds person by full name."""
+        mock_person = Mock(spec=PersonPage)
+        # First call (email) returns empty, second call (full name) returns results
+        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], [mock_person]]
+
+        result = self.service.lookup_existing_record("John Doe")
+
+        assert result is mock_person
+        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
+
+    def test_lookup_existing_record_by_first_name(self):
+        """Test lookup_existing_record finds person by first name."""
+        mock_person = Mock(spec=PersonPage)
+        # Full name and first name calls
+        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], [mock_person]]
+
+        result = self.service.lookup_existing_record("John")
+
+        assert result is mock_person
+        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
+
+    def test_lookup_existing_record_not_found(self):
+        """Test lookup_existing_record returns None when not found."""
         self.mock_page_cache.find_pages_by_attribute.return_value = []
 
-        result = self.service._get_existing_person_by_email("test@example.com")
+        result = self.service.lookup_existing_record("nonexistent@example.com")
+
         assert result is None
 
-    def test_parse_name_and_email_full_format(self):
-        """Test _parse_name_and_email with full name format."""
-        result = self.service._parse_name_and_email(
-            "John Doe <john.doe@example.com>", "john.doe@example.com", "gmail"
+    def test_create_new_record_from_people_api(self):
+        """Test create_new_record from People API (explicit source)."""
+        mock_person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe", 
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
         )
-        expected = {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "source": "gmail",
-        }
-        assert result == expected
+        
+        with patch.object(self.service, "_search_explicit_sources", return_value=mock_person_info):
+            with patch.object(self.service, "_is_real_person", return_value=True):
+                with patch.object(self.service, "_get_existing_person_by_email", return_value=None):
+                    mock_person_page = Mock(spec=PersonPage)
+                    with patch.object(self.service, "_create_and_store_person", return_value=mock_person_page):
+                        result = self.service.create_new_record("john@example.com")
+                        assert result is mock_person_page
 
-    def test_parse_name_and_email_simple_format(self):
-        """Test _parse_name_and_email with display name same as email."""
-        result = self.service._parse_name_and_email(
-            "john.doe@example.com", "John.Doe@Example.com", "gmail"
+    def test_create_new_record_from_emails(self):
+        """Test create_new_record from emails (implicit source)."""
+        mock_person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john@example.com", 
+            source=SourceType.EMAILS
         )
-        expected = {
-            "first_name": "john.doe@example.com",  # Display name used as-is when it's the email
-            "last_name": "",
-            "email": "john.doe@example.com",  # Email is converted to lowercase
-            "source": "gmail",
-        }
-        assert result == expected
+        
+        with patch.object(self.service, "_search_explicit_sources", return_value=None):
+            with patch.object(self.service, "_search_implicit_sources", return_value=mock_person_info):
+                with patch.object(self.service, "_is_real_person", return_value=True):
+                    with patch.object(self.service, "_get_existing_person_by_email", return_value=None):
+                        mock_person_page = Mock(spec=PersonPage)
+                        with patch.object(self.service, "_create_and_store_person", return_value=mock_person_page):
+                            result = self.service.create_new_record("john@example.com")
+                            assert result is mock_person_page
 
-    def test_parse_name_and_email_no_display_name(self):
-        """Test _parse_name_and_email with empty display name uses email local part."""
-        result = self.service._parse_name_and_email("", "john.doe@example.com", "gmail")
-        expected = {
-            "first_name": "john.doe",  # Email local part used when no display name
-            "last_name": "",
-            "email": "john.doe@example.com",
-            "source": "gmail",
-        }
-        assert result == expected
+    def test_create_new_record_no_sources(self):
+        """Test create_new_record raises error when no sources found."""
+        with patch.object(self.service, "_search_explicit_sources", return_value=None):
+            with patch.object(self.service, "_search_implicit_sources", return_value=None):
+                with pytest.raises(ValueError, match="Could not find person data"):
+                    self.service.create_new_record("nonexistent@example.com")
 
-    def test_parse_name_and_email_single_name(self):
-        """Test _parse_name_and_email with single name."""
-        result = self.service._parse_name_and_email(
-            "John <john@example.com>", "john@example.com", "gmail"
+    def test_create_new_record_not_real_person(self):
+        """Test create_new_record raises error for automated accounts."""
+        mock_person_info = PersonInfo(
+            first_name="No Reply",
+            last_name="",
+            email="noreply@example.com",
+            source=SourceType.EMAILS
         )
-        expected = {
-            "first_name": "John",
-            "last_name": "",
-            "email": "john@example.com",
-            "source": "gmail",
+        
+        with patch.object(self.service, "_search_explicit_sources", return_value=mock_person_info):
+            with patch.object(self.service, "_is_real_person", return_value=False):
+                with pytest.raises(ValueError, match="appears to be automated"):
+                    self.service.create_new_record("noreply@example.com")
+
+    def test_create_new_record_existing_person_same_email(self):
+        """Test create_new_record returns existing person with same email and name."""
+        mock_person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        
+        existing_person = Mock(spec=PersonPage)
+        existing_person.full_name = "John Doe"
+        
+        with patch.object(self.service, "_search_explicit_sources", return_value=mock_person_info):
+            with patch.object(self.service, "_is_real_person", return_value=True):
+                with patch.object(self.service, "_get_existing_person_by_email", return_value=existing_person):
+                    with patch.object(self.service, "_validate_name_consistency"):
+                        result = self.service.create_new_record("john@example.com")
+                        assert result is existing_person
+
+    def test_search_people_api(self):
+        """Test _search_people_api returns person info."""
+        mock_api_result = {
+            "person": {
+                "names": [{"displayName": "John Doe"}],
+                "emailAddresses": [{"value": "john@example.com"}]
+            }
         }
-        assert result == expected
+        
+        self.mock_api_client.search_contacts.return_value = [mock_api_result]
+        
+        with patch.object(self.service, "_matches_identifier", return_value=True):
+            result = self.service._search_people_api("john@example.com")
+            
+            assert result is not None
+            assert result["first_name"] == "John"
+            assert result["last_name"] == "Doe" 
+            assert result["email"] == "john@example.com"
+            assert result["source"] == SourceType.PEOPLE_API
 
-    def test_generate_person_id(self):
-        """Test _generate_person_id generates consistent IDs."""
-        id1 = self.service._generate_person_id("test@example.com")
-        id2 = self.service._generate_person_id("test@example.com")
-        assert id1 == id2
-        assert len(id1) == 32  # Full MD5 hash
-
-        # Different emails should generate different IDs
-        id3 = self.service._generate_person_id("other@example.com")
-        assert id1 != id3
-
-    def test_store_and_create_page(self):
-        """Test _store_and_create_page creates and stores person page."""
-        person_info = {
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john@example.com",
-            "source": "google_people",
+    def test_search_emails(self):
+        """Test _search_emails returns person info."""
+        mock_message = {"id": "123"}
+        mock_message_data = {
+            "payload": {
+                "headers": [
+                    {"name": "From", "value": "John Doe <john@example.com>"}
+                ]
+            }
         }
+        
+        self.mock_api_client.search_messages.return_value = ([mock_message], None)
+        self.mock_api_client.get_message.return_value = mock_message_data
+        
+        with patch.object(self.service, "_matches_identifier", return_value=True):
+            result = self.service._search_emails("john@example.com")
+            
+            assert result is not None
+            assert result["first_name"] == "John"
+            assert result["last_name"] == "Doe"
+            assert result["email"] == "john@example.com"
+            assert result["source"] == SourceType.EMAILS
 
-        # Mock page cache store_page method
+    def test_is_real_person_valid(self):
+        """Test _is_real_person returns True for valid person."""
+        person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john.doe@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        assert self.service._is_real_person(person_info) is True
+
+    def test_is_real_person_automated(self):
+        """Test _is_real_person returns False for automated accounts."""
+        person_info = PersonInfo(
+            first_name="No Reply",
+            last_name="",
+            email="noreply@example.com",
+            source=SourceType.EMAILS
+        )
+        assert self.service._is_real_person(person_info) is False
+
+    def test_validate_name_consistency_same_names(self):
+        """Test _validate_name_consistency passes for same names."""
+        existing_person = Mock(spec=PersonPage)
+        existing_person.full_name = "John Doe"
+        
+        person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        
+        # Should not raise exception
+        self.service._validate_name_consistency(existing_person, person_info)
+
+    def test_validate_name_consistency_different_names(self):
+        """Test _validate_name_consistency raises error for different names."""
+        existing_person = Mock(spec=PersonPage)
+        existing_person.full_name = "Jane Smith"
+        
+        person_info = PersonInfo(
+            first_name="John", 
+            last_name="Doe",
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        
+        with pytest.raises(ValueError, match="Name divergence detected"):
+            self.service._validate_name_consistency(existing_person, person_info)
+
+    def test_matches_identifier_email(self):
+        """Test _matches_identifier for email identifiers."""
+        person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        
+        assert self.service._matches_identifier(person_info, "john@example.com") is True
+        assert self.service._matches_identifier(person_info, "other@example.com") is False
+
+    def test_matches_identifier_name(self):
+        """Test _matches_identifier for name identifiers."""
+        person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe", 
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+        
+        assert self.service._matches_identifier(person_info, "John") is True
+        assert self.service._matches_identifier(person_info, "John Doe") is True
+        assert self.service._matches_identifier(person_info, "Jane") is False
+
+    def test_create_and_store_person(self):
+        """Test _create_and_store_person creates PersonPage with source_enum."""
+        person_info = PersonInfo(
+            first_name="John",
+            last_name="Doe",
+            email="john@example.com",
+            source=SourceType.PEOPLE_API
+        )
+
         self.mock_page_cache.store_page = Mock()
 
-        result = self.service._store_and_create_page(person_info)
+        result = self.service._create_and_store_person(person_info)
 
-        # Verify PersonPage creation
         assert isinstance(result, PersonPage)
         assert result.first_name == "John"
         assert result.last_name == "Doe"
         assert result.email == "john@example.com"
-
-        # Verify page was stored in cache
+        assert result.source_enum == SourceType.PEOPLE_API
         self.mock_page_cache.store_page.assert_called_once_with(result)
 
-    def test_name_property(self):
-        """Test name property returns correct service name."""
-        assert self.service.name == "people"
+    def test_toolkit_get_person_record(self):
+        """Test toolkit get_person_record method."""
+        toolkit = self.service.toolkit
+        mock_person = Mock(spec=PersonPage)
+        
+        with patch.object(self.service, "get_person_record", return_value=mock_person):
+            result = toolkit.get_person_record("test@example.com")
+            assert result is mock_person
+
+    def test_toolkit_get_person_by_email(self):
+        """Test toolkit get_person_by_email method."""
+        toolkit = self.service.toolkit
+        mock_person = Mock(spec=PersonPage)
+        
+        with patch.object(self.service, "_get_existing_person_by_email", return_value=mock_person):
+            result = toolkit.get_person_by_email("test@example.com")
+            assert result is mock_person
