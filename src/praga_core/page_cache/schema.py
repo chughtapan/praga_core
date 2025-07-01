@@ -11,12 +11,13 @@ from sqlalchemy import (
     Boolean,
     Column,
     Float,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
 )
-from sqlalchemy.orm.decl_api import declarative_base
+from sqlalchemy.orm.decl_api import DeclarativeBase
 
 from ..types import Page, PageURI
 
@@ -25,12 +26,39 @@ logger = logging.getLogger(__name__)
 # TypeVar for generic Page type support
 P = TypeVar("P", bound=Page)
 
+
 # SQLAlchemy declarative base for table definitions
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
 
 # Global registry to reuse table classes across PageCache instances
 # This prevents SQLAlchemy warnings about duplicate table definitions
 _TABLE_REGISTRY: Dict[str, Any] = {}
+
+
+class PageRelationships(Base):
+    """Table for storing page relationships for efficient provenance tracking.
+
+    This table directly stores parent-child relationships between pages,
+    allowing for efficient queries without scanning all page tables.
+    """
+
+    __tablename__ = "page_relationships"
+
+    # Composite primary key of source and relationship type
+    source_uri = Column(String, primary_key=True)
+    relationship_type = Column(String, primary_key=True, default="parent")
+    target_uri = Column(String, nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index("idx_relationships_target", "target_uri"),
+        Index("idx_relationships_source", "source_uri"),
+    )
 
 
 def get_base_type(field_type: Any) -> Any:
@@ -59,6 +87,7 @@ def get_base_type(field_type: Any) -> Any:
     # Handle Annotated types (extract the actual type)
     try:
         from typing import _AnnotatedAlias  # type: ignore
+
         if isinstance(field_type, _AnnotatedAlias):
             # Get the first argument which is the actual type
             args = get_args(field_type)
@@ -67,11 +96,14 @@ def get_base_type(field_type: Any) -> Any:
     except ImportError:
         # For older Python versions, try another approach
         pass
-    
+
     # Alternative check for Annotated types
-    if hasattr(field_type, '__origin__') and getattr(field_type, '__origin__', None) is not None:
-        origin_name = getattr(field_type.__origin__, '_name', None)
-        if origin_name == 'Annotated':
+    if (
+        hasattr(field_type, "__origin__")
+        and getattr(field_type, "__origin__", None) is not None
+    ):
+        origin_name = getattr(field_type.__origin__, "_name", None)
+        if origin_name == "Annotated":
             args = get_args(field_type)
             if args:
                 return get_base_type(args[0])

@@ -1,18 +1,23 @@
 """Core PageCache implementation."""
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, cast
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.sql.schema import Table
 
 from ..types import Page, PageURI
-from .exceptions import ProvenanceError
 from .provenance import ProvenanceTracker
-from .schema import Base, create_page_table, get_table_registry, clear_table_registry
+from .schema import (
+    Base,
+    PageRelationships,
+    clear_table_registry,
+    create_page_table,
+    get_table_registry,
+)
 from .serialization import convert_page_uris_for_storage, convert_page_uris_from_storage
 
 logger = logging.getLogger(__name__)
@@ -48,7 +53,7 @@ class PageCache:
             UserPage,
             lambda t: t.email.like("%@company.com")
         )
-        
+
         # Store with provenance tracking
         chunk = ChunkPage(uri=PageURI(...), content="...")
         cache.store_page(chunk, parent_uri=header.uri)
@@ -65,6 +70,7 @@ class PageCache:
         engine_args = {}
         if url.startswith("postgresql"):
             from sqlalchemy.pool import NullPool
+
             engine_args["poolclass"] = NullPool
 
         self._engine = create_engine(url, **engine_args)
@@ -77,6 +83,13 @@ class PageCache:
 
         # Initialize provenance tracker
         self._provenance = ProvenanceTracker(self)
+
+        # Ensure relationships table exists
+        Base.metadata.create_all(
+            self.engine,
+            tables=[cast(Table, PageRelationships.__table__)],
+            checkfirst=True,
+        )
 
         # Reset database if requested
         if drop_previous:
@@ -112,7 +125,7 @@ class PageCache:
         self._table_mapping[type_name] = table_class.__tablename__
 
         # Create the table in the database if it doesn't exist
-        table_class.__table__.create(self.engine, checkfirst=True)
+        table_class.metadata.create_all(self.engine, checkfirst=True)
 
         # Mark as registered in this instance
         self._registered_types.add(type_name)
@@ -140,11 +153,11 @@ class PageCache:
         """
         # Use provided parent_uri or fall back to page's parent_uri
         effective_parent_uri = parent_uri or page.parent_uri
-        
+
         # If we have a parent URI, perform provenance pre-checks
         if effective_parent_uri is not None:
             self._provenance.validate_provenance(page, effective_parent_uri)
-            
+
             # Update the page's parent_uri to the effective value
             if parent_uri is not None:
                 page.parent_uri = parent_uri
@@ -161,16 +174,12 @@ class PageCache:
             existing = session.query(table_class).filter_by(uri=str(page.uri)).first()
 
             if existing:
-                # Update existing page
-                for field_name in page.__class__.model_fields:
-                    if field_name not in ("uri",):
-                        value = getattr(page, field_name)
-                        # Convert PageURI objects to strings
-                        converted_value = convert_page_uris_for_storage(value)
-                        setattr(existing, field_name, converted_value)
-                existing.updated_at = datetime.now(timezone.utc)
-                session.commit()
-                return False
+                # Pages are immutable - do not allow updates
+                from .exceptions import PageCacheError
+
+                raise PageCacheError(
+                    f"Page with URI {page.uri} already exists and cannot be updated"
+                )
             else:
                 # Create new page record
                 page_data = {"uri": str(page.uri)}
@@ -182,6 +191,16 @@ class PageCache:
 
                 page_entity = table_class(**page_data)
                 session.add(page_entity)
+
+                # Store relationship if parent_uri exists
+                if effective_parent_uri is not None:
+                    relationship = PageRelationships(
+                        source_uri=str(page.uri),
+                        relationship_type="parent",
+                        target_uri=str(effective_parent_uri),
+                    )
+                    session.add(relationship)
+
                 try:
                     session.commit()
                     return True
@@ -191,25 +210,27 @@ class PageCache:
 
     def get_page_by_uri_any_type(self, uri: PageURI) -> Optional[Page]:
         """Get a page by URI regardless of its type.
-        
+
         Args:
             uri: The URI to look up
-            
+
         Returns:
             Page instance if found, None otherwise
         """
         table_registry = get_table_registry()
-        
+
         # Check all registered page types
         for page_type_name in self._registered_types:
-            if (page_type_name in table_registry and 
-                page_type_name in self._page_classes):
+            if (
+                page_type_name in table_registry
+                and page_type_name in self._page_classes
+            ):
                 table_class = table_registry[page_type_name]
                 page_class = self._page_classes[page_type_name]
-                
+
                 with self.get_session() as session:
                     entity = session.query(table_class).filter_by(uri=str(uri)).first()
-                    
+
                     if entity:
                         # Convert database entity back to Page instance
                         page_data = {"uri": PageURI.parse(entity.uri)}
@@ -237,7 +258,7 @@ class PageCache:
         """
         page_type_name = page_type.__name__
         table_registry = get_table_registry()
-        
+
         if page_type_name not in table_registry:
             return None
 
@@ -301,7 +322,7 @@ class PageCache:
         """
         page_type_name = page_type.__name__
         table_registry = get_table_registry()
-        
+
         if page_type_name not in table_registry:
             return []
 
@@ -362,7 +383,7 @@ class PageCache:
         """
         page_type_name = page_type.__name__
         table_registry = get_table_registry()
-        
+
         if page_type_name not in table_registry:
             raise ValueError(f"Page type {page_type_name} not registered")
         return table_registry[page_type_name]
@@ -372,7 +393,12 @@ class PageCache:
         """Validate provenance tracking pre-checks."""
         self._provenance.validate_provenance(page, parent_uri)
 
-    def _check_for_cycles(self, child_uri: PageURI, parent_uri: PageURI, visited: Optional[set] = None) -> None:
+    def _check_for_cycles(
+        self,
+        child_uri: PageURI,
+        parent_uri: PageURI,
+        visited: Optional[set[PageURI]] = None,
+    ) -> None:
         """Check if adding a parent-child relationship would create a cycle."""
         self._provenance.check_for_cycles(child_uri, parent_uri, visited)
 

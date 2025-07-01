@@ -3,4 +3,7 @@
 
 class ProvenanceError(Exception):
     """Exception raised for provenance tracking violations."""
-    pass
+
+
+class PageCacheError(Exception):
+    """Exception raised for general page cache errors."""

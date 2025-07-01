@@ -6,6 +6,6 @@ provenance tracking support.
 """
 
 from .core import PageCache
-from .exceptions import ProvenanceError
+from .exceptions import PageCacheError, ProvenanceError
 
-__all__ = ["PageCache", "ProvenanceError"]
+__all__ = ["PageCache", "PageCacheError", "ProvenanceError"]
