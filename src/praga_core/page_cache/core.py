@@ -107,6 +107,29 @@ class PageCache:
 
         logger.debug("Reset database and cleared all registries")
 
+    def _convert_entity_to_page(self, entity: Any, page_class: Type[P]) -> P:
+        """Convert a database entity back to a Page instance.
+
+        Args:
+            entity: The SQLAlchemy entity from the database
+            page_class: The Page class to convert to
+
+        Returns:
+            Page instance of the specified type
+        """
+        # Convert database entity back to Page instance
+        page_data = {"uri": PageURI.parse(entity.uri)}
+        for field_name, field_info in page_class.model_fields.items():
+            if field_name not in ("uri",):
+                value = getattr(entity, field_name)
+                # Convert strings back to PageURI objects
+                converted_value = convert_page_uris_from_storage(
+                    value, field_info.annotation
+                )
+                page_data[field_name] = converted_value
+
+        return page_class(**page_data)
+
     def register_page_type(self, page_type: Type[P]) -> None:
         """Register a page type for caching.
 
@@ -232,18 +255,7 @@ class PageCache:
                     entity = session.query(table_class).filter_by(uri=str(uri)).first()
 
                     if entity:
-                        # Convert database entity back to Page instance
-                        page_data = {"uri": PageURI.parse(entity.uri)}
-                        for field_name, field_info in page_class.model_fields.items():
-                            if field_name not in ("uri",):
-                                value = getattr(entity, field_name)
-                                # Convert strings back to PageURI objects
-                                converted_value = convert_page_uris_from_storage(
-                                    value, field_info.annotation
-                                )
-                                page_data[field_name] = converted_value
-
-                        return page_class(**page_data)
+                        return self._convert_entity_to_page(entity, page_class)
         return None
 
     def get_page(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
@@ -268,18 +280,7 @@ class PageCache:
             entity = session.query(table_class).filter_by(uri=str(uri)).first()
 
             if entity:
-                # Convert database entity back to Page instance
-                page_data = {"uri": PageURI.parse(entity.uri)}
-                for field_name, field_info in page_type.model_fields.items():
-                    if field_name not in ("uri",):
-                        value = getattr(entity, field_name)
-                        # Convert strings back to PageURI objects
-                        converted_value = convert_page_uris_from_storage(
-                            value, field_info.annotation
-                        )
-                        page_data[field_name] = converted_value
-
-                return page_type(**page_data)
+                return self._convert_entity_to_page(entity, page_type)
             return None
 
     def find_pages_by_attribute(
@@ -345,17 +346,7 @@ class PageCache:
 
             # Convert database entities back to Page instances
             for entity in entities:
-                page_data = {"uri": PageURI.parse(entity.uri)}
-                for field_name, field_info in page_type.model_fields.items():
-                    if field_name not in ("uri",):
-                        value = getattr(entity, field_name)
-                        # Convert strings back to PageURI objects
-                        converted_value = convert_page_uris_from_storage(
-                            value, field_info.annotation
-                        )
-                        page_data[field_name] = converted_value
-
-                results.append(page_type(**page_data))
+                results.append(self._convert_entity_to_page(entity, page_type))
 
             return results
 
