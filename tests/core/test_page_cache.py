@@ -1125,3 +1125,441 @@ class TestGoogleDocsPageURIs:
         assert len(results) == 3
         chunk_indices = {chunk.chunk_index for chunk in results}
         assert chunk_indices == {0, 1, 2}
+
+
+class TestProvenanceTracking:
+    """Test provenance tracking functionality."""
+
+    class EmailPage(Page):
+        """Test email page."""
+        
+        subject: str
+        content: str
+        sender: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = (len(self.subject) + len(self.content)) // 4
+
+    class ThreadPage(Page):
+        """Test email thread page."""
+        
+        title: str
+        message_count: int
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.title) // 4
+
+    class GoogleDocPage(Page):
+        """Test Google Docs page."""
+        
+        title: str
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = (len(self.title) + len(self.content)) // 4
+
+    class ChunkPage(Page):
+        """Test chunk page derived from Google Doc."""
+        
+        chunk_index: int
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_store_page_with_parent_uri_parameter(self, page_cache: PageCache) -> None:
+        """Test storing a page with parent_uri specified as parameter."""
+        # Store parent first
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child with parent_uri parameter
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="This is a test"
+        )
+        
+        result = page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+        assert result is True
+
+        # Verify parent_uri was set
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent_doc.uri
+
+    def test_store_page_with_parent_uri_on_page(self, page_cache: PageCache) -> None:
+        """Test storing a page with parent_uri set on the page instance."""
+        # Store parent first
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child with parent_uri on page
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="This is a test",
+            parent_uri=parent_doc.uri
+        )
+        
+        result = page_cache.store_page(chunk)
+        assert result is True
+
+        # Verify parent_uri was preserved
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent_doc.uri
+
+    def test_parent_uri_parameter_overrides_page_parent_uri(self, page_cache: PageCache) -> None:
+        """Test that parent_uri parameter overrides page's parent_uri."""
+        from praga_core import ProvenanceError
+        
+        # Store two potential parents
+        parent1 = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document 1",
+            content="Content 1"
+        )
+        parent2 = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc2", version=1),
+            title="Document 2", 
+            content="Content 2"
+        )
+        page_cache.store_page(parent1)
+        page_cache.store_page(parent2)
+
+        # Create child with parent_uri set to parent1
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk",
+            parent_uri=parent1.uri
+        )
+        
+        # Store with parent_uri parameter set to parent2 (should override)
+        result = page_cache.store_page(chunk, parent_uri=parent2.uri)
+        assert result is True
+
+        # Verify parent_uri was overridden
+        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        assert stored_chunk is not None
+        assert stored_chunk.parent_uri == parent2.uri
+
+    def test_store_page_no_parent_tracking(self, page_cache: PageCache) -> None:
+        """Test storing a page without any parent tracking (should work as before)."""
+        # Create email and thread without parent-child relationship
+        email = self.EmailPage(
+            uri=PageURI(root="test", type="email", id="email1", version=1),
+            subject="Test Email",
+            content="Test content",
+            sender="test@example.com"
+        )
+        
+        thread = self.ThreadPage(
+            uri=PageURI(root="test", type="thread", id="thread1", version=1),
+            title="Test Thread",
+            message_count=5
+        )
+        
+        result1 = page_cache.store_page(email)
+        result2 = page_cache.store_page(thread)
+        
+        assert result1 is True
+        assert result2 is True
+
+    def test_provenance_precheck_parent_not_exist(self, page_cache: PageCache) -> None:
+        """Test that storing fails when parent doesn't exist."""
+        from praga_core import ProvenanceError
+        
+        nonexistent_parent = PageURI(root="test", type="gdoc", id="nonexistent", version=1)
+        
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk"
+        )
+        
+        with pytest.raises(ProvenanceError, match="Parent page .* does not exist in cache"):
+            page_cache.store_page(chunk, parent_uri=nonexistent_parent)
+
+    def test_provenance_precheck_child_already_exists(self, page_cache: PageCache) -> None:
+        """Test that storing fails when child already exists."""
+        from praga_core import ProvenanceError
+        
+        # Store parent
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Test Document",
+            content="This is a test document"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child first time
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk"
+        )
+        page_cache.store_page(chunk)
+
+        # Try to store with parent relationship (should fail because child exists)
+        with pytest.raises(ProvenanceError, match="Child page .* already exists in cache"):
+            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_same_page_type(self, page_cache: PageCache) -> None:
+        """Test that storing fails when parent and child are same page type."""
+        from praga_core import ProvenanceError
+        
+        # Store parent doc
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Parent Document",
+            content="Parent content"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Try to store another doc as child (same type - should fail)
+        child_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc2", version=1),
+            title="Child Document",
+            content="Child content"
+        )
+        
+        with pytest.raises(ProvenanceError, match="Parent and child cannot be the same page type"):
+            page_cache.store_page(child_doc, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_parent_version_number(self, page_cache: PageCache) -> None:
+        """Test that storing fails when parent has invalid version number."""
+        from praga_core import ProvenanceError
+        
+        # Store parent with version 0 (should still be stored)
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=0),
+            title="Test Document",
+            content="This is a test document"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Try to use it as parent (should fail due to version 0)
+        chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
+            chunk_index=0,
+            content="Test chunk"
+        )
+        
+        with pytest.raises(ProvenanceError, match="Parent URI must have a fixed version number"):
+            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+
+    def test_provenance_precheck_cycle_detection(self, page_cache: PageCache) -> None:
+        """Test cycle detection in provenance relationships."""
+        from praga_core import ProvenanceError
+        
+        # Store grandparent doc
+        grandparent = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="grandparent", version=1),
+            title="Grandparent Document",
+            content="Grandparent content"
+        )
+        page_cache.store_page(grandparent)
+
+        # Store parent chunk
+        parent_chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="parent_chunk", version=1),
+            chunk_index=0,
+            content="Parent chunk",
+            parent_uri=grandparent.uri
+        )
+        page_cache.store_page(parent_chunk)
+
+        # Try to create a cycle by making grandparent a child of parent_chunk
+        cycle_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="cycle_doc", version=1),
+            title="Cycle Document",
+            content="This would create a cycle"
+        )
+        
+        # This should fail because it would create a cycle
+        with pytest.raises(ProvenanceError, match="would create a cycle"):
+            page_cache.store_page(cycle_doc, parent_uri=parent_chunk.uri)
+
+    def test_get_children(self, page_cache: PageCache) -> None:
+        """Test getting children of a parent page."""
+        # Store parent doc
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Parent Document",
+            content="Parent content"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store multiple chunks as children
+        chunks = []
+        for i in range(3):
+            chunk = self.ChunkPage(
+                uri=PageURI(root="test", type="chunk", id=f"chunk{i}", version=1),
+                chunk_index=i,
+                content=f"Chunk {i} content",
+                parent_uri=parent_doc.uri
+            )
+            page_cache.store_page(chunk)
+            chunks.append(chunk)
+
+        # Get children
+        children = page_cache.get_children(parent_doc.uri)
+        
+        assert len(children) == 3
+        child_uris = {child.uri for child in children}
+        expected_uris = {chunk.uri for chunk in chunks}
+        assert child_uris == expected_uris
+
+    def test_get_children_no_children(self, page_cache: PageCache) -> None:
+        """Test getting children when page has no children."""
+        # Store page without children
+        page = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document",
+            content="Content"
+        )
+        page_cache.store_page(page)
+
+        children = page_cache.get_children(page.uri)
+        assert len(children) == 0
+
+    def test_get_provenance_chain(self, page_cache: PageCache) -> None:
+        """Test getting the full provenance chain."""
+        # Store grandparent
+        grandparent = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="grandparent", version=1),
+            title="Grandparent Document",
+            content="Grandparent content"
+        )
+        page_cache.store_page(grandparent)
+
+        # Store parent with grandparent as parent
+        parent = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="parent", version=1),
+            chunk_index=0,
+            content="Parent chunk",
+            parent_uri=grandparent.uri
+        )
+        page_cache.store_page(parent)
+
+        # Store child with parent as parent
+        child = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="child", version=1),
+            chunk_index=1,
+            content="Child chunk",
+            parent_uri=parent.uri
+        )
+        page_cache.store_page(child)
+
+        # Get provenance chain for child
+        chain = page_cache.get_provenance_chain(child.uri)
+        
+        assert len(chain) == 3
+        assert chain[0].uri == grandparent.uri
+        assert chain[1].uri == parent.uri
+        assert chain[2].uri == child.uri
+
+    def test_get_provenance_chain_no_parent(self, page_cache: PageCache) -> None:
+        """Test getting provenance chain for page with no parent."""
+        # Store page without parent
+        page = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="doc1", version=1),
+            title="Document",
+            content="Content"
+        )
+        page_cache.store_page(page)
+
+        chain = page_cache.get_provenance_chain(page.uri)
+        
+        assert len(chain) == 1
+        assert chain[0].uri == page.uri
+
+    def test_get_provenance_chain_nonexistent_page(self, page_cache: PageCache) -> None:
+        """Test getting provenance chain for non-existent page."""
+        nonexistent_uri = PageURI(root="test", type="chunk", id="nonexistent", version=1)
+        
+        chain = page_cache.get_provenance_chain(nonexistent_uri)
+        assert len(chain) == 0
+
+    def test_example_google_docs_scenario(self, page_cache: PageCache) -> None:
+        """Test the Google Docs example scenario from the requirements."""
+        # Store the Google Doc
+        gdoc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="gdoc", id="my_doc", version=1),
+            title="My Google Document",
+            content="This is a long document that will be chunked."
+        )
+        page_cache.store_page(gdoc)
+
+        # Store chunks derived from the Google Doc
+        chunks = []
+        for i in range(3):
+            chunk = self.ChunkPage(
+                uri=PageURI(root="test", type="chunk", id=f"my_doc_chunk_{i}", version=1),
+                chunk_index=i,
+                content=f"Chunk {i} of the document",
+                parent_uri=gdoc.uri
+            )
+            page_cache.store_page(chunk)
+            chunks.append(chunk)
+
+        # Verify relationships
+        children = page_cache.get_children(gdoc.uri)
+        assert len(children) == 3
+
+        # Verify each chunk has the correct parent
+        for i, chunk in enumerate(chunks):
+            stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+            assert stored_chunk is not None
+            assert stored_chunk.parent_uri == gdoc.uri
+            assert stored_chunk.chunk_index == i
+
+    def test_example_email_thread_scenario(self, page_cache: PageCache) -> None:
+        """Test the email thread example scenario from the requirements."""
+        # Store emails and threads separately (no parent-child relationship)
+        emails = []
+        for i in range(3):
+            email = self.EmailPage(
+                uri=PageURI(root="test", type="email", id=f"email_{i}", version=1),
+                subject=f"Email Subject {i}",
+                content=f"Email content {i}",
+                sender=f"user{i}@example.com"
+            )
+            page_cache.store_page(email)
+            emails.append(email)
+
+        thread = self.ThreadPage(
+            uri=PageURI(root="test", type="thread", id="thread_1", version=1),
+            title="Email Thread",
+            message_count=len(emails)
+        )
+        page_cache.store_page(thread)
+
+        # Verify no parent-child relationships exist
+        for email in emails:
+            stored_email = page_cache.get_page(self.EmailPage, email.uri)
+            assert stored_email is not None
+            assert stored_email.parent_uri is None
+
+        stored_thread = page_cache.get_page(self.ThreadPage, thread.uri)
+        assert stored_thread is not None
+        assert stored_thread.parent_uri is None
+
+        # Verify no children relationships
+        assert len(page_cache.get_children(thread.uri)) == 0
+        for email in emails:
+            assert len(page_cache.get_children(email.uri)) == 0

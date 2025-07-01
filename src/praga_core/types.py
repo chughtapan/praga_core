@@ -126,6 +126,9 @@ class Page(BaseModel, ABC):
     uri: Annotated[PageURI, BeforeValidator(PageURI.parse)] = Field(
         description="Structured URI for the page"
     )
+    parent_uri: Optional[Annotated[PageURI, BeforeValidator(PageURI.parse)]] = Field(
+        None, description="Optional parent page URI for provenance tracking"
+    )
     _metadata: PageMetadata = PrivateAttr(
         default_factory=lambda: PageMetadata(token_count=None)
     )
