@@ -51,29 +51,29 @@ class PeopleService(ToolkitService):
 
         raise RuntimeError(f"Invalid request: Person {person_id} not found.")
 
-    def get_person_record(self, identifier: str) -> Optional[PersonPage]:
-        """Get person record by trying lookup first, then create if not found.
+    def get_person_records(self, identifier: str) -> List[PersonPage]:
+        """Get person records by trying lookup first, then create if not found.
         
         Args:
             identifier: Email address, full name, or first name to search for
             
         Returns:
-            PersonPage if found or created, None if not possible to create
+            List of PersonPage objects found or created, empty list if not possible to create
         """
         # First try to lookup existing record (search path - only uses page_cache)
-        existing_person = self.lookup_people(identifier)
-        if existing_person:
-            logger.debug(f"Found existing person record for: {identifier}")
-            return existing_person[0]  # Return first match
+        existing_people = self.lookup_people(identifier)
+        if existing_people:
+            logger.debug(f"Found existing person records for: {identifier}")
+            return existing_people
             
         # If not found, try to create new record (create path - uses all APIs)
         try:
-            new_person = self.create_person(identifier)
-            logger.info(f"Created new person record for: {identifier}")
-            return new_person[0] if new_person else None  # Return first created
+            new_people = self.create_person(identifier)
+            logger.info(f"Created new person records for: {identifier}")
+            return new_people
         except ValueError as e:
-            logger.warning(f"Could not create person record for '{identifier}': {e}")
-            return None
+            logger.warning(f"Could not create person records for '{identifier}': {e}")
+            return []
 
     def lookup_people(self, identifier: str) -> List[PersonPage]:
         """Lookup people by identifier (first name, full name, or email).
@@ -465,15 +465,14 @@ class PeopleToolkit(RetrieverToolkit):
 
     @tool()
     def get_or_create_person(self, identifier: str) -> List[PersonPage]:
-        """Get or create person record by email, full name, or first name.
+        """Get or create person records by email, full name, or first name.
         
-        Tries to lookup existing record first, then creates new record if not found.
+        Tries to lookup existing records first, then creates new records if not found.
         
         Args:
             identifier: Email address, full name, or first name to search for
             
         Returns:
-            List containing PersonPage if found or created, empty list if not possible
+            List of PersonPage objects found or created, empty list if not possible
         """
-        result = self.people_service.get_person_record(identifier)
-        return [result] if result else []
+        return self.people_service.get_person_records(identifier)

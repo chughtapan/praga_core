@@ -65,27 +65,27 @@ class TestPeopleService:
         with pytest.raises(RuntimeError, match="Invalid request: Person person123 not found"):
             self.service.handle_person_request("person123")
 
-    def test_get_person_record_existing(self):
-        """Test get_person_record returns existing person."""
-        mock_person = Mock(spec=PersonPage)
-        with patch.object(self.service, "lookup_people", return_value=[mock_person]):
-            result = self.service.get_person_record("test@example.com")
-            assert result is mock_person
+    def test_get_person_records_existing(self):
+        """Test get_person_records returns existing people."""
+        mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
+        with patch.object(self.service, "lookup_people", return_value=mock_people):
+            result = self.service.get_person_records("test@example.com")
+            assert result == mock_people
 
-    def test_get_person_record_create_new(self):
-        """Test get_person_record creates new person when not found."""
-        mock_person = Mock(spec=PersonPage)
+    def test_get_person_records_create_new(self):
+        """Test get_person_records creates new people when not found."""
+        mock_people = [Mock(spec=PersonPage)]
         with patch.object(self.service, "lookup_people", return_value=[]):
-            with patch.object(self.service, "create_person", return_value=[mock_person]):
-                result = self.service.get_person_record("test@example.com")
-                assert result is mock_person
+            with patch.object(self.service, "create_person", return_value=mock_people):
+                result = self.service.get_person_records("test@example.com")
+                assert result == mock_people
 
-    def test_get_person_record_creation_fails(self):
-        """Test get_person_record returns None when creation fails."""
+    def test_get_person_records_creation_fails(self):
+        """Test get_person_records returns empty list when creation fails."""
         with patch.object(self.service, "lookup_people", return_value=[]):
             with patch.object(self.service, "create_person", side_effect=ValueError("Not found")):
-                result = self.service.get_person_record("test@example.com")
-                assert result is None
+                result = self.service.get_person_records("test@example.com")
+                assert result == []
 
     def test_lookup_people_by_email(self):
         """Test lookup_people by email address (search path only)."""
@@ -338,12 +338,12 @@ class TestPeopleService:
     def test_toolkit_get_or_create_person(self):
         """Test toolkit get_or_create_person method."""
         toolkit = self.service.toolkit
-        mock_person = Mock(spec=PersonPage)
+        mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
         
-        with patch.object(self.service, "get_person_record", return_value=mock_person):
+        with patch.object(self.service, "get_person_records", return_value=mock_people):
             result = toolkit.get_or_create_person("test@example.com")
-            assert result == [mock_person]
+            assert result == mock_people
 
-        with patch.object(self.service, "get_person_record", return_value=None):
+        with patch.object(self.service, "get_person_records", return_value=[]):
             result = toolkit.get_or_create_person("test@example.com")
             assert result == []
