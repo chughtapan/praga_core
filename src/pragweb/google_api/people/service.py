@@ -7,7 +7,7 @@ from email.utils import parseaddr
 from typing import Any, Dict, List, Optional, TypedDict, Union
 
 from praga_core.agents import RetrieverToolkit, tool
-from praga_core.types import PageURI
+from praga_core.types import PageURI, DEFAULT_VERSION
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -55,7 +55,7 @@ class PeopleService(ToolkitService):
         page_cache = self.context.page_cache
 
         # Construct URI from person_id
-        person_uri = PageURI(root=self.context.root, type="person", id=person_id)
+        person_uri = PageURI(root=self.context.root, type="person", id=person_id, version=DEFAULT_VERSION)
         cached_person = page_cache.get_page(PersonPage, person_uri)
         if cached_person:
             logger.debug(f"Found existing person in cache: {person_id}")
@@ -506,7 +506,7 @@ class PeopleService(ToolkitService):
         person_id = self._generate_person_id(person_info["email"])
 
         # Create PersonPage
-        uri = PageURI(root=self.context.root, type="person", id=person_id)
+        uri = PageURI(root=self.context.root, type="person", id=person_id, version=DEFAULT_VERSION)
         person_page = PersonPage(
             uri=uri,
             first_name=person_info["first_name"],

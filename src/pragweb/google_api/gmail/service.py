@@ -6,7 +6,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.types import PageURI
+from praga_core.types import PageURI, DEFAULT_VERSION
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -92,7 +92,7 @@ class GmailService(ToolkitService):
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
         # Create URI and return complete document
-        uri = PageURI(root=self.context.root, type="email", id=email_id)
+        uri = PageURI(root=self.context.root, type="email", id=email_id, version=DEFAULT_VERSION)
         return EmailPage(
             uri=uri,
             message_id=email_id,
@@ -131,7 +131,7 @@ class GmailService(ToolkitService):
 
             # Create URI for this email
             email_uri = PageURI(
-                root=self.context.root, type="email", id=message["id"]
+                root=self.context.root, type="email", id=message["id"], version=DEFAULT_VERSION
             )
 
             # Create EmailSummary
@@ -151,7 +151,7 @@ class GmailService(ToolkitService):
 
         # Create URI and return complete thread document
         uri = PageURI(
-            root=self.context.root, type="email_thread", id=thread_id
+            root=self.context.root, type="email_thread", id=thread_id, version=DEFAULT_VERSION
         )
         return EmailThreadPage(
             uri=uri,
@@ -176,7 +176,7 @@ class GmailService(ToolkitService):
 
             # Convert to PageURIs
             uris = [
-                PageURI(root=self.context.root, type="email", id=msg["id"])
+                PageURI(root=self.context.root, type="email", id=msg["id"], version=DEFAULT_VERSION)
                 for msg in messages
             ]
 

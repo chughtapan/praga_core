@@ -6,7 +6,7 @@ and related classes with the new json_encoders configuration.
 
 import json
 
-from praga_core.types import PageReference, PageURI, SearchResponse, TextPage, LATEST_VERSION
+from praga_core.types import PageReference, PageURI, SearchResponse, TextPage, DEFAULT_VERSION
 
 
 class TestPageURIJSONSerialization:
@@ -25,64 +25,37 @@ class TestPageURIJSONSerialization:
         uri = PageURI(root="myserver", type="Document", id="abc", version=2)
         assert str(uri) == "myserver/Document:abc@2"
 
-    def test_page_uri_latest_version_serialization(self) -> None:
-        """Test that latest version PageURI serializes without version number."""
-        uri = PageURI(root="test", type="Email", id="123", version=LATEST_VERSION)
+    def test_page_uri_default_version_serialization(self) -> None:
+        """Test that default version PageURI serializes without version number."""
+        uri = PageURI(root="test", type="Email", id="123", version=DEFAULT_VERSION)
 
         serialized = uri.model_dump(mode="json")
         expected = "test/Email:123"
         assert serialized == expected
 
-    def test_page_uri_latest_version_string_representation(self) -> None:
-        """Test latest version PageURI string representation."""
-        uri = PageURI(root="myserver", type="Document", id="abc", version=LATEST_VERSION)
+    def test_page_uri_default_version_string_representation(self) -> None:
+        """Test default version PageURI string representation."""
+        uri = PageURI(root="myserver", type="Document", id="abc", version=DEFAULT_VERSION)
         assert str(uri) == "myserver/Document:abc"
 
-    def test_page_uri_latest_version_default(self) -> None:
-        """Test that PageURI defaults to latest version."""
+    def test_page_uri_default_version_default(self) -> None:
+        """Test that PageURI defaults to default version."""
         uri = PageURI(root="test", type="Email", id="123")
-        assert uri.version == LATEST_VERSION
-        assert uri.is_latest is True
+        assert uri.version == DEFAULT_VERSION
         assert str(uri) == "test/Email:123"
 
-    def test_page_uri_latest_version_parsing(self) -> None:
-        """Test parsing URI string without version defaults to latest."""
+    def test_page_uri_default_version_parsing(self) -> None:
+        """Test parsing URI string without version defaults to default version."""
         uri = PageURI.parse("test/Email:123")
-        assert uri.version == LATEST_VERSION
-        assert uri.is_latest is True
-
-    def test_page_uri_with_specific_version(self) -> None:
-        """Test creating PageURI with specific version from latest."""
-        latest_uri = PageURI(root="test", type="Email", id="123")
-        specific_uri = latest_uri.with_specific_version(5)
-        
-        assert specific_uri.version == 5
-        assert specific_uri.is_latest is False
-        assert str(specific_uri) == "test/Email:123@5"
-
-    def test_page_uri_as_latest(self) -> None:
-        """Test converting PageURI to latest version."""
-        versioned_uri = PageURI(root="test", type="Email", id="123", version=5)
-        latest_uri = versioned_uri.as_latest()
-        
-        assert latest_uri.version == LATEST_VERSION
-        assert latest_uri.is_latest is True
-        assert str(latest_uri) == "test/Email:123"
+        assert uri.version == DEFAULT_VERSION
 
     def test_page_uri_version_validation(self) -> None:
         """Test that invalid version numbers are rejected."""
         import pytest
         
-        # Test negative version (other than -1)
-        with pytest.raises(ValueError, match="Version must be non-negative or -1 for latest"):
-            PageURI(root="test", type="Email", id="123", version=-2)
-        
-        # Test that with_specific_version rejects invalid versions
-        uri = PageURI(root="test", type="Email", id="123")
-        with pytest.raises(ValueError, match="Specific version must be positive"):
-            uri.with_specific_version(0)
-        with pytest.raises(ValueError, match="Specific version must be positive"):
-            uri.with_specific_version(-1)
+        # Test negative version
+        with pytest.raises(ValueError, match="Version must be non-negative"):
+            PageURI(root="test", type="Email", id="123", version=-1)
 
 
 class TestPageJSONSerialization:

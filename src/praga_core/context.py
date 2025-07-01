@@ -4,7 +4,7 @@ import logging
 from typing import Callable, Dict, List, Optional, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import Page, PageReference, PageURI, SearchResponse, LATEST_VERSION
+from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 from .page_cache import PageCache
 from .service import Service
@@ -54,23 +54,17 @@ class ServerContext:
         """Get all registered services."""
         return self._services.copy()
 
-    def create_page_uri(self, type_name: str, id: str, version: Optional[int] = None) -> PageURI:
+    def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
         """Create a PageURI with this context's root.
 
         Args:
             type_name: Type name for the page
             id: Unique identifier
-            version: Version number (defaults to latest, except for Google Docs which defaults to 1)
+            version: Version number (defaults to 1)
 
         Returns:
             PageURI object
         """
-        if version is None:
-            # Special handling for Google Docs to maintain existing behavior
-            if type_name in ("gdoc_header", "gdoc_chunk"):
-                version = 1
-            else:
-                version = LATEST_VERSION
         return PageURI(root=self.root, type=type_name, id=id, version=version)
 
     def handler(self, page_type: str) -> Callable[[Callable[..., T]], Callable[..., T]]:

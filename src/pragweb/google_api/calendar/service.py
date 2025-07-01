@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.types import PageURI
+from praga_core.types import PageURI, DEFAULT_VERSION
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -68,7 +68,7 @@ class CalendarService(ToolkitService):
         permalink = f"https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
 
         # 7. Create URI and return complete document
-        uri = PageURI(root=self.context.root, type=self.name, id=event_id)
+        uri = PageURI(root=self.context.root, type=self.name, id=event_id, version=DEFAULT_VERSION)
         return CalendarEventPage(
             uri=uri,
             event_id=event_id,
@@ -102,7 +102,7 @@ class CalendarService(ToolkitService):
 
             # Convert to PageURIs
             uris = [
-                PageURI(root=self.context.root, type=self.name, id=event["id"])
+                PageURI(root=self.context.root, type=self.name, id=event["id"], version=DEFAULT_VERSION)
                 for event in events
             ]
 
