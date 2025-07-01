@@ -60,31 +60,26 @@ class PeopleService(ToolkitService):
         Returns:
             PersonPage if found or created, None if not possible to create
         """
-        # First try to lookup existing record
-        existing_person = self.lookup_existing_record(identifier)
+        # First try to lookup existing record (search path - only uses page_cache)
+        existing_person = self.lookup_people(identifier)
         if existing_person:
             logger.debug(f"Found existing person record for: {identifier}")
-            return existing_person
+            return existing_person[0]  # Return first match
             
-        # If not found, try to create new record
+        # If not found, try to create new record (create path - uses all APIs)
         try:
-            new_person = self.create_new_record(identifier)
+            new_person = self.create_person(identifier)
             logger.info(f"Created new person record for: {identifier}")
-            return new_person
+            return new_person[0] if new_person else None  # Return first created
         except ValueError as e:
             logger.warning(f"Could not create person record for '{identifier}': {e}")
             return None
 
-    def lookup_existing_record(self, identifier: str) -> Optional[PersonPage]:
-        """Lookup existing person record by identifier.
+    def lookup_people(self, identifier: str) -> List[PersonPage]:
+        """Lookup people by identifier (first name, full name, or email).
         
-        Searches by email (exact), full name (partial), then first name (partial).
-        
-        Args:
-            identifier: Email address, full name, or first name
-            
-        Returns:
-            First matching PersonPage or None if not found
+        SEARCH PATH: Only searches the page_cache, does not create new records.
+        Returns all matching people, not just the first match.
         """
         page_cache = self.context.page_cache
         identifier_lower = identifier.lower().strip()
@@ -94,166 +89,173 @@ class PeopleService(ToolkitService):
             email_matches = page_cache.find_pages_by_attribute(
                 PersonPage, lambda t: t.email == identifier_lower
             )
-            if email_matches:
-                return email_matches[0]
+            return email_matches
 
         # Try full name matches (partial/case-insensitive)
         full_name_matches = page_cache.find_pages_by_attribute(
             PersonPage, lambda t: t.full_name.ilike(f"%{identifier_lower}%")
         )
         if full_name_matches:
-            return full_name_matches[0]
+            return full_name_matches
 
-        # Try first name matches
+        # Try first name matches (if not already found)
         first_name_matches = page_cache.find_pages_by_attribute(
             PersonPage, lambda t: t.first_name.ilike(f"%{identifier_lower}%")
         )
-        if first_name_matches:
-            return first_name_matches[0]
+        return first_name_matches
 
-        return None
-
-    def create_new_record(self, identifier: str) -> PersonPage:
-        """Create new person record from available sources.
+    def create_person(self, identifier: str) -> List[PersonPage]:
+        """Create person pages for a given identifier.
         
-        Searches sources in priority order: People API, Directory API, then Emails.
-        Only creates the specifically requested person, not additional found persons.
-        
-        Args:
-            identifier: Email address, full name, or first name
-            
-        Returns:
-            PersonPage for the created person
-            
-        Raises:
-            ValueError: If no valid person data can be found in any source
+        CREATE PATH: May return multiple people if multiple email addresses are found for the same name.
+        Raises ValueError if no people can be found in any API source.
         """
-        # Search explicit sources first (People API, Directory API)
-        person_info = self._search_explicit_sources(identifier)
-        
-        # If not found in explicit sources, search implicit sources (Emails)
-        if not person_info:
-            person_info = self._search_implicit_sources(identifier)
-            
-        if not person_info:
+        # First check if person already exists (avoid duplicate work)
+        existing_people = self.lookup_people(identifier)
+        if existing_people:
+            logger.debug(f"Person already exists for identifier: {identifier}")
+            return existing_people
+
+        # Try to extract information from various API sources
+        all_person_infos: List[Dict[str, Any]] = []
+
+        # Google People API might return multiple matches
+        people_infos = self._extract_people_info_from_google_people(identifier)
+        all_person_infos.extend(people_infos)
+
+        # Directory API might find multiple matches
+        directory_infos = self._extract_people_from_directory(identifier)
+        all_person_infos.extend(directory_infos)
+
+        # Gmail might find multiple email addresses
+        gmail_infos = self._extract_people_from_gmail_contacts(identifier)
+        all_person_infos.extend(gmail_infos)
+
+        # Filter out non-real persons and remove duplicates based on email address
+        unique_person_infos: List[Union[Dict[str, Any], Dict[str, PersonPage]]] = []
+        seen_emails = set()
+
+        for person_info in all_person_infos:
+            if not person_info["email"]:  # Skip if no email
+                continue
+
+            email = person_info["email"].lower()
+
+            # Skip if we've already seen this email
+            if email in seen_emails:
+                continue
+
+            # Filter out non-real persons
+            if not self._is_real_person(person_info):
+                logger.debug(f"Skipping non-real person: {person_info['email']}")
+                continue
+
+            # Check for existing person with this email but different name
+            existing_person_with_email = self._get_existing_person_by_email(email)
+            if existing_person_with_email:
+                # Check for name divergence
+                existing_full_name = (
+                    existing_person_with_email.full_name.lower().strip()
+                    if existing_person_with_email.full_name
+                    else ""
+                )
+                new_full_name = f"{person_info['first_name']} {person_info['last_name']}".lower().strip()
+
+                if existing_full_name != new_full_name:
+                    raise ValueError(
+                        f"Name divergence detected for email {email}: "
+                        f"existing='{existing_person_with_email.full_name}' vs new='{new_full_name.title()}'"
+                    )
+
+                # Same email, same name - return existing person
+                logger.debug(f"Person with email {email} already exists with same name")
+                unique_person_infos.append({"existing": existing_person_with_email})
+            else:
+                seen_emails.add(email)
+                unique_person_infos.append(person_info)
+
+        # If we can't find any real people, raise an error
+        if not unique_person_infos:
             raise ValueError(
-                f"Could not find person data for '{identifier}' in any source "
-                f"(People API, Directory API, or Emails)"
+                f"Could not find any real people for '{identifier}' in any data source "
+                f"(Google People, Directory, or Gmail). Cannot create person without valid data."
             )
-            
-        # Validate person data
-        if not self._is_real_person(person_info):
-            raise ValueError(f"Person data for '{identifier}' appears to be automated/non-human")
-            
-        # Check for existing person with same email but different name
-        existing_person = self._get_existing_person_by_email(person_info["email"])
-        if existing_person:
-            self._validate_name_consistency(existing_person, person_info)
-            return existing_person
-            
-        # Create and store new person
-        return self._create_and_store_person(person_info)
 
-    def _search_explicit_sources(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Search explicit sources (People API, Directory API) for person information.
-        
-        Args:
-            identifier: Search identifier
-            
-        Returns:
-            Person info dict if found, None otherwise
-        """
-        # Search People API first
-        person_info = self._search_people_api(identifier)
-        if person_info:
-            return person_info
-            
-        # Search Directory API second
-        person_info = self._search_directory_api(identifier)
-        if person_info:
-            return person_info
-            
-        return None
+        # Store all found people in database and return PersonPages
+        created_people: List[PersonPage] = []
+        for person_info in unique_person_infos:
+            if "existing" in person_info:
+                # Return existing person
+                created_people.append(person_info["existing"])  # type: ignore
+            else:
+                # Create new person
+                person_page = self._store_and_create_page(person_info)
+                created_people.append(person_page)
 
-    def _search_implicit_sources(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Search implicit sources (Emails) for person information.
-        
-        Args:
-            identifier: Search identifier
-            
-        Returns:
-            Person info dict if found, None otherwise
-        """
-        return self._search_emails(identifier)
+        logger.info(
+            f"Created/found {len(created_people)} people for identifier '{identifier}'"
+        )
+        return created_people
 
-    def _search_people_api(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Search Google People API for person information."""
+    def _extract_people_info_from_google_people(self, identifier: str) -> List[Dict[str, Any]]:
+        """Extract people information from Google People API."""
         try:
             results = self.api_client.search_contacts(identifier)
-            
+
+            people_infos = []
             for result in results:
                 person_info = self._extract_person_from_people_api(result, identifier)
-                if person_info and self._matches_identifier(person_info, identifier):
-                    return person_info
-                    
-            return None
-        except Exception as e:
-            logger.debug(f"Error searching People API: {e}")
-            return None
+                if person_info:
+                    people_infos.append(person_info)
 
-    def _search_directory_api(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Search Google Directory API for person information."""
+            return people_infos
+        except Exception as e:
+            logger.debug(f"Error extracting people from Google People API: {e}")
+            return []
+
+    def _extract_people_from_directory(self, identifier: str) -> List[Dict[str, Any]]:
+        """Extract people from Directory using People API searchDirectoryPeople."""
         try:
-            # Use Directory API to search for users in the organization
-            directory_service = self.api_client.auth_manager.get_admin_service()
+            # Use People API's searchDirectoryPeople endpoint
+            people_service = self.api_client._people
             
-            # Search by email if identifier looks like email
-            if self._is_email_address(identifier):
-                try:
-                    user = directory_service.users().get(userKey=identifier).execute()
-                    return self._extract_person_from_directory_user(user, SourceType.DIRECTORY_API)
-                except Exception:
-                    # User not found by exact email, continue to name search
-                    pass
-            
-            # Search by name
-            search_query = f"name:{identifier}"
-            users_result = directory_service.users().list(
-                domain=self._get_organization_domain(),
-                query=search_query,
-                maxResults=10
+            results = people_service.people().searchDirectoryPeople(
+                query=identifier,
+                readMask="names,emailAddresses",
+                sources=["DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE"]
             ).execute()
-            
-            users = users_result.get('users', [])
-            for user in users:
-                person_info = self._extract_person_from_directory_user(user, SourceType.DIRECTORY_API)
-                if person_info and self._matches_identifier(person_info, identifier):
-                    return person_info
-                    
-            return None
-        except Exception as e:
-            logger.debug(f"Error searching Directory API: {e}")
-            return None
 
-    def _search_emails(self, identifier: str) -> Optional[Dict[str, Any]]:
-        """Search emails for person information."""
+            people_infos = []
+            for person in results.get("people", []):
+                person_info = self._extract_person_from_directory_result(person)
+                if person_info:
+                    people_infos.append(person_info)
+
+            return people_infos
+        except Exception as e:
+            logger.debug(f"Error extracting people from Directory API: {e}")
+            return []
+
+    def _extract_people_from_gmail_contacts(self, identifier: str) -> List[Dict[str, Any]]:
+        """Extract people from Gmail contacts by searching for identifier."""
         try:
-            # Search Gmail messages for the identifier
             messages, _ = self.api_client.search_messages(
                 f"from:{identifier} OR to:{identifier}"
             )
-            
-            # Look through recent messages for person information
-            for message in messages[:5]:  # Limit search to avoid creating too many records
+
+            people_infos = []
+            for message in messages[:10]:  # Limit to first 10 messages
                 message_data = self.api_client.get_message(message["id"])
-                person_info = self._extract_person_from_email(message_data, identifier)
-                if person_info and self._matches_identifier(person_info, identifier):
-                    return person_info
-                    
-            return None
+                person_info = self._extract_person_from_gmail_message(
+                    message_data, identifier
+                )
+                if person_info:
+                    people_infos.append(person_info)
+
+            return people_infos
         except Exception as e:
-            logger.debug(f"Error searching emails: {e}")
-            return None
+            logger.debug(f"Error extracting people from Gmail: {e}")
+            return []
 
     def _extract_person_from_people_api(self, person: Dict[str, Any], identifier: str) -> Optional[Dict[str, Any]]:
         """Extract person information from People API result."""
@@ -283,22 +285,34 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error extracting from People API: {e}")
             return None
 
-    def _extract_person_from_directory_user(self, user: Dict[str, Any], source: SourceType) -> Dict[str, Any]:
-        """Extract person information from Directory API user object."""
-        primary_email = user.get("primaryEmail", "")
-        name_obj = user.get("name", {})
-        display_name = name_obj.get("fullName", "")
-        
-        # Fallback to first + last name if no display name
-        if not display_name:
-            first_name = name_obj.get("givenName", "")
-            last_name = name_obj.get("familyName", "")
-            display_name = f"{first_name} {last_name}".strip()
-        
-        return self._parse_name_and_email(display_name, primary_email, source)
+    def _extract_person_from_directory_result(self, person: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract person information from Directory API search result."""
+        try:
+            # Get primary name
+            names = person.get("names", [])
+            if not names:
+                return None
+                
+            primary_name = names[0]
+            display_name = primary_name.get("displayName", "")
+            
+            # Get primary email
+            emails = person.get("emailAddresses", [])
+            if not emails:
+                return None
+                
+            primary_email = emails[0].get("value", "")
+            if not primary_email:
+                return None
+                
+            return self._parse_name_and_email(display_name, primary_email, SourceType.DIRECTORY_API)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting from Directory API: {e}")
+            return None
 
-    def _extract_person_from_email(self, message_data: Dict[str, Any], identifier: str) -> Optional[Dict[str, Any]]:
-        """Extract person information from email message headers."""
+    def _extract_person_from_gmail_message(self, message_data: Dict[str, Any], identifier: str) -> Optional[Dict[str, Any]]:
+        """Extract person information from Gmail message headers."""
         try:
             headers = message_data.get("payload", {}).get("headers", [])
             header_dict = {h["name"]: h["value"] for h in headers}
@@ -310,6 +324,7 @@ class PeopleService(ToolkitService):
                     display_name, email = parseaddr(header_value)
                     if email:
                         person_info = self._parse_name_and_email(display_name, email, SourceType.EMAILS)
+                        # Only return if it matches our identifier
                         if self._matches_identifier(person_info, identifier):
                             return person_info
                             
@@ -400,19 +415,8 @@ class PeopleService(ToolkitService):
         )
         return matches[0] if matches else None
 
-    def _validate_name_consistency(self, existing_person: PersonPage, new_person_info: Dict[str, Any]) -> None:
-        """Validate that names are consistent for the same email address."""
-        existing_full_name = existing_person.full_name.lower().strip() if existing_person.full_name else ""
-        new_full_name = f"{new_person_info['first_name']} {new_person_info['last_name']}".lower().strip()
-        
-        if existing_full_name and new_full_name and existing_full_name != new_full_name:
-            raise ValueError(
-                f"Name divergence detected for email {new_person_info['email']}: "
-                f"existing='{existing_person.full_name}' vs new='{new_full_name.title()}'"
-            )
-
-    def _create_and_store_person(self, person_info: Dict[str, Any]) -> PersonPage:
-        """Create and store a new PersonPage from person info."""
+    def _store_and_create_page(self, person_info: Dict[str, Any]) -> PersonPage:
+        """Store person information and create PersonPage."""
         person_id = self._generate_person_id(person_info["email"])
         
         uri = PageURI(root=self.context.root, type="person", id=person_id)
@@ -434,12 +438,6 @@ class PeopleService(ToolkitService):
     def _generate_person_id(self, email: str) -> str:
         """Generate a consistent person ID from email."""
         return hashlib.md5(email.encode()).hexdigest()
-
-    def _get_organization_domain(self) -> str:
-        """Get the organization domain for Directory API searches."""
-        # This would typically come from configuration
-        # For now, we'll extract from a known admin email or use a default
-        return "example.com"  # Replace with actual domain logic
 
     def _is_email_address(self, text: str) -> bool:
         """Check if text looks like an email address."""
@@ -492,3 +490,18 @@ class PeopleToolkit(RetrieverToolkit):
             PersonPage if found, None otherwise
         """
         return self.people_service._get_existing_person_by_email(email)
+
+    @tool()
+    def find_or_create_person(self, identifier: str) -> List[PersonPage]:
+        """Find existing person or create new one if not found.
+
+        Args:
+            identifier: Name or email to search for
+        """
+        # Try to find existing first
+        existing = self.people_service.lookup_people(identifier)
+        if existing:
+            return existing
+
+        # Create new if not found
+        return self.people_service.create_person(identifier)
