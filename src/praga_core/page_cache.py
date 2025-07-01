@@ -20,6 +20,7 @@ from typing import (
     get_origin,
 )
 
+from pydantic import BaseModel
 from sqlalchemy import (
     JSON,
     TIMESTAMP,
@@ -116,9 +117,6 @@ def _get_sql_type(field_type: Any, field_info: Any) -> Any:
         if sql_type_name == "text":
             return Text
         return String
-
-    # Handle PageURI as string (special case)
-    from .types import PageURI
 
     if base_type == PageURI:
         return String
@@ -344,10 +342,6 @@ class PageCache:
         Returns:
             JSON-serializable representation of the value
         """
-        from pydantic import BaseModel
-
-        from .types import PageURI
-
         if isinstance(value, PageURI):
             return str(value)
         elif isinstance(value, BaseModel):
@@ -376,9 +370,6 @@ class PageCache:
         Returns:
             Deserialized value with proper types restored
         """
-
-        from .types import PageURI
-
         base_type = _get_base_type(field_type)
 
         # Handle PageURI conversion
@@ -430,8 +421,6 @@ class PageCache:
 
     def _is_pydantic_model_type(self, type_obj: Any) -> bool:
         """Check if a type is a Pydantic model class."""
-        from pydantic import BaseModel
-
         return isinstance(type_obj, type) and issubclass(type_obj, BaseModel)
 
     def store_page(self, page: Page) -> bool:
