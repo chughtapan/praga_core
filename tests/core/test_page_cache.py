@@ -19,9 +19,9 @@ def clear_global_registry() -> None:
 
     This function is used for testing to ensure clean state between test runs.
     """
-    from praga_core.page_cache import _TABLE_REGISTRY, Base
+    from praga_core.page_cache.schema import clear_table_registry, Base
 
-    _TABLE_REGISTRY.clear()
+    clear_table_registry()
     Base.metadata.clear()
 
 
@@ -831,7 +831,7 @@ class TestPageURISerialization:
         ]
 
         for value, field_type in test_cases:
-            result = page_cache._convert_page_uris_from_storage(value, field_type)
+            result = page_cache.convert_page_uris_from_storage(value, field_type)
             assert result == value
 
 
