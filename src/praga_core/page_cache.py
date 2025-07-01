@@ -60,7 +60,7 @@ class ProvenanceError(Exception):
 def _get_base_type(field_type: Any) -> Any:
     """Extract the base type from a complex type annotation.
 
-    Handles Optional/Union types and container types like List, Dict.
+    Handles Optional/Union types, Annotated types, and container types like List, Dict.
 
     Args:
         field_type: The type annotation to analyze
@@ -75,9 +75,30 @@ def _get_base_type(field_type: Any) -> Any:
         args = get_args(field_type)
         non_none_types = [t for t in args if t is not type(None)]
         if len(non_none_types) == 1:
-            return non_none_types[0]
+            # Recursively handle the non-None type (in case it's also Annotated)
+            return _get_base_type(non_none_types[0])
         # If multiple non-None types, treat as complex type
         return None
+
+    # Handle Annotated types (extract the actual type)
+    try:
+        from typing import _AnnotatedAlias  # type: ignore
+        if isinstance(field_type, _AnnotatedAlias):
+            # Get the first argument which is the actual type
+            args = get_args(field_type)
+            if args:
+                return _get_base_type(args[0])
+    except ImportError:
+        # For older Python versions, try another approach
+        pass
+    
+    # Alternative check for Annotated types
+    if hasattr(field_type, '__origin__') and getattr(field_type, '__origin__', None) is not None:
+        origin_name = getattr(field_type.__origin__, '_name', None)
+        if origin_name == 'Annotated':
+            args = get_args(field_type)
+            if args:
+                return _get_base_type(args[0])
 
     # Handle container types (List, Dict, etc.)
     if origin is not None:
@@ -294,6 +315,8 @@ class PageCache:
         # Instance-specific tracking of registered page types
         self._registered_types: set[str] = set()
         self._table_mapping: Dict[str, str] = {}
+        # Keep track of page classes for proper reconstruction
+        self._page_classes: Dict[str, Type[Page]] = {}
 
         # Reset database if requested
         if drop_previous:
@@ -307,6 +330,7 @@ class PageCache:
         _TABLE_REGISTRY.clear()
         self._registered_types.clear()
         self._table_mapping.clear()
+        self._page_classes.clear()
 
         logger.debug("Reset database and cleared all registries")
 
@@ -332,6 +356,8 @@ class PageCache:
 
         # Mark as registered in this instance
         self._registered_types.add(type_name)
+        # Store the page class for easier reconstruction
+        self._page_classes[type_name] = page_type
 
         logger.debug(f"Registered page type {type_name}")
 
@@ -495,42 +521,26 @@ class PageCache:
         """
         # Check all registered page types
         for page_type_name in self._registered_types:
-            if page_type_name in _TABLE_REGISTRY:
+            if page_type_name in _TABLE_REGISTRY and page_type_name in self._page_classes:
                 table_class = _TABLE_REGISTRY[page_type_name]
+                page_class = self._page_classes[page_type_name]
                 
                 with self.get_session() as session:
                     entity = session.query(table_class).filter_by(uri=str(uri)).first()
                     
                     if entity:
-                        # Need to reconstruct the page type from the table name
-                        # Find the corresponding page class
-                        for registered_name in self._registered_types:
-                            if _TABLE_REGISTRY[registered_name] == table_class:
-                                # Import all page types to find the right class
-                                # This is a bit hacky but works for our use case
-                                page_class = None
-                                import sys
-                                for module_name, module in sys.modules.items():
-                                    if hasattr(module, registered_name):
-                                        potential_class = getattr(module, registered_name)
-                                        if (hasattr(potential_class, '__mro__') and 
-                                            any(base.__name__ == 'Page' for base in potential_class.__mro__)):
-                                            page_class = potential_class
-                                            break
-                                
-                                if page_class:
-                                    # Convert database entity back to Page instance
-                                    page_data = {"uri": PageURI.parse(entity.uri)}
-                                    for field_name, field_info in page_class.model_fields.items():
-                                        if field_name not in ("uri",):
-                                            value = getattr(entity, field_name)
-                                            # Convert strings back to PageURI objects
-                                            converted_value = self._convert_page_uris_from_storage(
-                                                value, field_info.annotation
-                                            )
-                                            page_data[field_name] = converted_value
+                        # Convert database entity back to Page instance
+                        page_data = {"uri": PageURI.parse(entity.uri)}
+                        for field_name, field_info in page_class.model_fields.items():
+                            if field_name not in ("uri",):
+                                value = getattr(entity, field_name)
+                                # Convert strings back to PageURI objects
+                                converted_value = self._convert_page_uris_from_storage(
+                                    value, field_info.annotation
+                                )
+                                page_data[field_name] = converted_value
 
-                                    return page_class(**page_data)
+                        return page_class(**page_data)
         return None
 
     def _check_for_cycles(self, child_uri: PageURI, parent_uri: PageURI, visited: Optional[set] = None) -> None:
@@ -573,36 +583,25 @@ class PageCache:
         
         # Check all registered page types for children
         for page_type_name in self._registered_types:
-            if page_type_name in _TABLE_REGISTRY:
+            if page_type_name in _TABLE_REGISTRY and page_type_name in self._page_classes:
                 table_class = _TABLE_REGISTRY[page_type_name]
+                page_class = self._page_classes[page_type_name]
                 
                 with self.get_session() as session:
                     entities = session.query(table_class).filter_by(parent_uri=str(parent_uri)).all()
                     
                     # Convert entities back to Page instances
                     for entity in entities:
-                        # Find the corresponding page class
-                        page_class = None
-                        import sys
-                        for module_name, module in sys.modules.items():
-                            if hasattr(module, page_type_name):
-                                potential_class = getattr(module, page_type_name)
-                                if (hasattr(potential_class, '__mro__') and 
-                                    any(base.__name__ == 'Page' for base in potential_class.__mro__)):
-                                    page_class = potential_class
-                                    break
-                        
-                        if page_class:
-                            page_data = {"uri": PageURI.parse(entity.uri)}
-                            for field_name, field_info in page_class.model_fields.items():
-                                if field_name not in ("uri",):
-                                    value = getattr(entity, field_name)
-                                    converted_value = self._convert_page_uris_from_storage(
-                                        value, field_info.annotation
-                                    )
-                                    page_data[field_name] = converted_value
+                        page_data = {"uri": PageURI.parse(entity.uri)}
+                        for field_name, field_info in page_class.model_fields.items():
+                            if field_name not in ("uri",):
+                                value = getattr(entity, field_name)
+                                converted_value = self._convert_page_uris_from_storage(
+                                    value, field_info.annotation
+                                )
+                                page_data[field_name] = converted_value
 
-                            children.append(page_class(**page_data))
+                        children.append(page_class(**page_data))
         
         return children
 
