@@ -330,44 +330,109 @@ class PageCache:
 
         logger.debug(f"Registered page type {type_name}")
 
-    def _convert_page_uris_for_storage(self, value: Any) -> Any:
-        """Convert PageURI objects to strings for database storage."""
+    def _serialize_for_storage(self, value: Any) -> Any:
+        """Convert complex objects to JSON-serializable formats for database storage.
+
+        Handles:
+        - PageURI objects → strings
+        - Pydantic models → JSON-serialized dictionaries
+        - Lists and dicts recursively
+
+        Args:
+            value: The value to serialize
+
+        Returns:
+            JSON-serializable representation of the value
+        """
+        from pydantic import BaseModel
+
         from .types import PageURI
 
         if isinstance(value, PageURI):
             return str(value)
+        elif isinstance(value, BaseModel):
+            # Use mode='json' to handle datetime serialization automatically
+            return value.model_dump(mode="json")
         elif isinstance(value, list):
-            return [self._convert_page_uris_for_storage(item) for item in value]
+            return [self._serialize_for_storage(item) for item in value]
         elif isinstance(value, dict):
-            return {k: self._convert_page_uris_for_storage(v) for k, v in value.items()}
+            return {k: self._serialize_for_storage(v) for k, v in value.items()}
         else:
             return value
 
-    def _convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Convert strings back to PageURI objects after database retrieval."""
+    def _deserialize_from_storage(self, value: Any, field_type: Any) -> Any:
+        """Convert stored values back to their original types after database retrieval.
+
+        Handles:
+        - String → PageURI objects
+        - JSON dictionaries → Pydantic models
+        - Lists with typed elements
+        - Nested structures recursively
+
+        Args:
+            value: The stored value to deserialize
+            field_type: The target field type annotation
+
+        Returns:
+            Deserialized value with proper types restored
+        """
+
         from .types import PageURI
 
-        # Get the base type, handling Optional/Union
         base_type = _get_base_type(field_type)
 
+        # Handle PageURI conversion
         if base_type == PageURI and isinstance(value, str):
             return PageURI.parse(value)
-        elif get_origin(field_type) is list:
-            # Handle List[PageURI]
-            args = get_args(field_type)
-            if args and args[0] == PageURI and isinstance(value, list):
-                return [
-                    PageURI.parse(item) if isinstance(item, str) else item
-                    for item in value
-                ]
-        elif isinstance(value, dict):
-            # Handle nested dictionaries (though less common for PageURI)
+
+        # Handle list types
+        if get_origin(field_type) is list and isinstance(value, list):
+            return self._deserialize_list(value, field_type)
+
+        # Handle single Pydantic model
+        if self._is_pydantic_model_type(base_type) and isinstance(value, dict):
+            return base_type.model_validate(value)
+
+        # Handle nested dictionaries
+        if isinstance(value, dict):
             return {
-                k: self._convert_page_uris_from_storage(v, field_type)
+                k: self._deserialize_from_storage(v, field_type)
                 for k, v in value.items()
             }
 
         return value
+
+    def _deserialize_list(self, value: list[Any], field_type: Any) -> list[Any]:
+        """Deserialize a list with proper element type handling."""
+
+        args = get_args(field_type)
+        if not args:
+            return value
+
+        element_type = args[0]
+
+        if element_type == PageURI:
+            # Handle List[PageURI]
+            return [
+                PageURI.parse(item) if isinstance(item, str) else item for item in value
+            ]
+        elif self._is_pydantic_model_type(element_type):
+            # Handle List[PydanticModel]
+            return [
+                element_type.model_validate(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            # Handle other list types recursively
+            return [
+                self._deserialize_from_storage(item, element_type) for item in value
+            ]
+
+    def _is_pydantic_model_type(self, type_obj: Any) -> bool:
+        """Check if a type is a Pydantic model class."""
+        from pydantic import BaseModel
+
+        return isinstance(type_obj, type) and issubclass(type_obj, BaseModel)
 
     def store_page(self, page: Page) -> bool:
         """Store a page in the cache.
@@ -396,8 +461,8 @@ class PageCache:
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
                         value = getattr(page, field_name)
-                        # Convert PageURI objects to strings
-                        converted_value = self._convert_page_uris_for_storage(value)
+                        # Serialize complex objects for storage
+                        converted_value = self._serialize_for_storage(value)
                         setattr(existing, field_name, converted_value)
                 existing.updated_at = datetime.now(timezone.utc)
                 session.commit()
@@ -408,10 +473,8 @@ class PageCache:
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
                         value = getattr(page, field_name)
-                        # Convert PageURI objects to strings
-                        page_data[field_name] = self._convert_page_uris_for_storage(
-                            value
-                        )
+                        # Serialize complex objects for storage
+                        page_data[field_name] = self._serialize_for_storage(value)
 
                 page_entity = table_class(**page_data)
                 session.add(page_entity)
@@ -447,8 +510,8 @@ class PageCache:
                 for field_name, field_info in page_type.model_fields.items():
                     if field_name not in ("uri",):
                         value = getattr(entity, field_name)
-                        # Convert strings back to PageURI objects
-                        converted_value = self._convert_page_uris_from_storage(
+                        # Deserialize stored values back to original types
+                        converted_value = self._deserialize_from_storage(
                             value, field_info.annotation
                         )
                         page_data[field_name] = converted_value
@@ -528,8 +591,8 @@ class PageCache:
                 for field_name, field_info in page_type.model_fields.items():
                     if field_name not in ("uri",):
                         value = getattr(entity, field_name)
-                        # Convert strings back to PageURI objects
-                        converted_value = self._convert_page_uris_from_storage(
+                        # Deserialize stored values back to original types
+                        converted_value = self._deserialize_from_storage(
                             value, field_info.annotation
                         )
                         page_data[field_name] = converted_value

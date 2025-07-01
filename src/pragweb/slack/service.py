@@ -285,7 +285,7 @@ class SlackService(ToolkitService):
             channel_type=channel_page.channel_type,
             user_id=user_id,
             display_name=display_name,
-            text=target_message.get("text", ""),
+            text_content=target_message.get("text", ""),
             timestamp=timestamp,
             thread_ts=thread_ts,
             next_message_uri=next_uri,

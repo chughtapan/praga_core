@@ -87,19 +87,6 @@ class SlackThreadPage(Page):
             formatted_messages.append(f"{msg.display_name}: {msg.text}")
         return "\n".join(formatted_messages)
 
-    def get_content(self) -> str:
-        """Return the full thread messages for indexing."""
-        return self.thread_messages
-
-    def get_title(self) -> str:
-        """Generate a title for the thread."""
-        # Use first few words of parent message as title
-        words = self.parent_message.split()[:8]
-        title = " ".join(words)
-        if len(self.parent_message.split()) > 8:
-            title += "..."
-        return f"Thread: {title}"
-
 
 class SlackChannelPage(Page):
     """A Slack channel with metadata and recent activity summary."""
@@ -150,7 +137,7 @@ class SlackMessagePage(Page):
     )
     user_id: str = Field(description="User ID who sent the message", exclude=True)
     display_name: str = Field(description="Display name of message sender")
-    text: str = Field(description="Message text content")
+    text_content: str = Field(description="Message text content")
     timestamp: datetime = Field(description="When message was sent")
     thread_ts: Optional[str] = Field(
         description="Thread timestamp if message is part of a thread"

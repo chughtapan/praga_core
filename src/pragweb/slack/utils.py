@@ -160,20 +160,27 @@ class SlackParser:
         Raises:
             ValueError: If person identifier format is invalid
         """
-        if not person:
+        if not person or not person.strip():
             raise ValueError("Person identifier cannot be empty")
 
-        # If it starts with @, it's a username/handle - use as is
+        person = person.strip()
+
+        # Handle @username format
         if person.startswith("@"):
+            if len(person) == 1:  # Just "@"
+                raise ValueError("Username cannot be empty after @")
+            username = person[1:]
+            # Basic validation: username should contain alphanumeric chars, dots, dashes, underscores
+            if not username or not all(c.isalnum() or c in "._-" for c in username):
+                raise ValueError(f"Invalid username format: {person}")
             return person
 
-        # If it looks like a user ID (starts with U), use as is
-        if person.startswith("U") and len(person) > 5:
-            return f"<@{person}>"  # Format for search
+        # Handle Slack user ID format (U + 10 alphanumeric chars = 11 total)
+        if person.startswith("U") and len(person) == 11 and person[1:].isalnum():
+            return f"<@{person}>"
 
-        # Otherwise, it's likely a display name or email - we don't support this yet
+        # Reject everything else
         raise ValueError(
-            f"Person identifier '{person}' is not supported. "
-            f"Please use either @username (e.g., '@john.doe') or user ID (e.g., 'U1234567890'). "
-            f"Display names and email addresses are not yet supported."
+            f"Person identifier '{person}' is invalid. "
+            f"Use @username (e.g., '@john.doe') or user ID (e.g., 'U1234567890') format."
         )
