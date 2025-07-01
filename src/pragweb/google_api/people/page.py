@@ -14,6 +14,11 @@ class PersonPage(Page):
     last_name: str = Field(description="Person's last name")
     email: str = Field(description="Person's email address")
     full_name: Optional[str] = Field(None, description="Person's full name (computed)")
+    source: Optional[str] = Field(
+        None,
+        exclude=True,
+        description="Source of person information (people_api, directory_api, or emails)",
+    )
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
