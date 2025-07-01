@@ -116,6 +116,7 @@ class SlackAPIClient:
         channel_id: str,
         oldest: Optional[str] = None,
         latest: Optional[str] = None,
+        inclusive: bool = False,
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
@@ -127,6 +128,7 @@ class SlackAPIClient:
             oldest=oldest,
             latest=latest,
             cursor=cursor,
+            inclusive=inclusive,
         )
         response_data = cast(Dict[str, Any], response.data)
 
