@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# Import only what we need to avoid circular dependencies
 from .context import ServerContext
 from .page_cache import PageCache
 from .service import Service
