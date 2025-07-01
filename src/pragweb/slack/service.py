@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
 from praga_core.types import PageURI
@@ -192,55 +192,104 @@ class SlackService(ToolkitService):
         # Create message page on-demand
         return self.create_message_page(message_id)
 
+    def _fetch_single_message(
+        self, channel_id: str, message_ts: str, *, before: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch a single message from the channel.
+
+        Args:
+            channel_id: The channel ID to fetch from
+            message_ts: The timestamp to fetch around
+            before: If True, fetch message before timestamp, if False fetch after
+
+        Returns:
+            The message if found and its timestamp is correctly ordered relative to message_ts,
+            None otherwise.
+        """
+        current_ts = float(message_ts)
+
+        if before:
+            messages, _ = self.api_client.get_conversation_history(
+                channel_id=channel_id, latest=message_ts, inclusive=False, limit=1
+            )
+            if messages:
+                msg = messages[0]
+                # Verify the message is actually before
+                if float(msg["ts"]) < current_ts:
+                    return cast(Dict[str, Any], msg)
+        else:
+            messages, _ = self.api_client.get_conversation_history(
+                channel_id=channel_id, oldest=message_ts, inclusive=False, limit=1
+            )
+            if messages:
+                msg = messages[0]
+                # Verify the message is actually after
+                if float(msg["ts"]) > current_ts:
+                    return cast(Dict[str, Any], msg)
+
+        return None
+
+    def _create_message_uri(self, channel_id: str, message_ts: str) -> PageURI:
+        """Create a PageURI for a message."""
+        message_id = self.parser.encode_message_id(channel_id, message_ts)
+        return PageURI(root=self.context.root, type="slack_message", id=message_id)
+
     def create_message_page(self, message_id: str) -> SlackMessagePage:
         """Create a message page from message ID (format: channel_id_message_ts)."""
         logger.info(f"Creating message page for message ID: {message_id}")
 
+        # Parse message ID and get channel info
         channel_id, message_ts = self.parser.decode_message_id(message_id)
-
-        # Get channel page for info
         channel_page = self.get_channel_page(channel_id)
-        channel_name = channel_page.name
-        channel_type = channel_page.channel_type
 
-        # Fetch the target message
+        # Fetch target message
         messages, _ = self.api_client.get_conversation_history(
             channel_id=channel_id, oldest=message_ts, inclusive=True, limit=1
         )
         if not messages:
             raise RuntimeError(f"Unable to find message: {message_id}")
-
         target_message = messages[0]
 
-        user_id = target_message.get("user", "")
-        display_name = self.get_user_display_name(user_id)
+        # Fetch adjacent messages
+        prev_message = self._fetch_single_message(channel_id, message_ts, before=True)
+        next_message = self._fetch_single_message(channel_id, message_ts, before=False)
 
-        # Parse timestamp
-        timestamp_str = target_message.get("ts", "")
-        timestamp = datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
-
-        # Create permalink
-        permalink = f"https://slack.com/app_redirect?channel={channel_id}&message_ts={message_ts}"
-
-        # Check if message is part of a thread
-        thread_ts = target_message.get("thread_ts")
-
-        # Create URI
-        uri = PageURI(
-            root=self.context.root, type="slack_message", id=message_id, version=1
+        # Create navigation URIs
+        prev_uri = (
+            self._create_message_uri(channel_id, prev_message["ts"])
+            if prev_message
+            else None
+        )
+        next_uri = (
+            self._create_message_uri(channel_id, next_message["ts"])
+            if next_message
+            else None
         )
 
+        # Parse message metadata
+        user_id = target_message.get("user", "")
+        display_name = self.get_user_display_name(user_id)
+        timestamp = datetime.fromtimestamp(float(target_message["ts"]), tz=timezone.utc)
+        thread_ts = target_message.get("thread_ts")
+
+        # Create page URI and permalink
+        uri = self._create_message_uri(channel_id, message_ts)
+        permalink = f"https://slack.com/app_redirect?channel={channel_id}&message_ts={message_ts}"
+
+        # Create and return the page
         page = SlackMessagePage(
             uri=uri,
             message_ts=message_ts,
             channel_id=channel_id,
-            channel_name=channel_name,
-            channel_type=channel_type,
+            channel_name=channel_page.name,
+            channel_type=channel_page.channel_type,
             user_id=user_id,
             display_name=display_name,
             text=target_message.get("text", ""),
             timestamp=timestamp,
             thread_ts=thread_ts,
+            next_message_uri=next_uri,
+            previous_message_uri=prev_uri,
             permalink=permalink,
         )
 

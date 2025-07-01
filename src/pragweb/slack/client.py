@@ -46,7 +46,7 @@ class SlackAPIClient:
     def list_channels(
         self, types: str = "public_channel,private_channel,mpim,im", limit: int = 1000
     ) -> List[Dict[str, Any]]:
-        """List all channels the bot has access to."""
+        """List only channels the authenticated user is a member of."""
         channels: List[Dict[str, Any]] = []
         cursor: Optional[str] = None
 
@@ -55,13 +55,26 @@ class SlackAPIClient:
                 types=types,
                 limit=min(limit, 1000),  # API max is 1000
                 cursor=cursor,
+                exclude_archived=True,  # Don't include archived channels
             )
             response_data = cast(Dict[str, Any], response.data)
 
             if response_data.get("ok"):
                 channels_data = response_data.get("channels", [])
                 if isinstance(channels_data, list):
-                    channels.extend(cast(List[Dict[str, Any]], channels_data))
+                    # Filter to only channels the user is a member of
+                    user_channels = []
+                    for channel in cast(List[Dict[str, Any]], channels_data):
+                        # For public channels, check is_member field
+                        if channel.get("is_channel"):  # Public channel
+                            if channel.get("is_member", False):
+                                user_channels.append(channel)
+                        else:
+                            # Private channels, DMs, and group DMs should already be filtered by the API
+                            # to only include channels the user is a member of
+                            user_channels.append(channel)
+
+                    channels.extend(user_channels)
 
                 # Get next cursor
                 metadata = response_data.get("response_metadata", {})

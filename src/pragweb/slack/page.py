@@ -60,21 +60,6 @@ class SlackConversationPage(Page):
         # This will be populated by the service when threads are detected
         return []
 
-    def get_content(self) -> str:
-        """Return the combined messages content for indexing."""
-        return self.messages_content
-
-    def get_title(self) -> str:
-        """Generate a title for the conversation chunk."""
-        # Use channel name and time range
-        if self.channel_name:
-            channel_display = self.channel_name
-        else:
-            channel_display = f"Channel {self.channel_id}"
-
-        date_str = self.start_time.strftime("%Y-%m-%d")
-        return f"{channel_display} - {date_str}"
-
 
 class SlackThreadPage(Page):
     """A Slack thread containing all messages within a specific thread."""
@@ -137,20 +122,6 @@ class SlackChannelPage(Page):
     )
     permalink: str = Field(description="Slack permalink to channel")
 
-    def get_content(self) -> str:
-        """Return channel metadata for indexing."""
-        content_parts = [self.name]
-        if self.topic:
-            content_parts.append(f"Topic: {self.topic}")
-        if self.purpose:
-            content_parts.append(f"Purpose: {self.purpose}")
-        return " | ".join(content_parts)
-
-    def get_title(self) -> str:
-        """Generate a title for the channel."""
-        prefix = "#" if self.channel_type == "public_channel" else ""
-        return f"{prefix}{self.name}"
-
 
 class SlackUserPage(Page):
     """A Slack user profile with information."""
@@ -182,7 +153,14 @@ class SlackMessagePage(Page):
     text: str = Field(description="Message text content")
     timestamp: datetime = Field(description="When message was sent")
     thread_ts: Optional[str] = Field(
-        description="Thread timestamp if message is part of a thread", exclude=True
+        description="Thread timestamp if message is part of a thread"
+    )
+    next_message_uri: Optional[PageURI] = Field(
+        default=None, description="URI to the next message in chronological order"
+    )
+    previous_message_uri: Optional[PageURI] = Field(
+        default=None,
+        description="URI to the previous message in reverse chronological order",
     )
     permalink: str = Field(description="Slack permalink to message")
 
