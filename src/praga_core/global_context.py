@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-# Import only what we need to avoid circular dependencies
 from .context import ServerContext
+from .page_cache import PageCache
 from .service import Service
 
 # Global context storage
@@ -97,3 +97,8 @@ class ServiceContext(Service, ContextMixin):
         self.api_client = api_client
         super().__init__(*args, **kwargs)
         self.context.register_service(self.name, self)
+
+    @property
+    def page_cache(self) -> PageCache:
+        """Access the global PageCache instance."""
+        return self.context.page_cache
