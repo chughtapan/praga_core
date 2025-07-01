@@ -92,7 +92,7 @@ class GmailService(ToolkitService):
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
         # Create URI and return complete document
-        uri = PageURI(root=self.context.root, type="email", id=email_id, version=1)
+        uri = PageURI(root=self.context.root, type="email", id=email_id)
         return EmailPage(
             uri=uri,
             message_id=email_id,
@@ -131,7 +131,7 @@ class GmailService(ToolkitService):
 
             # Create URI for this email
             email_uri = PageURI(
-                root=self.context.root, type="email", id=message["id"], version=1
+                root=self.context.root, type="email", id=message["id"]
             )
 
             # Create EmailSummary
@@ -151,7 +151,7 @@ class GmailService(ToolkitService):
 
         # Create URI and return complete thread document
         uri = PageURI(
-            root=self.context.root, type="email_thread", id=thread_id, version=1
+            root=self.context.root, type="email_thread", id=thread_id
         )
         return EmailThreadPage(
             uri=uri,

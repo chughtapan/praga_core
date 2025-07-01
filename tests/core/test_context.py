@@ -197,6 +197,43 @@ class TestPageURI:
         assert uri1 != "not_a_uri"
 
 
+class TestLatestVersionFunctionality:
+    """Test latest version functionality in context."""
+
+    def test_create_page_uri_defaults_to_latest_version(self, context: ServerContext) -> None:
+        """Test that create_page_uri defaults to latest version for most types."""
+        from praga_core.types import LATEST_VERSION
+
+        uri = context.create_page_uri("email", "test123")
+        assert uri.version == LATEST_VERSION
+        assert uri.is_latest
+
+    def test_create_page_uri_google_docs_defaults_to_version_1(self, context: ServerContext) -> None:
+        """Test that create_page_uri defaults to version 1 for Google Docs types."""
+        # Test gdoc_header
+        header_uri = context.create_page_uri("gdoc_header", "doc123")
+        assert header_uri.version == 1
+        assert not header_uri.is_latest
+
+        # Test gdoc_chunk  
+        chunk_uri = context.create_page_uri("gdoc_chunk", "chunk123")
+        assert chunk_uri.version == 1
+        assert not chunk_uri.is_latest
+
+    def test_create_page_uri_explicit_version_overrides_default(self, context: ServerContext) -> None:
+        """Test that explicit version parameter overrides the default behavior."""
+        # Explicit version for non-gdoc type
+        uri = context.create_page_uri("email", "test123", version=5)
+        assert uri.version == 5
+        assert not uri.is_latest
+
+        # Explicit latest version for gdoc type
+        from praga_core.types import LATEST_VERSION
+        gdoc_uri = context.create_page_uri("gdoc_header", "doc123", version=LATEST_VERSION)
+        assert gdoc_uri.version == LATEST_VERSION
+        assert gdoc_uri.is_latest
+
+
 class TestServerContextInitialization:
     """Test ServerContext initialization."""
 

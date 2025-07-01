@@ -1125,3 +1125,90 @@ class TestGoogleDocsPageURIs:
         assert len(results) == 3
         chunk_indices = {chunk.chunk_index for chunk in results}
         assert chunk_indices == {0, 1, 2}
+
+
+class TestPageCacheLatestVersionFunctionality:
+    """Test latest version functionality in PageCache."""
+
+    def test_store_page_with_latest_version_uri(self, page_cache: PageCache) -> None:
+        """Test storing a page with latest version URI and retrieving it."""
+        # Create page with latest version URI
+        user = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=-1),
+            name="Test User",
+            email="test@example.com",
+            age=30,
+        )
+        
+        page_cache.store_page(user)
+
+        # Should be able to retrieve by same URI
+        retrieved = page_cache.get_page(UserPage, user.uri)
+        assert retrieved is not None
+        assert retrieved.name == "Test User"
+
+    def test_store_page_with_specific_version_updates_latest_tracking(self, page_cache: PageCache) -> None:
+        """Test that storing pages with specific versions updates latest version tracking."""
+        from praga_core.types import LATEST_VERSION
+        
+        # Store page with version 1
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User v1",
+            email="test@example.com",
+        )
+        page_cache.store_page(user_v1)
+
+        # Check latest version
+        latest_version = page_cache.get_latest_version(user_v1.uri)
+        assert latest_version == 1
+
+        # Store page with version 3 (skipping 2)
+        user_v3 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=3),
+            name="User v3",
+            email="test@example.com",
+        )
+        page_cache.store_page(user_v3)
+
+        # Latest version should now be 3
+        latest_version = page_cache.get_latest_version(user_v3.uri)
+        assert latest_version == 3
+
+        # Request latest version should return v3
+        latest_uri = PageURI(root="test", type="user", id="user1", version=LATEST_VERSION)
+        retrieved = page_cache.get_page(UserPage, latest_uri)
+        assert retrieved is not None
+        assert retrieved.name == "User v3"
+
+    def test_get_latest_version_for_nonexistent_page(self, page_cache: PageCache) -> None:
+        """Test getting latest version for a page that doesn't exist."""
+        uri = PageURI(root="test", type="user", id="nonexistent")
+        latest_version = page_cache.get_latest_version(uri)
+        assert latest_version is None
+
+    def test_retrieve_latest_version_with_explicit_latest_uri(self, page_cache: PageCache) -> None:
+        """Test retrieving latest version using explicit latest version URI."""
+        from praga_core.types import LATEST_VERSION
+        
+        # Store multiple versions
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User v1",
+            email="test@example.com",
+        )
+        user_v2 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=2),
+            name="User v2",
+            email="test@example.com",
+        )
+        
+        page_cache.store_page(user_v1)
+        page_cache.store_page(user_v2)
+
+        # Request latest version explicitly
+        latest_uri = PageURI(root="test", type="user", id="user1", version=LATEST_VERSION)
+        retrieved = page_cache.get_page(UserPage, latest_uri)
+        
+        assert retrieved is not None
+        assert retrieved.name == "User v2"  # Should get version 2

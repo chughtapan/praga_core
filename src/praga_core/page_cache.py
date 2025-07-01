@@ -37,7 +37,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.decl_api import declarative_base
 
-from .types import Page, PageURI
+from .types import Page, PageURI, LATEST_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,23 @@ Base = declarative_base()
 # Global registry to reuse table classes across PageCache instances
 # This prevents SQLAlchemy warnings about duplicate table definitions
 _TABLE_REGISTRY: Dict[str, Any] = {}
+
+
+class LatestVersionTable(Base):
+    """Table to track the latest version for each page type/id combination."""
+    
+    __tablename__ = "latest_versions"
+    
+    # Composite primary key of root, type, and id
+    root = Column(String, primary_key=True)
+    type = Column(String, primary_key=True)
+    id = Column(String, primary_key=True)
+    latest_version = Column(Integer, nullable=False)
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 def _get_base_type(field_type: Any) -> Any:
@@ -293,6 +310,9 @@ class PageCache:
         # Reset database if requested
         if drop_previous:
             self._reset()
+        
+        # Ensure latest versions table exists
+        LatestVersionTable.__table__.create(self.engine, checkfirst=True)
 
     def _reset(self) -> None:
         """Reset the database by dropping all tables and clearing registries."""
@@ -391,6 +411,10 @@ class PageCache:
             # Check if page already exists
             existing = session.query(table_class).filter_by(uri=str(page.uri)).first()
 
+            # Handle latest version tracking
+            if not page.uri.is_latest and page.uri.version > 0:
+                self._update_latest_version(session, page.uri)
+
             if existing:
                 # Update existing page
                 for field_name in page.__class__.model_fields:
@@ -422,12 +446,34 @@ class PageCache:
                     session.rollback()
                     return False
 
+    def _update_latest_version(self, session: Session, uri: PageURI) -> None:
+        """Update the latest version tracking for a page."""
+        # Query for existing latest version record
+        latest_record = session.query(LatestVersionTable).filter_by(
+            root=uri.root, type=uri.type, id=uri.id
+        ).first()
+        
+        if latest_record:
+            # Update if this version is newer
+            if uri.version > latest_record.latest_version:
+                latest_record.latest_version = uri.version
+                latest_record.updated_at = datetime.now(timezone.utc)
+        else:
+            # Create new latest version record
+            latest_record = LatestVersionTable(
+                root=uri.root,
+                type=uri.type,
+                id=uri.id,
+                latest_version=uri.version
+            )
+            session.add(latest_record)
+
     def get_page(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
         """Retrieve a page by its type and URI.
 
         Args:
             page_type: The Page class type to retrieve
-            uri: The PageURI to look up
+            uri: The PageURI to look up (if latest version requested, will get highest version)
 
         Returns:
             Page instance of the requested type if found, None otherwise
@@ -439,7 +485,15 @@ class PageCache:
         table_class = _TABLE_REGISTRY[page_type_name]
 
         with self.get_session() as session:
-            entity = session.query(table_class).filter_by(uri=str(uri)).first()
+            # If requesting latest version, resolve to specific version
+            if uri.is_latest:
+                resolved_uri = self._resolve_latest_version(session, uri)
+                if resolved_uri is None:
+                    return None
+            else:
+                resolved_uri = uri
+
+            entity = session.query(table_class).filter_by(uri=str(resolved_uri)).first()
 
             if entity:
                 # Convert database entity back to Page instance
@@ -454,6 +508,21 @@ class PageCache:
                         page_data[field_name] = converted_value
 
                 return page_type(**page_data)
+            return None
+
+    def _resolve_latest_version(self, session: Session, uri: PageURI) -> Optional[PageURI]:
+        """Resolve a latest version URI to a specific version URI."""
+        if not uri.is_latest:
+            return uri
+            
+        # Query for the latest version
+        latest_record = session.query(LatestVersionTable).filter_by(
+            root=uri.root, type=uri.type, id=uri.id
+        ).first()
+        
+        if latest_record:
+            return uri.with_specific_version(latest_record.latest_version)
+        else:
             return None
 
     def find_pages_by_attribute(
@@ -598,3 +667,19 @@ class PageCache:
             Dictionary mapping page type names to table names
         """
         return self._table_mapping.copy()
+
+    def get_latest_version(self, uri: PageURI) -> Optional[int]:
+        """Get the latest version number for a page.
+
+        Args:
+            uri: PageURI (version will be ignored, only root/type/id used)
+
+        Returns:
+            Latest version number if found, None otherwise
+        """
+        with self.get_session() as session:
+            latest_record = session.query(LatestVersionTable).filter_by(
+                root=uri.root, type=uri.type, id=uri.id
+            ).first()
+            
+            return latest_record.latest_version if latest_record else None
