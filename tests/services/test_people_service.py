@@ -339,7 +339,11 @@ class TestPeopleService:
         
         with patch.object(self.service, "get_person_record", return_value=mock_person):
             result = toolkit.get_person_record("test@example.com")
-            assert result is mock_person
+            assert result == [mock_person]
+
+        with patch.object(self.service, "get_person_record", return_value=None):
+            result = toolkit.get_person_record("test@example.com")
+            assert result == []
 
     def test_toolkit_get_person_by_email(self):
         """Test toolkit get_person_by_email method."""
@@ -348,7 +352,11 @@ class TestPeopleService:
         
         with patch.object(self.service, "_get_existing_person_by_email", return_value=mock_person):
             result = toolkit.get_person_by_email("test@example.com")
-            assert result is mock_person
+            assert result == [mock_person]
+
+        with patch.object(self.service, "_get_existing_person_by_email", return_value=None):
+            result = toolkit.get_person_by_email("test@example.com")
+            assert result == []
 
     def test_toolkit_find_or_create_person(self):
         """Test toolkit find_or_create_person method."""

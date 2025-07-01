@@ -466,7 +466,7 @@ class PeopleToolkit(RetrieverToolkit):
         return "PeopleToolkit"
 
     @tool()
-    def get_person_record(self, identifier: str) -> Optional[PersonPage]:
+    def get_person_record(self, identifier: str) -> List[PersonPage]:
         """Get person record by email, full name, or first name.
         
         Tries to lookup existing record first, then creates new record if not found.
@@ -475,21 +475,23 @@ class PeopleToolkit(RetrieverToolkit):
             identifier: Email address, full name, or first name to search for
             
         Returns:
-            PersonPage if found or created, None if not possible
+            List containing PersonPage if found or created, empty list if not possible
         """
-        return self.people_service.get_person_record(identifier)
+        result = self.people_service.get_person_record(identifier)
+        return [result] if result else []
 
     @tool()
-    def get_person_by_email(self, email: str) -> Optional[PersonPage]:
+    def get_person_by_email(self, email: str) -> List[PersonPage]:
         """Get a specific person by email address.
 
         Args:
             email: Email address to search for
             
         Returns:
-            PersonPage if found, None otherwise
+            List containing PersonPage if found, empty list otherwise
         """
-        return self.people_service._get_existing_person_by_email(email)
+        result = self.people_service._get_existing_person_by_email(email)
+        return [result] if result else []
 
     @tool()
     def find_or_create_person(self, identifier: str) -> List[PersonPage]:
