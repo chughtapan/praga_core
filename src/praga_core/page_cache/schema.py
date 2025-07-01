@@ -236,10 +236,15 @@ def create_page_table(page_class: Type[P]) -> Any:
     # Create new table class dynamically
     class_name = f"{page_type_name}Table"
 
-    # Define base table attributes
+    # Define base table attributes with composite primary key
     attrs = {
         "__tablename__": table_name,
-        "uri": Column(String, primary_key=True),  # URI as primary key
+        "uri_prefix": Column(
+            String, primary_key=True
+        ),  # URI prefix as part of composite primary key
+        "version": Column(
+            Integer, primary_key=True
+        ),  # Version as part of composite primary key
         "created_at": Column(
             TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
         ),

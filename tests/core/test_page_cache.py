@@ -6,9 +6,10 @@ including page storage, retrieval, SqlAlchemy queries, and error handling.
 
 import tempfile
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import pytest
+from pydantic import BaseModel
 
 from praga_core.page_cache import PageCache, PageCacheError
 from praga_core.page_cache.schema import PageRelationships
@@ -602,7 +603,8 @@ class TestErrorHandling:
         page_cache.register_page_type(UserPage)
         table_class = page_cache._get_table_class(UserPage)
         assert table_class is not None
-        assert hasattr(table_class, "uri")
+        assert hasattr(table_class, "uri_prefix")
+        assert hasattr(table_class, "version")
         assert hasattr(table_class, "name")
         assert hasattr(table_class, "email")
 
@@ -1774,3 +1776,333 @@ class TestPageRelationshipsTable:
             assert len(relationships) == 2
             rel_types = {rel.relationship_type for rel in relationships}
             assert rel_types == {"parent", "references"}
+
+
+class TestComprehensiveSerialization:
+    """Test comprehensive serialization of complex Pydantic models."""
+
+    class NestedModel(BaseModel):
+        """A nested Pydantic model for testing serialization."""
+
+        name: str
+        value: int
+        uri: Optional[PageURI] = None
+
+    class ComplexPage(Page):
+        """A complex page with nested Pydantic models for testing."""
+
+        title: str
+        nested_model: "TestComprehensiveSerialization.NestedModel"
+        model_list: List["TestComprehensiveSerialization.NestedModel"]
+        optional_model: Optional["TestComprehensiveSerialization.NestedModel"] = None
+
+    def test_store_and_retrieve_complex_page_with_pydantic_models(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test storing and retrieving pages with nested Pydantic models."""
+        nested_model = self.NestedModel(
+            name="Test Nested",
+            value=42,
+            uri=PageURI(root="test", type="nested", id="nested1"),
+        )
+
+        model_list = [
+            self.NestedModel(name="Item 1", value=10),
+            self.NestedModel(
+                name="Item 2",
+                value=20,
+                uri=PageURI(root="test", type="item", id="item2"),
+            ),
+        ]
+
+        complex_page = self.ComplexPage(
+            uri=PageURI(root="test", type="complex", id="complex1"),
+            title="Complex Page Test",
+            nested_model=nested_model,
+            model_list=model_list,
+            optional_model=None,
+        )
+
+        # Store the complex page
+        result = page_cache.store_page(complex_page)
+        assert result is True
+
+        # Retrieve the complex page
+        retrieved_page = page_cache.get_page(self.ComplexPage, complex_page.uri)
+
+        assert retrieved_page is not None
+        assert retrieved_page.title == "Complex Page Test"
+
+        # Verify nested model serialization/deserialization
+        assert isinstance(retrieved_page.nested_model, self.NestedModel)
+        assert retrieved_page.nested_model.name == "Test Nested"
+        assert retrieved_page.nested_model.value == 42
+        assert isinstance(retrieved_page.nested_model.uri, PageURI)
+        assert retrieved_page.nested_model.uri.id == "nested1"
+
+        # Verify list of models serialization/deserialization
+        assert isinstance(retrieved_page.model_list, list)
+        assert len(retrieved_page.model_list) == 2
+
+        assert all(
+            isinstance(model, self.NestedModel) for model in retrieved_page.model_list
+        )
+        assert retrieved_page.model_list[0].name == "Item 1"
+        assert retrieved_page.model_list[0].value == 10
+        assert retrieved_page.model_list[0].uri is None
+
+        assert retrieved_page.model_list[1].name == "Item 2"
+        assert retrieved_page.model_list[1].value == 20
+        assert isinstance(retrieved_page.model_list[1].uri, PageURI)
+        assert retrieved_page.model_list[1].uri.id == "item2"
+
+        # Verify optional model is None
+        assert retrieved_page.optional_model is None
+
+    def test_store_and_retrieve_complex_page_with_optional_model(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test storing and retrieving pages with optional Pydantic models."""
+        optional_model = self.NestedModel(
+            name="Optional Model",
+            value=99,
+            uri=PageURI(root="test", type="optional", id="opt1"),
+        )
+
+        complex_page = self.ComplexPage(
+            uri=PageURI(root="test", type="complex", id="complex2"),
+            title="Complex Page with Optional",
+            nested_model=self.NestedModel(name="Required", value=1),
+            model_list=[],
+            optional_model=optional_model,
+        )
+
+        # Store the complex page
+        result = page_cache.store_page(complex_page)
+        assert result is True
+
+        # Retrieve the complex page
+        retrieved_page = page_cache.get_page(self.ComplexPage, complex_page.uri)
+
+        assert retrieved_page is not None
+        assert retrieved_page.title == "Complex Page with Optional"
+
+        # Verify optional model serialization/deserialization
+        assert isinstance(retrieved_page.optional_model, self.NestedModel)
+        assert retrieved_page.optional_model.name == "Optional Model"
+        assert retrieved_page.optional_model.value == 99
+        assert isinstance(retrieved_page.optional_model.uri, PageURI)
+        assert retrieved_page.optional_model.uri.id == "opt1"
+
+    def test_find_pages_with_complex_models(self, page_cache: PageCache) -> None:
+        """Test querying pages that contain complex Pydantic models."""
+        # Create pages with different nested model names
+        page1 = self.ComplexPage(
+            uri=PageURI(root="test", type="complex", id="find1"),
+            title="Find Test 1",
+            nested_model=self.NestedModel(name="Search Target", value=100),
+            model_list=[],
+        )
+
+        page2 = self.ComplexPage(
+            uri=PageURI(root="test", type="complex", id="find2"),
+            title="Find Test 2",
+            nested_model=self.NestedModel(name="Different Name", value=200),
+            model_list=[],
+        )
+
+        page_cache.store_page(page1)
+        page_cache.store_page(page2)
+
+        # Find pages by title (which should work normally)
+        results = page_cache.find_pages_by_attribute(
+            self.ComplexPage, lambda t: t.title.like("Find Test%")
+        )
+
+        assert len(results) == 2
+        titles = {page.title for page in results}
+        assert titles == {"Find Test 1", "Find Test 2"}
+
+        # Verify the complex models are properly deserialized
+        for page in results:
+            assert isinstance(page.nested_model, self.NestedModel)
+            assert page.nested_model.value in [100, 200]
+
+
+class TestVersioning:
+    """Test URI prefix and version handling with composite primary keys."""
+
+    def test_store_and_retrieve_multiple_versions(self, page_cache: PageCache) -> None:
+        """Test storing and retrieving multiple versions of the same page."""
+        # Create multiple versions of the same page
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User Version 1",
+            email="user@example.com",
+            age=25,
+        )
+
+        user_v2 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=2),
+            name="User Version 2",
+            email="user@example.com",
+            age=26,
+        )
+
+        user_v3 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=3),
+            name="User Version 3",
+            email="user@example.com",
+            age=27,
+        )
+
+        # Store all versions
+        result1 = page_cache.store_page(user_v1)
+        result2 = page_cache.store_page(user_v2)
+        result3 = page_cache.store_page(user_v3)
+
+        assert result1 is True
+        assert result2 is True
+        assert result3 is True
+
+        # Retrieve each version
+        retrieved_v1 = page_cache.get_page(UserPage, user_v1.uri)
+        retrieved_v2 = page_cache.get_page(UserPage, user_v2.uri)
+        retrieved_v3 = page_cache.get_page(UserPage, user_v3.uri)
+
+        assert retrieved_v1 is not None
+        assert retrieved_v2 is not None
+        assert retrieved_v3 is not None
+
+        assert retrieved_v1.name == "User Version 1"
+        assert retrieved_v1.age == 25
+        assert retrieved_v2.name == "User Version 2"
+        assert retrieved_v2.age == 26
+        assert retrieved_v3.name == "User Version 3"
+        assert retrieved_v3.age == 27
+
+    def test_get_latest_version(self, page_cache: PageCache) -> None:
+        """Test getting the latest version number for a URI prefix."""
+        prefix = "test/user:user1"
+
+        # Should return None when no versions exist
+        latest = page_cache.get_latest_version(UserPage, prefix)
+        assert latest is None
+
+        # Store multiple versions
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User Version 1",
+            email="user@example.com",
+        )
+        user_v3 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=3),
+            name="User Version 3",
+            email="user@example.com",
+        )
+        user_v2 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=2),
+            name="User Version 2",
+            email="user@example.com",
+        )
+
+        page_cache.store_page(user_v1)
+        page_cache.store_page(user_v3)  # Store v3 before v2 to test ordering
+        page_cache.store_page(user_v2)
+
+        # Should return the highest version number
+        latest = page_cache.get_latest_version(UserPage, prefix)
+        assert latest == 3
+
+    def test_get_latest_page(self, page_cache: PageCache) -> None:
+        """Test getting the latest version of a page for a URI prefix."""
+        prefix = "test/user:user1"
+
+        # Should return None when no versions exist
+        latest_page = page_cache.get_latest_page(UserPage, prefix)
+        assert latest_page is None
+
+        # Store multiple versions
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User Version 1",
+            email="user@example.com",
+            age=25,
+        )
+        user_v2 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=2),
+            name="User Version 2",
+            email="user@example.com",
+            age=26,
+        )
+
+        page_cache.store_page(user_v1)
+        page_cache.store_page(user_v2)
+
+        # Should return the latest version page
+        latest_page = page_cache.get_latest_page(UserPage, prefix)
+        assert latest_page is not None
+        assert latest_page.name == "User Version 2"
+        assert latest_page.age == 26
+        assert latest_page.uri.version == 2
+
+    def test_prefix_property_usage(self, page_cache: PageCache) -> None:
+        """Test that the PageURI prefix property works correctly in practice."""
+        user = UserPage(
+            uri=PageURI(root="test", type="user", id="user123", version=5),
+            name="Test User",
+            email="test@example.com",
+        )
+
+        # Test the prefix property
+        assert user.uri.prefix == "test/user:user123"
+
+        page_cache.store_page(user)
+
+        # Use the prefix to get the latest version
+        latest_version = page_cache.get_latest_version(UserPage, user.uri.prefix)
+        assert latest_version == 5
+
+        latest_page = page_cache.get_latest_page(UserPage, user.uri.prefix)
+        assert latest_page is not None
+        assert latest_page.name == "Test User"
+
+    def test_different_prefixes_independent(self, page_cache: PageCache) -> None:
+        """Test that different URI prefixes are handled independently."""
+        # Create pages with different prefixes
+        user1_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User 1 Version 1",
+            email="user1@example.com",
+        )
+        user1_v2 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=2),
+            name="User 1 Version 2",
+            email="user1@example.com",
+        )
+
+        user2_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user2", version=1),
+            name="User 2 Version 1",
+            email="user2@example.com",
+        )
+
+        page_cache.store_page(user1_v1)
+        page_cache.store_page(user1_v2)
+        page_cache.store_page(user2_v1)
+
+        # Check that each prefix has its own version history
+        user1_latest = page_cache.get_latest_version(UserPage, "test/user:user1")
+        user2_latest = page_cache.get_latest_version(UserPage, "test/user:user2")
+
+        assert user1_latest == 2
+        assert user2_latest == 1
+
+        # Check that latest pages are correct
+        user1_latest_page = page_cache.get_latest_page(UserPage, "test/user:user1")
+        user2_latest_page = page_cache.get_latest_page(UserPage, "test/user:user2")
+
+        assert user1_latest_page is not None
+        assert user2_latest_page is not None
+        assert user1_latest_page.name == "User 1 Version 2"
+        assert user2_latest_page.name == "User 2 Version 1"
