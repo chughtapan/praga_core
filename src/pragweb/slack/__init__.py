@@ -1,22 +1,30 @@
-"""Slack integration module for pragweb."""
+"""Slack service module."""
 
-from .auth import SlackAuthManager
 from .client import SlackAPIClient
+from .ingestion import SlackIngestionService
 from .page import (
+    SlackChannelListPage,
     SlackChannelPage,
     SlackConversationPage,
+    SlackMessagePage,
+    SlackMessageSummary,
     SlackThreadPage,
     SlackUserPage,
 )
 from .service import SlackService, SlackToolkit
+from .utils import SlackParser
 
 __all__ = [
-    "SlackAuthManager",
     "SlackAPIClient",
-    "SlackConversationPage",
-    "SlackThreadPage",
+    "SlackIngestionService",
+    "SlackChannelListPage",
     "SlackChannelPage",
+    "SlackConversationPage",
+    "SlackMessagePage",
+    "SlackMessageSummary",
+    "SlackThreadPage",
     "SlackUserPage",
     "SlackService",
     "SlackToolkit",
+    "SlackParser",
 ]

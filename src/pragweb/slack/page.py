@@ -130,6 +130,11 @@ class SlackChannelPage(Page):
     created: datetime = Field(description="When channel was created")
     is_archived: bool = Field(description="Whether channel is archived")
     last_activity: Optional[datetime] = Field(description="Last message timestamp")
+    message_urls: List[str] = Field(
+        default=[],
+        description="List of recent message URLs in this channel",
+        exclude=True,
+    )
     permalink: str = Field(description="Slack permalink to channel")
 
     def get_content(self) -> str:
