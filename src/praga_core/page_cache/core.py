@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, cast
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,6 +43,7 @@ class PageCache:
     - Table reuse across cache instances
     - Support for complex field types via JSON columns
     - Provenance tracking for page relationships
+    - Cache invalidation with ancestor validation
 
     Example:
         cache = PageCache("sqlite:///pages.db")
@@ -83,6 +84,9 @@ class PageCache:
         self._registered_types: set[str] = set()
         self._table_mapping: Dict[str, str] = {}
         self._page_classes: Dict[str, Type[Page]] = {}
+        
+        # Store invalidator functions for cache validation
+        self._invalidators: Dict[str, Callable[[Page], bool]] = {}
 
         # Initialize provenance tracker
         self._provenance = ProvenanceTracker(self)
@@ -159,6 +163,17 @@ class PageCache:
         self._page_classes[type_name] = page_type
 
         logger.debug(f"Registered page type {type_name}")
+
+    def register_invalidator(self, page_type: Type[P], invalidator: Callable[[P], bool]) -> None:
+        """Register an invalidator function for a page type.
+
+        Args:
+            page_type: Page class to register invalidator for
+            invalidator: Function that takes a page and returns True if valid, False if invalid
+        """
+        type_name = page_type.__name__
+        self._invalidators[type_name] = invalidator
+        logger.debug(f"Registered invalidator for page type {type_name}")
 
     def store_page(self, page: Page, parent_uri: Optional[PageURI] = None) -> bool:
         """Store a page in the cache with optional provenance tracking.
@@ -245,7 +260,7 @@ class PageCache:
             uri: The URI to look up
 
         Returns:
-            Page instance if found, None otherwise
+            Page instance if found and valid, None otherwise
         """
         table_registry = get_table_registry()
 
@@ -266,7 +281,18 @@ class PageCache:
                     )
 
                     if entity:
-                        return self._convert_entity_to_page(entity, page_class)
+                        # Check if page is marked as valid in cache
+                        if not entity.valid:
+                            logger.debug(f"Page marked as invalid in cache: {uri}")
+                            return None
+                            
+                        page = self._convert_entity_to_page(entity, page_class)
+                        
+                        # Validate page and ancestors using invalidators
+                        if not self._validate_page_and_ancestors(page):
+                            return None
+                            
+                        return page
         return None
 
     def get_page(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
@@ -277,7 +303,7 @@ class PageCache:
             uri: The PageURI to look up
 
         Returns:
-            Page instance of the requested type if found, None otherwise
+            Page instance of the requested type if found and valid, None otherwise
         """
         page_type_name = page_type.__name__
         table_registry = get_table_registry()
@@ -295,7 +321,18 @@ class PageCache:
             )
 
             if entity:
-                return self._convert_entity_to_page(entity, page_type)
+                # Check if page is marked as valid in cache
+                if not entity.valid:
+                    logger.debug(f"Page marked as invalid in cache: {uri}")
+                    return None
+                    
+                page = self._convert_entity_to_page(entity, page_type)
+                
+                # Validate page and ancestors using invalidators
+                if not self._validate_page_and_ancestors(page):
+                    return None
+                    
+                return page
             return None
 
     def get_latest_version(self, page_type: Type[P], uri_prefix: str) -> Optional[int]:
@@ -335,7 +372,7 @@ class PageCache:
             uri_prefix: The URI prefix (without version) to look up
 
         Returns:
-            Latest version of the page if found, None otherwise
+            Latest valid version of the page if found, None otherwise
         """
         latest_version = self.get_latest_version(page_type, uri_prefix)
         if latest_version is None:
@@ -403,12 +440,19 @@ class PageCache:
                 # Direct SQLAlchemy filter expression
                 query = query.filter(query_filter)
 
+            # Only return valid pages
+            query = query.filter(table_class.valid == True)
+
             entities = query.all()
             results = []
 
-            # Convert database entities back to Page instances
+            # Convert database entities back to Page instances and validate
             for entity in entities:
-                results.append(self._convert_entity_to_page(entity, page_type))
+                page = self._convert_entity_to_page(entity, page_type)
+                
+                # Validate page and ancestors using invalidators
+                if self._validate_page_and_ancestors(page):
+                    results.append(page)
 
             return results
 
@@ -499,3 +543,114 @@ class PageCache:
     def page_classes(self) -> Dict[str, Type[Page]]:
         """Get the registered page classes."""
         return self._page_classes.copy()
+
+    def invalidate_page(self, uri: PageURI) -> bool:
+        """Mark a specific page as invalid in the cache.
+
+        Args:
+            uri: URI of the page to invalidate
+
+        Returns:
+            True if page was found and invalidated, False if not found
+        """
+        table_registry = get_table_registry()
+
+        # Find which table contains this page
+        for page_type_name in self._registered_types:
+            if page_type_name in table_registry:
+                table_class = table_registry[page_type_name]
+
+                with self.get_session() as session:
+                    result = session.execute(
+                        update(table_class)
+                        .where(
+                            table_class.uri_prefix == uri.prefix,
+                            table_class.version == uri.version,
+                        )
+                        .values(valid=False)
+                    )
+                    session.commit()
+
+                    if result.rowcount > 0:
+                        logger.debug(f"Invalidated page: {uri}")
+                        return True
+
+        logger.debug(f"Page not found for invalidation: {uri}")
+        return False
+
+    def invalidate_pages_by_prefix(self, uri_prefix: str) -> int:
+        """Mark all versions of pages with the given prefix as invalid.
+
+        Args:
+            uri_prefix: URI prefix (without version) to invalidate
+
+        Returns:
+            Number of pages invalidated
+        """
+        table_registry = get_table_registry()
+        total_invalidated = 0
+
+        # Invalidate across all registered page types
+        for page_type_name in self._registered_types:
+            if page_type_name in table_registry:
+                table_class = table_registry[page_type_name]
+
+                with self.get_session() as session:
+                    result = session.execute(
+                        update(table_class)
+                        .where(table_class.uri_prefix == uri_prefix)
+                        .values(valid=False)
+                    )
+                    session.commit()
+                    total_invalidated += result.rowcount
+
+        logger.debug(f"Invalidated {total_invalidated} pages with prefix: {uri_prefix}")
+        return total_invalidated
+
+    def _validate_page_and_ancestors(self, page: Page) -> bool:
+        """Validate a page and its ancestors using registered invalidators.
+
+        This method checks:
+        1. If the page itself is valid according to its invalidator
+        2. If all ancestors in the provenance chain are valid
+
+        Args:
+            page: Page to validate
+
+        Returns:
+            True if page and all ancestors are valid, False otherwise
+        """
+        # First, validate the page itself
+        page_type_name = page.__class__.__name__
+        if page_type_name in self._invalidators:
+            invalidator = self._invalidators[page_type_name]
+            if not invalidator(page):
+                logger.debug(f"Page failed validation: {page.uri}")
+                # Mark as invalid in cache
+                self.invalidate_page(page.uri)
+                return False
+
+        # Then validate all ancestors
+        if page.parent_uri is not None:
+            try:
+                provenance_chain = self.get_provenance_chain(page.uri)
+                # Remove the current page from the chain (it's always the last one)
+                ancestor_pages = provenance_chain[:-1] if provenance_chain else []
+                
+                for ancestor in ancestor_pages:
+                    ancestor_type_name = ancestor.__class__.__name__
+                    if ancestor_type_name in self._invalidators:
+                        ancestor_invalidator = self._invalidators[ancestor_type_name]
+                        if not ancestor_invalidator(ancestor):
+                            logger.debug(f"Ancestor page failed validation: {ancestor.uri}")
+                            # Mark ancestor as invalid in cache
+                            self.invalidate_page(ancestor.uri)
+                            # Also mark current page as invalid since its ancestor is invalid
+                            self.invalidate_page(page.uri)
+                            return False
+            except Exception as e:
+                logger.warning(f"Error validating provenance chain for {page.uri}: {e}")
+                # If we can't validate ancestors, consider the page invalid to be safe
+                return False
+
+        return True

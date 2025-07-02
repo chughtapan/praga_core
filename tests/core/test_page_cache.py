@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from praga_core.page_cache import PageCache, PageCacheError
 from praga_core.page_cache.schema import PageRelationships
@@ -2086,3 +2086,249 @@ class TestVersioning:
         assert user2_latest_page is not None
         assert user1_latest_page.name == "User 1 Version 2"
         assert user2_latest_page.name == "User 2 Version 1"
+
+
+class TestCacheInvalidation:
+    """Test cache invalidation functionality."""
+
+    class GoogleDocPage(Page):
+        """Test Google Docs page with revision tracking."""
+
+        title: str
+        content: str
+        revision: str = Field(exclude=True)  # Excluded field for validation
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    class ChunkPage(Page):
+        """Test chunk page derived from Google Doc."""
+
+        chunk_index: int
+        content: str
+        doc_revision: str = Field(exclude=True)  # For validation
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_register_invalidator(self, page_cache: PageCache) -> None:
+        """Test registering an invalidator function."""
+        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+            # Mock validation - check if revision is "current"
+            return page.revision == "current"
+
+        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+        
+        # Verify invalidator is stored
+        assert "GoogleDocPage" in page_cache._invalidators
+
+    def test_invalidate_page_by_uri(self, page_cache: PageCache) -> None:
+        """Test invalidating a specific page by URI."""
+        # Store a page
+        doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc1"),
+            title="Test Doc",
+            content="Test content",
+            revision="current"
+        )
+        page_cache.store_page(doc)
+
+        # Verify page exists and is valid
+        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        assert retrieved is not None
+
+        # Invalidate the page
+        result = page_cache.invalidate_page(doc.uri)
+        assert result is True
+
+        # Verify page is now invalid
+        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        assert retrieved is None
+
+    def test_invalidate_pages_by_prefix(self, page_cache: PageCache) -> None:
+        """Test invalidating all versions of pages with a prefix."""
+        # Store multiple versions of a page
+        for version in [1, 2, 3]:
+            doc = self.GoogleDocPage(
+                uri=PageURI(root="test", type="doc", id="doc1", version=version),
+                title=f"Test Doc v{version}",
+                content=f"Test content v{version}",
+                revision="current"
+            )
+            page_cache.store_page(doc)
+
+        # Verify all versions exist
+        for version in [1, 2, 3]:
+            uri = PageURI(root="test", type="doc", id="doc1", version=version)
+            retrieved = page_cache.get_page(self.GoogleDocPage, uri)
+            assert retrieved is not None
+
+        # Invalidate all versions
+        invalidated_count = page_cache.invalidate_pages_by_prefix("test/doc:doc1")
+        assert invalidated_count == 3
+
+        # Verify all versions are now invalid
+        for version in [1, 2, 3]:
+            uri = PageURI(root="test", type="doc", id="doc1", version=version)
+            retrieved = page_cache.get_page(self.GoogleDocPage, uri)
+            assert retrieved is None
+
+    def test_page_validation_with_invalidator(self, page_cache: PageCache) -> None:
+        """Test that pages are validated using registered invalidators."""
+        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+            # Mock validation - only "current" revision is valid
+            return page.revision == "current"
+
+        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+
+        # Store a page with "current" revision
+        doc_current = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc1"),
+            title="Current Doc",
+            content="Current content",
+            revision="current"
+        )
+        page_cache.store_page(doc_current)
+
+        # Store a page with "old" revision
+        doc_old = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc2"),
+            title="Old Doc",
+            content="Old content",
+            revision="old"
+        )
+        page_cache.store_page(doc_old)
+
+        # Current revision should be retrievable
+        retrieved_current = page_cache.get_page(self.GoogleDocPage, doc_current.uri)
+        assert retrieved_current is not None
+        assert retrieved_current.title == "Current Doc"
+
+        # Old revision should be invalidated and not retrievable
+        retrieved_old = page_cache.get_page(self.GoogleDocPage, doc_old.uri)
+        assert retrieved_old is None
+
+    def test_ancestor_validation(self, page_cache: PageCache) -> None:
+        """Test that ancestor pages are validated when retrieving child pages."""
+        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+            return page.revision == "current"
+
+        def validate_chunk(page: "TestCacheInvalidation.ChunkPage") -> bool:
+            return page.doc_revision == "current"
+
+        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+        page_cache.register_invalidator(self.ChunkPage, validate_chunk)
+
+        # Store parent document with "current" revision
+        parent_doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc1"),
+            title="Parent Doc",
+            content="Parent content",
+            revision="current"
+        )
+        page_cache.store_page(parent_doc)
+
+        # Store child chunk with "current" revision
+        child_chunk = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1"),
+            chunk_index=1,
+            content="Chunk content",
+            doc_revision="current",
+            parent_uri=parent_doc.uri
+        )
+        page_cache.store_page(child_chunk)
+
+        # Both should be retrievable initially
+        retrieved_parent = page_cache.get_page(self.GoogleDocPage, parent_doc.uri)
+        retrieved_child = page_cache.get_page(self.ChunkPage, child_chunk.uri)
+        assert retrieved_parent is not None
+        assert retrieved_child is not None
+
+        # Now simulate parent document becoming invalid (revision changed)
+        # We'll manually update the parent's revision to make it invalid
+        updated_parent = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc1", version=2),
+            title="Parent Doc Updated",
+            content="Updated parent content",
+            revision="old"  # This will make it invalid
+        )
+        page_cache.store_page(updated_parent)
+
+        # Update the child to point to the new parent version
+        updated_child = self.ChunkPage(
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=2),
+            chunk_index=1,
+            content="Chunk content",
+            doc_revision="current",  # Child is still current
+            parent_uri=updated_parent.uri
+        )
+        page_cache.store_page(updated_child)
+
+        # The updated parent should be invalid
+        retrieved_updated_parent = page_cache.get_page(self.GoogleDocPage, updated_parent.uri)
+        assert retrieved_updated_parent is None
+
+        # The child should also be invalid because its parent is invalid
+        retrieved_updated_child = page_cache.get_page(self.ChunkPage, updated_child.uri)
+        assert retrieved_updated_child is None
+
+    def test_find_pages_respects_validity(self, page_cache: PageCache) -> None:
+        """Test that find_pages_by_attribute only returns valid pages."""
+        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+            return page.revision == "current"
+
+        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+
+        # Store multiple documents with different revisions
+        docs = [
+            self.GoogleDocPage(
+                uri=PageURI(root="test", type="doc", id="doc1"),
+                title="Current Doc 1",
+                content="Content 1",
+                revision="current"
+            ),
+            self.GoogleDocPage(
+                uri=PageURI(root="test", type="doc", id="doc2"),
+                title="Current Doc 2",
+                content="Content 2",
+                revision="current"
+            ),
+            self.GoogleDocPage(
+                uri=PageURI(root="test", type="doc", id="doc3"),
+                title="Old Doc 3",
+                content="Content 3",
+                revision="old"
+            ),
+        ]
+
+        for doc in docs:
+            page_cache.store_page(doc)
+
+        # Find all documents with "Doc" in title
+        results = page_cache.find_pages_by_attribute(
+            self.GoogleDocPage,
+            lambda t: t.title.like("%Doc%")
+        )
+
+        # Should only return the 2 current documents, not the old one
+        assert len(results) == 2
+        titles = {r.title for r in results}
+        assert titles == {"Current Doc 1", "Current Doc 2"}
+
+    def test_no_invalidator_allows_all_pages(self, page_cache: PageCache) -> None:
+        """Test that pages without invalidators are always considered valid."""
+        # Store a page without registering an invalidator
+        doc = self.GoogleDocPage(
+            uri=PageURI(root="test", type="doc", id="doc1"),
+            title="Test Doc",
+            content="Test content",
+            revision="old"  # Would be invalid if invalidator was registered
+        )
+        page_cache.store_page(doc)
+
+        # Should be retrievable since no invalidator is registered
+        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        assert retrieved is not None
+        assert retrieved.title == "Test Doc"

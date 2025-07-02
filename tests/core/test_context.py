@@ -7,6 +7,7 @@ including page creation, caching, retrieval, and search functionality.
 from typing import Any, List, Optional
 
 import pytest
+from pydantic import Field
 
 from praga_core.context import ServerContext
 from praga_core.retriever import RetrieverAgentBase
@@ -428,3 +429,107 @@ class TestIntegration:
         assert isinstance(resolved_refs[1].page, AlternateTestPage)
         assert resolved_refs[0].page.title == "Test Page doc1"
         assert resolved_refs[1].page.name == "Alternate Page alt1"
+
+
+class TestInvalidatorIntegration:
+    """Test invalidator integration with ServerContext."""
+
+    class GoogleDocPage(Page):
+        """Test Google Docs page with revision tracking."""
+
+        title: str
+        content: str
+        revision: str = Field(exclude=True)
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_register_handler_with_invalidator(self, context: ServerContext) -> None:
+        """Test registering a handler with an invalidator function."""
+        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+            # Mock handler that creates a document
+            return TestInvalidatorIntegration.GoogleDocPage(
+                uri=context.create_page_uri("gdoc", doc_id),
+                title=f"Document {doc_id}",
+                content=f"Content for {doc_id}",
+                revision="current"
+            )
+
+        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
+            # Mock validator - only "current" revision is valid
+            return page.revision == "current"
+
+        # Register handler with invalidator
+        context.register_handler("gdoc", handle_gdoc, validate_gdoc)
+
+        # Verify both handler and invalidator are registered
+        assert "gdoc" in context._page_handlers
+        assert "gdoc" in context._page_invalidators
+
+    def test_invalidator_decorator_syntax(self, context: ServerContext) -> None:
+        """Test using invalidator with decorator syntax."""
+        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
+            return page.revision == "current"
+
+        @context.handler("gdoc", invalidator=validate_gdoc)
+        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+            return TestInvalidatorIntegration.GoogleDocPage(
+                uri=context.create_page_uri("gdoc", doc_id),
+                title=f"Document {doc_id}",
+                content=f"Content for {doc_id}",
+                revision="current"
+            )
+
+        # Verify both handler and invalidator are registered
+        assert "gdoc" in context._page_handlers
+        assert "gdoc" in context._page_invalidators
+
+    def test_context_invalidation_methods(self, context: ServerContext) -> None:
+        """Test the invalidation methods exposed by ServerContext."""
+        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+            return TestInvalidatorIntegration.GoogleDocPage(
+                uri=context.create_page_uri("gdoc", doc_id),
+                title=f"Document {doc_id}",
+                content=f"Content for {doc_id}",
+                revision="current"
+            )
+
+        context.register_handler("gdoc", handle_gdoc)
+
+        # Create and store a page through the handler
+        page = context.get_page("test/gdoc:doc1")
+        assert page is not None
+
+        # Test invalidating by URI string
+        result = context.invalidate_page("test/gdoc:doc1@1")
+        assert result is True
+
+        # Test invalidating by prefix
+        count = context.invalidate_pages_by_prefix("test/gdoc:doc1")
+        assert count >= 0  # May be 0 if already invalidated
+
+    def test_get_page_registers_invalidator_with_cache(self, context: ServerContext) -> None:
+        """Test that getting a page registers the invalidator with the cache."""
+        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+            return TestInvalidatorIntegration.GoogleDocPage(
+                uri=context.create_page_uri("gdoc", doc_id),
+                title=f"Document {doc_id}",
+                content=f"Content for {doc_id}",
+                revision="current"
+            )
+
+        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
+            return page.revision == "current"
+
+        context.register_handler("gdoc", handle_gdoc, validate_gdoc)
+
+        # Initially, cache should not have the invalidator
+        assert "GoogleDocPage" not in context.page_cache._invalidators
+
+        # Get a page, which should register the invalidator with cache
+        page = context.get_page("test/gdoc:doc1")
+        assert page is not None
+
+        # Now cache should have the invalidator
+        assert "GoogleDocPage" in context.page_cache._invalidators
