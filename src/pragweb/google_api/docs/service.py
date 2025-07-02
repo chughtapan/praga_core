@@ -179,9 +179,12 @@ class GoogleDocsService(ToolkitService):
                     id=f"{document_id}({i + 1})",
                 )
 
-            # Create chunk page
-            chunk_uri = self.context.create_page_uri(
-                GDocChunk, "gdoc_chunk", id=chunk_id
+            # Create chunk page using same pattern as provided header URI
+            chunk_uri = PageURI(
+                root=header_page_uri.root,
+                type="gdoc_chunk", 
+                id=chunk_id,
+                version=None  # Let the chunk handler create the version when needed
             )
             chunk_page = GDocChunk(
                 uri=chunk_uri,

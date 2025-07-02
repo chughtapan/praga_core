@@ -130,8 +130,13 @@ class GmailService(ToolkitService):
             if i == 0:
                 thread_subject = parsed["subject"]
 
-            # Create URI for this email
-            email_uri = self.context.create_page_uri(EmailPage, "email", message["id"])
+            # Create URI for this email using same pattern as provided thread URI
+            email_uri = PageURI(
+                root=page_uri.root, 
+                type="email", 
+                id=message["id"],
+                version=None  # Let the email handler create the version when needed
+            )
 
             # Create EmailSummary
             email_summary = EmailSummary(

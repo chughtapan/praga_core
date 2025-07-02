@@ -129,32 +129,44 @@ class ServerContext:
         """
         # Check if caching is enabled for this page type
         cache_enabled = self._page_cache_enabled.get(page_uri.type, True)
-        
         if not cache_enabled:
             return None
             
-        # Try to get from cache (determine page type from handler return type)
+        # Get handler and extract page type from return annotation
         handler = self._page_handlers[page_uri.type]
-        # We need to inspect the handler's return type annotation to get the Page class
-        import typing
+        page_type = self._get_handler_return_type(handler, page_uri.type)
+        if not page_type:
+            return None
+            
+        # Try to get from cache
         try:
-            # Try to get the return type annotation
-            if hasattr(handler, '__annotations__') and 'return' in handler.__annotations__:
-                page_type = handler.__annotations__['return']
-                cached_page = self._page_cache.get(page_type, page_uri)
-                if cached_page:
-                    logger.debug(f"Found cached page for {page_uri}")
-                    # Register invalidator with cache if we have one for this page type
-                    if page_uri.type in self._page_invalidators:
-                        invalidator = self._page_invalidators[page_uri.type]
-                        self._register_invalidator_with_cache(page_type, invalidator)
-                    return cached_page
-            else:
-                logger.debug(f"No return type annotation found for handler {page_uri.type}, skipping cache lookup")
+            cached_page = self._page_cache.get(page_type, page_uri)
+            if cached_page:
+                logger.debug(f"Found cached page for {page_uri}")
+                self._register_invalidator_if_exists(page_uri.type, page_type)
+                return cached_page
         except Exception as e:
             logger.debug(f"Error checking cache for {page_uri}: {e}, falling back to handler")
         
         return None
+    
+    def _get_handler_return_type(self, handler, page_type_name: str):
+        """Extract the return type annotation from a handler function."""
+        try:
+            if hasattr(handler, '__annotations__') and 'return' in handler.__annotations__:
+                return handler.__annotations__['return']
+            else:
+                logger.debug(f"No return type annotation found for handler {page_type_name}, skipping cache lookup")
+                return None
+        except Exception as e:
+            logger.debug(f"Error extracting return type for handler {page_type_name}: {e}")
+            return None
+    
+    def _register_invalidator_if_exists(self, page_type_name: str, page_type):
+        """Register invalidator with cache if one exists for this page type."""
+        if page_type_name in self._page_invalidators:
+            invalidator = self._page_invalidators[page_type_name]
+            self._register_invalidator_with_cache(page_type, invalidator)
 
     def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
