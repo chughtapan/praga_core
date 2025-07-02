@@ -249,7 +249,11 @@ class PageCache:
                 )
             else:
                 # Create new page record with split URI
-                page_data = {"uri_prefix": page.uri.prefix, "version": page.uri.version}
+                page_data = {
+                    "uri_prefix": page.uri.prefix,
+                    "version": page.uri.version,
+                    "valid": True,  # Explicitly set valid to True
+                }
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
                         value = getattr(page, field_name)
@@ -275,83 +279,74 @@ class PageCache:
                     session.rollback()
                     return False
 
-    def get_page_by_uri_any_type(self, uri: PageURI) -> Optional[Page]:
-        """Get a page by URI regardless of its type.
+    def _get_table_and_class(
+        self, page_type_name: str
+    ) -> tuple[Any, Any] | tuple[None, None]:
+        table_registry = get_table_registry()
+        if page_type_name in table_registry and page_type_name in self._page_classes:
+            return table_registry[page_type_name], self._page_classes[page_type_name]
+        return None, None
 
-        Args:
-            uri: The URI to look up. If version is None, returns latest version.
-
-        Returns:
-            Page instance if found and valid, None otherwise
-        """
-        # Handle None version by getting latest for each type
+    def _get_page_by_uri_any_type_internal(
+        self, uri: PageURI, *, validate: bool = True, check_valid: bool = True
+    ) -> Optional[Page]:
+        """Internal method to get a page by URI with optional validation and validity check."""
         if uri.version is None:
-            table_registry = get_table_registry()
+            return None
+        for page_type_name in self._registered_types:
+            table_class, page_class = self._get_table_and_class(page_type_name)
+            if not table_class or not isinstance(page_class, type):
+                continue
+            with self.get_session() as session:
+                entity = (
+                    session.query(table_class)
+                    .filter_by(uri_prefix=uri.prefix, version=uri.version)
+                    .first()
+                )
+                if entity:
+                    if check_valid and not entity.valid:
+                        return None
+                    page: Page = self._convert_entity_to_page(entity, page_class)
+                    if validate:
+                        if hasattr(
+                            self, "_validate_page_and_ancestors"
+                        ) and not self._validate_page_and_ancestors(page):
+                            return None
+                    return page
+        return None
 
-            # Check all registered page types for latest version
+    def get_page_by_uri_any_type(self, uri: PageURI) -> Optional[Page]:
+        """Get a page by URI regardless of its type."""
+        if uri.version is None:
             for page_type_name in self._registered_types:
-                if (
-                    page_type_name in table_registry
-                    and page_type_name in self._page_classes
-                ):
+                if page_type_name in self._page_classes:
                     page_class = self._page_classes[page_type_name]
                     latest_page = self.get_latest_page(page_class, uri.prefix)
                     if latest_page is not None:
                         return latest_page
             return None
+        return self._get_page_by_uri_any_type_internal(
+            uri, validate=True, check_valid=True
+        )
 
-        # Handle concrete version
-        table_registry = get_table_registry()
+    def _get_page_by_uri_any_type_no_validation(self, uri: PageURI) -> Optional[Page]:
+        """Get a page by URI without validation (for provenance tracking)."""
+        return self._get_page_by_uri_any_type_internal(
+            uri, validate=False, check_valid=True
+        )
 
-        # Check all registered page types
-        for page_type_name in self._registered_types:
-            if (
-                page_type_name in table_registry
-                and page_type_name in self._page_classes
-            ):
-                table_class = table_registry[page_type_name]
-                page_class = self._page_classes[page_type_name]
-
-                with self.get_session() as session:
-                    entity = (
-                        session.query(table_class)
-                        .filter_by(uri_prefix=uri.prefix, version=uri.version)
-                        .first()
-                    )
-
-                    if entity:
-                        # Check if page is marked as valid in cache
-                        if not entity.valid:
-                            logger.debug(f"Page marked as invalid in cache: {uri}")
-                            return None
-
-                        page = self._convert_entity_to_page(entity, page_class)
-
-                        # Validate page and ancestors using invalidators
-                        if not self._validate_page_and_ancestors(page):
-                            return None
-
-                        return page
-        return None
+    def _get_page_by_uri_any_type_ignore_validity(self, uri: PageURI) -> Optional[Page]:
+        """Get a page by URI ignoring validity status (for provenance chain construction)."""
+        return self._get_page_by_uri_any_type_internal(
+            uri, validate=False, check_valid=False
+        )
 
     def get_page(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
-        """Retrieve a page by its type and URI.
-
-        Args:
-            page_type: The Page class type to retrieve
-            uri: The PageURI to look up. If version is None, returns latest version.
-
-        Returns:
-            Page instance of the requested type if found and valid, None otherwise
-        """
+        """Retrieve a page by its type and URI."""
         page_type_name = page_type.__name__
-        table_registry = get_table_registry()
-
-        if page_type_name not in table_registry:
+        table_class, _ = self._get_table_and_class(page_type_name)
+        if not table_class:
             return None
-
-        table_class = table_registry[page_type_name]
-
         with self.get_session() as session:
             results = (
                 session.query(table_class)
@@ -360,20 +355,14 @@ class PageCache:
             )
             if uri.version is not None:
                 results = results.filter_by(version=uri.version)
-
             entity = results.first()
             if entity:
-                # Check if page is marked as valid in cache
                 if not entity.valid:
                     logger.debug(f"Page marked as invalid in cache: {uri}")
                     return None
-
                 page = self._convert_entity_to_page(entity, page_type)
-
-                # Validate page and ancestors using invalidators
                 if not self._validate_page_and_ancestors(page):
                     return None
-
                 return page
             return None
 
@@ -470,7 +459,7 @@ class PageCache:
                 query = query.filter(query_filter)
 
             # Only return valid pages
-            query = query.filter(table_class.valid is True)
+            query = query.filter(table_class.valid.is_(True))
 
             entities = query.all()
             results = []
@@ -659,8 +648,8 @@ class PageCache:
                 self.invalidate_page(page.uri)
                 return False
 
-        # Then validate all ancestors
-        if page.parent_uri is not None:
+        # Then validate all ancestors - but only if page has a parent and we have invalidators
+        if page.parent_uri is not None and self._invalidators:
             try:
                 provenance_chain = self.get_provenance_chain(page.uri)
                 # Remove the current page from the chain (it's always the last one)
@@ -681,7 +670,9 @@ class PageCache:
                             return False
             except Exception as e:
                 logger.warning(f"Error validating provenance chain for {page.uri}: {e}")
-                # If we can't validate ancestors, consider the page invalid to be safe
-                return False
+                # If we can't validate ancestors, only fail if we have invalidators registered
+                # Otherwise, assume the page is valid
+                if self._invalidators:
+                    return False
 
         return True

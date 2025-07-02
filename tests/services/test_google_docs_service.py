@@ -134,6 +134,7 @@ class TestGoogleDocsService:
 
         self.mock_api_client.get_document.return_value = mock_doc_data
         self.mock_api_client.get_file_metadata.return_value = mock_file_metadata
+        self.mock_api_client.get_latest_revision_id.return_value = "revision123"
 
         # Create a real PageURI for testing
         test_doc_id = "doc123"
@@ -141,6 +142,7 @@ class TestGoogleDocsService:
         chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
 
         # Mock the service's chunker directly
+        # Provide all required fields for GDocChunk
         mock_chunk = Mock()
         mock_chunk.text = "Hello world!"
         mock_chunk.token_count = 3
@@ -664,11 +666,32 @@ class TestGoogleDocsCacheInvalidation:
         self.mock_api_client.get_file_metadata.return_value = mock_file_metadata
         self.mock_api_client.get_latest_revision_id.return_value = "revision123"
 
-        # Mock chunker
-        mock_chunk = Mock()
-        mock_chunk.text = "Hello world!"
-        mock_chunk.token_count = 3
-        self.service.chunker.chunk = Mock(return_value=[mock_chunk])
+        # Patch chunker to return a real GDocChunk instance
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocChunk
+
+        test_doc_id = "doc123"
+        chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
+        header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
+        chunk = GDocChunk(
+            uri=chunk_uri,
+            document_id=test_doc_id,
+            chunk_index=0,
+            chunk_title="Hello world!",
+            content="Hello world!",
+            doc_title="Test Document",
+            token_count=3,
+            prev_chunk_uri=None,
+            next_chunk_uri=None,
+            header_uri=header_uri,
+            permalink=f"https://docs.google.com/document/d/{test_doc_id}/edit",
+            doc_revision_id="revision123",
+        )
+        self.service.chunker.chunk = Mock(return_value=[chunk])
+
+        # Patch create_page_uri to return real PageURI objects in the correct order
+        self.mock_context.create_page_uri = Mock()
+        self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
 
         # Mock page cache
         self.mock_page_cache.store_page = Mock()
@@ -821,7 +844,8 @@ class TestGoogleDocsCacheInvalidation:
         with patch.object(self.service, "refresh_document") as mock_refresh:
             mock_refresh.return_value = mock_header
             result = toolkit.refresh_document("doc123")
-            assert result is mock_header
+            # toolkit.refresh_document returns a list
+            assert result == [mock_header]
 
     def test_toolkit_invalidate_error_handling(self):
         """Test toolkit error handling for invalidation."""

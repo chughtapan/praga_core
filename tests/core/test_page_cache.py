@@ -2201,7 +2201,7 @@ class TestCacheInvalidation:
         """Test invalidating a specific page by URI."""
         # Store a page
         doc = self.GoogleDocPage(
-            uri=PageURI(root="test", type="doc", id="doc1"),
+            uri=PageURI(root="test", type="doc", id="doc1", version=1),
             title="Test Doc",
             content="Test content",
             revision="current",
@@ -2259,7 +2259,7 @@ class TestCacheInvalidation:
 
         # Store a page with "current" revision
         doc_current = self.GoogleDocPage(
-            uri=PageURI(root="test", type="doc", id="doc1"),
+            uri=PageURI(root="test", type="doc", id="doc1", version=1),
             title="Current Doc",
             content="Current content",
             revision="current",
@@ -2268,7 +2268,7 @@ class TestCacheInvalidation:
 
         # Store a page with "old" revision
         doc_old = self.GoogleDocPage(
-            uri=PageURI(root="test", type="doc", id="doc2"),
+            uri=PageURI(root="test", type="doc", id="doc2", version=1),
             title="Old Doc",
             content="Old content",
             revision="old",
@@ -2298,7 +2298,7 @@ class TestCacheInvalidation:
 
         # Store parent document with "current" revision
         parent_doc = self.GoogleDocPage(
-            uri=PageURI(root="test", type="doc", id="doc1"),
+            uri=PageURI(root="test", type="doc", id="doc1", version=1),
             title="Parent Doc",
             content="Parent content",
             revision="current",
@@ -2307,13 +2307,13 @@ class TestCacheInvalidation:
 
         # Store child chunk with "current" revision
         child_chunk = self.ChunkPage(
-            uri=PageURI(root="test", type="chunk", id="chunk1"),
+            uri=PageURI(root="test", type="chunk", id="chunk1", version=1),
             chunk_index=1,
             content="Chunk content",
             doc_revision="current",
             parent_uri=parent_doc.uri,
         )
-        page_cache.store_page(child_chunk)
+        page_cache.store_page(child_chunk, parent_uri=parent_doc.uri)
 
         # Both should be retrievable initially
         retrieved_parent = page_cache.get_page(self.GoogleDocPage, parent_doc.uri)
@@ -2339,7 +2339,7 @@ class TestCacheInvalidation:
             doc_revision="current",  # Child is still current
             parent_uri=updated_parent.uri,
         )
-        page_cache.store_page(updated_child)
+        page_cache.store_page(updated_child, parent_uri=updated_parent.uri)
 
         # The updated parent should be invalid
         retrieved_updated_parent = page_cache.get_page(
@@ -2362,19 +2362,19 @@ class TestCacheInvalidation:
         # Store multiple documents with different revisions
         docs = [
             self.GoogleDocPage(
-                uri=PageURI(root="test", type="doc", id="doc1"),
+                uri=PageURI(root="test", type="doc", id="doc1", version=1),
                 title="Current Doc 1",
                 content="Content 1",
                 revision="current",
             ),
             self.GoogleDocPage(
-                uri=PageURI(root="test", type="doc", id="doc2"),
+                uri=PageURI(root="test", type="doc", id="doc2", version=1),
                 title="Current Doc 2",
                 content="Content 2",
                 revision="current",
             ),
             self.GoogleDocPage(
-                uri=PageURI(root="test", type="doc", id="doc3"),
+                uri=PageURI(root="test", type="doc", id="doc3", version=1),
                 title="Old Doc 3",
                 content="Content 3",
                 revision="old",
@@ -2398,7 +2398,7 @@ class TestCacheInvalidation:
         """Test that pages without invalidators are always considered valid."""
         # Store a page without registering an invalidator
         doc = self.GoogleDocPage(
-            uri=PageURI(root="test", type="doc", id="doc1"),
+            uri=PageURI(root="test", type="doc", id="doc1", version=1),
             title="Test Doc",
             content="Test content",
             revision="old",  # Would be invalid if invalidator was registered
