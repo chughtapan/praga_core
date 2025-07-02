@@ -134,10 +134,6 @@ class PageCache:
         """Mark a specific page as invalid."""
         return self._storage.mark_invalid(uri)
 
-    def invalidate_prefix(self, uri_prefix: str) -> int:
-        """Mark all versions of a URI prefix as invalid."""
-        return self._storage.mark_invalid_by_prefix(uri_prefix)
-
     # Versioning methods
     def get_latest_version(self, page_type: Type[P], uri_prefix: str) -> Optional[int]:
         """Get the latest version number for a URI prefix (used by ServerContext for auto-increment)."""

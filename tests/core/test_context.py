@@ -521,36 +521,6 @@ class TestInvalidatorIntegration:
         assert "gdoc" in context._page_handlers
         assert "gdoc" in context._page_invalidators
 
-    @pytest.mark.xfail(
-        reason="This should be fixed after we ensure pages are cached aggressively."
-    )
-    def test_context_invalidation_methods(self, context: ServerContext) -> None:
-        """Test the invalidation methods exposed by ServerContext."""
-
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
-            return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
-                revision="current",
-            )
-
-        context.register_handler("gdoc", handle_gdoc)
-
-        # Create and store a page through the handler
-        page = context.get_page("test/gdoc:doc1")
-        assert page is not None
-
-        # Test invalidating by URI string
-        result = context.invalidate_page("test/gdoc:doc1@1")
-        assert result is True
-
-        # Test invalidating by prefix
-        count = context.invalidate_pages_by_prefix("test/gdoc:doc1")
-        assert count >= 0  # May be 0 if already invalidated
-
     def test_get_page_validates_with_registered_invalidator(
         self, context: ServerContext
     ) -> None:

@@ -2130,34 +2130,6 @@ class TestCacheInvalidation:
         retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is None
 
-    def test_invalidate_pages_by_prefix(self, page_cache: PageCache) -> None:
-        """Test invalidating all versions of pages with a prefix."""
-        # Store multiple versions of a page
-        for version in [1, 2, 3]:
-            doc = self.GoogleDocPage(
-                uri=PageURI(root="test", type="doc", id="doc1", version=version),
-                title=f"Test Doc v{version}",
-                content=f"Test content v{version}",
-                revision="current",
-            )
-            page_cache.store(doc)
-
-        # Verify all versions exist
-        for version in [1, 2, 3]:
-            uri = PageURI(root="test", type="doc", id="doc1", version=version)
-            retrieved = page_cache.get(self.GoogleDocPage, uri)
-            assert retrieved is not None
-
-        # Invalidate all versions
-        invalidated_count = page_cache.invalidate_prefix("test/doc:doc1")
-        assert invalidated_count == 3
-
-        # Verify all versions are now invalid
-        for version in [1, 2, 3]:
-            uri = PageURI(root="test", type="doc", id="doc1", version=version)
-            retrieved = page_cache.get(self.GoogleDocPage, uri)
-            assert retrieved is None
-
     def test_page_validation_with_invalidator(self, page_cache: PageCache) -> None:
         """Test that pages are validated using registered invalidators."""
 
