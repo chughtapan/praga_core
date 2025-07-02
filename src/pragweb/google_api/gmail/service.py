@@ -131,10 +131,10 @@ class GmailService(ToolkitService):
 
             # Create URI for this email using same pattern as provided thread URI
             email_uri = PageURI(
-                root=page_uri.root, 
-                type="email", 
+                root=page_uri.root,
+                type="email",
                 id=message["id"],
-                version=None  # Let the email handler create the version when needed
+                version=1,  # Use version 1 for email summaries in threads
             )
 
             # Create EmailSummary

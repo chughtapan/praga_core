@@ -62,38 +62,18 @@ class TestGoogleDocsService:
         # The chunker should be initialized (we can't easily test chunk_size as it's internal)
         assert service.chunker is not None
 
-    def test_handle_header_request_cached(self):
-        """Test handle_header_request returns cached header."""
-        mock_header = Mock(spec=GDocHeader)
-        self.mock_page_cache.get.return_value = mock_header
-
-        result = self.service.handle_header_request("doc123")
-
-        # Verify cache lookup
-        expected_uri = PageURI(root="test-root", type="gdoc_header", id="doc123")
-        self.mock_page_cache.get.assert_called_once_with(GDocHeader, expected_uri)
-        assert result is mock_header
-
     def test_handle_header_request_not_cached(self):
-        """Test handle_header_request ingests document when not cached."""
-        self.mock_page_cache.get.return_value = None
+        """Test handle_header_request ingests document when called directly (cache is handled by context)."""
+        # Note: Caching is now handled by ServerContext.get_page(), so this method always ingests
         mock_header = Mock(spec=GDocHeader)
 
         with patch.object(self.service, "_ingest_document", return_value=mock_header):
-            result = self.service.handle_header_request("doc123")
+            expected_uri = PageURI(
+                root="test-root", type="gdoc_header", id="doc123", version=1
+            )
+            result = self.service.handle_header_request(expected_uri)
 
         assert result is mock_header
-
-    def test_handle_chunk_request_cached(self):
-        """Test handle_chunk_request returns cached chunk."""
-        mock_chunk = Mock(spec=GDocChunk)
-        self.mock_page_cache.get.return_value = mock_chunk
-
-        result = self.service.handle_chunk_request("chunk123")
-
-        expected_uri = PageURI(root="test-root", type="gdoc_chunk", id="chunk123")
-        self.mock_page_cache.get.assert_called_once_with(GDocChunk, expected_uri)
-        assert result is mock_chunk
 
     def test_handle_chunk_request_not_found(self):
         """Test handle_chunk_request raises error when chunk not found."""
@@ -105,7 +85,10 @@ class TestGoogleDocsService:
             with pytest.raises(
                 ValueError, match="Chunk doc123\\(0\\) not found after ingestion"
             ):
-                self.service.handle_chunk_request("doc123(0)")
+                expected_uri = PageURI(
+                    root="test-root", type="gdoc_chunk", id="doc123(0)", version=1
+                )
+                self.service.handle_chunk_request(expected_uri)
 
     def test_ingest_document_success(self):
         """Test successful document ingestion."""
@@ -137,6 +120,9 @@ class TestGoogleDocsService:
 
         # Create a real PageURI for testing
         test_doc_id = "doc123"
+        test_header_uri = PageURI(
+            root="test-root", type="gdoc_header", id=test_doc_id, version=1
+        )
         header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
         chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
 
@@ -154,7 +140,7 @@ class TestGoogleDocsService:
         # Mock page cache store method
         self.mock_page_cache.store = Mock()
 
-        result = self.service._ingest_document(test_doc_id)
+        result = self.service._ingest_document(test_header_uri)
 
         # Verify API calls made
         self.mock_api_client.get_document.assert_called_once_with(test_doc_id)
@@ -868,7 +854,10 @@ class TestGoogleDocsCacheInvalidation:
         # Mock page cache
         self.mock_page_cache.store = Mock()
 
-        result = self.service._ingest_document("doc123")
+        test_header_uri = PageURI(
+            root="test-root", type="gdoc_header", id="doc123", version=1
+        )
+        result = self.service._ingest_document(test_header_uri)
 
         # Verify revision ID was captured
         assert result.revision_id == "revision123"
