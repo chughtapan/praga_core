@@ -35,6 +35,9 @@ class PersonInfo:
         """Get the full name by combining first and last name."""
         return f"{self.first_name} {self.last_name}".strip()
 
+    def __str__(self) -> str:
+        return f"{self.full_name} <{self.email}> (from {self.source})"
+
 
 class PeopleService(ToolkitService):
     """Service for managing person data and PersonPage creation using Google People API."""
@@ -604,7 +607,7 @@ class PeopleService(ToolkitService):
         """Store person information and create PersonPage."""
         person_id = self._generate_person_id(person_info.email)
 
-        uri = PageURI(root=self.context.root, type="person", id=person_id)
+        uri = self.context.create_page_uri(PersonPage, "person", person_id)
         person_page = PersonPage(uri=uri, **person_info.__dict__)
 
         # Store in page cache

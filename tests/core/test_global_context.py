@@ -24,7 +24,7 @@ class MockService(ContextMixin):
 
     def create_test_page(self, page_id: str) -> TestPage:
         """Create a test page using global context."""
-        uri = self.context.create_page_uri("test", page_id)
+        uri = self.context.create_page_uri(TestPage, "test", page_id)
         return TestPage(uri=uri, title=f"Test {page_id}", content="Test content")
 
     def get_page_from_context(self, uri: str) -> Page:

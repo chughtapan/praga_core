@@ -141,8 +141,8 @@ class GoogleDocsService(ToolkitService):
         permalink = f"https://docs.google.com/document/d/{document_id}/edit"
 
         # Create header URI that will be used as parent for chunks
-        header_uri = PageURI(
-            root=self.context.root, type="gdoc_header", id=document_id
+        header_uri = self.context.create_page_uri(
+            GDocHeader, "gdoc_header", id=document_id
         )
 
         # Store chunks in page cache first
@@ -172,7 +172,9 @@ class GoogleDocsService(ToolkitService):
                 )
 
             # Create chunk page
-            chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
+            chunk_uri = self.context.create_page_uri(
+                GDocChunk, "gdoc_chunk", id=chunk_id
+            )
             chunk_page = GDocChunk(
                 uri=chunk_uri,
                 document_id=document_id,

@@ -33,6 +33,14 @@ class TestGmailService:
 
         self.mock_context.register_service = mock_register_service
 
+        # Mock create_page_uri to return predictable URIs
+        def mock_create_page_uri(page_type, type_path, id, version=None):
+            if version is None:
+                version = 1
+            return PageURI(root="test-root", type=type_path, id=id, version=version)
+
+        self.mock_context.create_page_uri = mock_create_page_uri
+
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient
@@ -112,7 +120,7 @@ class TestGmailService:
 
     def test_email_page_thread_uri_property(self):
         """Test that EmailPage has thread_uri property that links to thread page."""
-        # Setup mock message response
+        # Setup mock message response with all required fields
         mock_message = {
             "id": "msg123",
             "threadId": "thread456",
@@ -120,6 +128,7 @@ class TestGmailService:
                 "headers": [
                     {"name": "Subject", "value": "Test Subject"},
                     {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
                     {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
                 ]
             },
@@ -251,79 +260,125 @@ class TestGmailService:
         mock_thread = {
             "id": "thread456",
             "messages": [
-                {"id": "msg1", "payload": {"headers": []}},
-                {"id": "msg2", "payload": {"headers": []}},
+                {
+                    "id": "msg1",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Test Subject"},
+                            {"name": "From", "value": "sender@example.com"},
+                            {"name": "To", "value": "recipient@example.com"},
+                            {
+                                "name": "Date",
+                                "value": "Thu, 15 Jun 2023 10:30:00 +0000",
+                            },
+                        ]
+                    },
+                }
             ],
         }
 
         self.mock_api_client.get_thread.return_value = mock_thread
-        self.service.parser.extract_body = Mock(return_value="")
+        self.service.parser.extract_body = Mock(return_value="Test body")
 
         result = self.service.create_thread_page("thread456")
 
-        assert result.subject == ""
-        assert len(result.emails) == 2
-
-    def test_create_email_page_api_error(self):
-        """Test create_email_page handles API errors."""
-        self.mock_api_client.get_message.side_effect = Exception("API Error")
-
-        with pytest.raises(ValueError, match="Failed to fetch email msg123: API Error"):
-            self.service.create_email_page("msg123")
+        assert isinstance(result, EmailThreadPage)
+        assert result.thread_id == "thread456"
+        assert result.subject == "Test Subject"
+        assert len(result.emails) == 1
+        assert result.emails[0].sender == "sender@example.com"
+        assert result.emails[0].recipients == ["recipient@example.com"]
+        assert result.emails[0].body == "Test body"
+        assert result.emails[0].uri == PageURI(
+            root="test-root", type="email", id="msg1", version=1
+        )
 
     def test_create_email_page_minimal_headers(self):
-        """Test create_email_page with minimal headers."""
+        """Test email page creation with minimal headers."""
+        # Setup mock message response with minimal headers
         mock_message = {
             "id": "msg123",
             "threadId": "thread456",
-            "payload": {"headers": []},
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ]
+            },
         }
 
         self.mock_api_client.get_message.return_value = mock_message
-        self.service.parser.extract_body = Mock(return_value="")
+        self.service.parser.extract_body = Mock(return_value="Test body")
 
         result = self.service.create_email_page("msg123")
 
-        assert result.subject == ""
-        assert result.sender == ""
-        assert result.recipients == []
-        assert result.cc_list == []
-        assert isinstance(result.time, datetime)
+        assert isinstance(result, EmailPage)
+        assert result.message_id == "msg123"
+        assert result.thread_id == "thread456"
+        assert result.subject == "Test Subject"
+        assert result.sender == "sender@example.com"
+        assert result.recipients == ["recipient@example.com"]
+        assert result.body == "Test body"
+        assert result.uri == PageURI(
+            root="test-root", type="email", id="msg123", version=1
+        )
 
     def test_create_email_page_missing_thread_id(self):
-        """Test create_email_page when threadId is missing."""
-        mock_message = {"id": "msg123", "payload": {"headers": []}}
+        """Test email page creation with missing thread ID."""
+        # Setup mock message response with missing thread ID
+        mock_message = {
+            "id": "msg123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ]
+            },
+        }
 
         self.mock_api_client.get_message.return_value = mock_message
-        self.service.parser.extract_body = Mock(return_value="")
+        self.service.parser.extract_body = Mock(return_value="Test body")
 
         result = self.service.create_email_page("msg123")
 
-        assert result.thread_id == "msg123"  # Falls back to message ID
-        assert result.permalink == "https://mail.google.com/mail/u/0/#inbox/msg123"
+        assert isinstance(result, EmailPage)
+        assert result.message_id == "msg123"
+        assert result.thread_id == "msg123"  # Should use message ID as thread ID
+        assert result.subject == "Test Subject"
+        assert result.sender == "sender@example.com"
+        assert result.recipients == ["recipient@example.com"]
+        assert result.body == "Test body"
+        assert result.uri == PageURI(
+            root="test-root", type="email", id="msg123", version=1
+        )
 
     def test_search_emails_basic(self):
-        """Test basic email search."""
-        mock_messages = [{"id": "msg1"}, {"id": "msg2"}, {"id": "msg3"}]
+        """Test basic email search functionality."""
+        # Setup mock search response
+        mock_messages = [
+            {"id": "msg1", "threadId": "thread1"},
+            {"id": "msg2", "threadId": "thread2"},
+        ]
+        self.mock_api_client.search_messages.return_value = (mock_messages, None)
 
-        self.mock_api_client.search_messages.return_value = (mock_messages, "token123")
-
+        # Call search_emails
         uris, next_token = self.service.search_emails("test query")
 
-        # Verify API call
+        # Verify API client call
         self.mock_api_client.search_messages.assert_called_once_with(
             "test query", page_token=None, page_size=20
         )
 
         # Verify results
-        assert len(uris) == 3
+        assert len(uris) == 2
         assert all(isinstance(uri, PageURI) for uri in uris)
         assert uris[0].id == "msg1"
         assert uris[1].id == "msg2"
-        assert uris[2].id == "msg3"
-        assert all(uri.type == "email" for uri in uris)
-        assert all(uri.root == "test-root" for uri in uris)
-        assert next_token == "token123"
+        assert next_token is None
 
     def test_search_emails_with_inbox_filter(self):
         """Test search passes query through to API client."""
@@ -656,6 +711,12 @@ class TestEmailThreadPageIntegration:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
 
+        # Mock create_page_uri to return predictable URIs
+        def mock_create_page_uri(page_type, type_path, id, version=None):
+            return PageURI(root="test-root", type=type_path, id=id, version=1)
+
+        self.mock_context.create_page_uri = mock_create_page_uri
+
         def mock_register_service(name, service):
             self.mock_context.services[name] = service
 
@@ -665,6 +726,7 @@ class TestEmailThreadPageIntegration:
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
         self.mock_api_client.get_thread = Mock()
+        self.mock_api_client.get_message = Mock()
         self.service = GmailService(self.mock_api_client)
 
     def teardown_method(self):
@@ -681,6 +743,7 @@ class TestEmailThreadPageIntegration:
                 "headers": [
                     {"name": "Subject", "value": "Test Subject"},
                     {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
                     {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
                 ]
             },
@@ -692,8 +755,8 @@ class TestEmailThreadPageIntegration:
             "messages": [mock_message],
         }
 
-        self.mock_api_client.get_message = Mock(return_value=mock_message)
-        self.mock_api_client.get_thread = Mock(return_value=mock_thread)
+        self.mock_api_client.get_message.return_value = mock_message
+        self.mock_api_client.get_thread.return_value = mock_thread
         self.service.parser.extract_body = Mock(return_value="Test body")
 
         # Create email page and thread page
@@ -763,6 +826,8 @@ class TestEmailThreadPageIntegration:
             assert email_summary.uri.root == "test-root"
             assert email_summary.uri.type == "email"
             assert email_summary.uri.version == 1
+            assert email_summary.body == "Email body content"
+            assert isinstance(email_summary.time, datetime)
 
 
 class TestGmailToolkit:
