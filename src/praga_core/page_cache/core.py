@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..types import Page, PageURI
-from .provenance_manager import ProvenanceManager
+from .provenance import ProvenanceManager
 from .query import PageQuery
 from .registry import PageRegistry
 from .schema import Base, PageRelationships

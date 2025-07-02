@@ -152,50 +152,58 @@ class ProvenanceManager:
         return children
 
     def get_lineage(self, page_uri: PageURI) -> List[Page]:
-        """Get the lineage chain from root to the specified page as Page objects."""
+        """Get the lineage chain from root to the specified page as Page objects.
+
+        Returns the pages in order from root to child. Since cycles are prevented
+        during relationship creation, this is guaranteed to be a linear chain.
+
+        Args:
+            page_uri: The URI of the page to get lineage for
+
+        Returns:
+            List of pages in order from root to child
+        """
         lineage = []
         current_uri: Optional[PageURI] = page_uri
-        visited: Set[str] = set()  # Prevent infinite loops
-        max_depth = 50  # Safety limit
 
-        while current_uri and len(visited) < max_depth:
-            # Prevent infinite loops
-            uri_str = str(current_uri)
-            if uri_str in visited:
-                break
-            visited.add(uri_str)
-
-            # Find the page for this URI (ignore validity to build complete lineage)
-            page = None
-            for page_type in self._registry.registered_types:
-                try:
-                    page = self._storage.get(
-                        page_type, current_uri, ignore_validity=True
-                    )
-                    if page is not None:
-                        break
-                except Exception:
-                    continue
-
+        while current_uri:
+            # Try to find the page of this URI in any registered type
+            page = self._find_page_by_uri(current_uri)
             if page:
-                lineage.append(page)  # Append to build child-to-root order
+                lineage.append(page)
 
             # Find parent relationship
             with self._session_factory() as session:
                 parent_relationship = (
                     session.query(PageRelationships)
-                    .filter_by(source_uri=uri_str, relationship_type="parent")
+                    .filter_by(source_uri=str(current_uri), relationship_type="parent")
                     .first()
                 )
 
-                if parent_relationship:
-                    try:
-                        current_uri = PageURI.parse(str(parent_relationship.target_uri))
-                    except Exception:
-                        current_uri = None
-                else:
-                    current_uri = None
+                current_uri = (
+                    PageURI.parse(str(parent_relationship.target_uri))
+                    if parent_relationship
+                    else None
+                )
 
         # Reverse to get root-to-child order
         lineage.reverse()
         return lineage
+
+    def _find_page_by_uri(self, uri: PageURI) -> Optional[Page]:
+        """Find a page by URI across all registered types.
+
+        Args:
+            uri: The URI to look up
+
+        Returns:
+            The page if found, None otherwise
+        """
+        for page_type in self._registry.registered_types:
+            try:
+                page = self._storage.get(page_type, uri, ignore_validity=True)
+                if page is not None:
+                    return page
+            except Exception:
+                continue
+        return None

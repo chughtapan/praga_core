@@ -11,7 +11,11 @@ from typing import Any, List, Optional
 import pytest
 from pydantic import BaseModel, Field
 
-from praga_core.page_cache import PageCache, PageCacheError
+from praga_core.page_cache import (
+    PageCache,
+    PageCacheError,
+    ProvenanceError,
+)
 from praga_core.page_cache.schema import PageRelationships
 from praga_core.page_cache.serialization import (
     deserialize_from_storage,
@@ -1140,7 +1144,7 @@ class TestProvenanceTracking:
 
     def test_provenance_precheck_parent_not_exist(self, page_cache: PageCache) -> None:
         """Test that storing fails when parent doesn't exist."""
-        from praga_core import ProvenanceError
+        from praga_core.page_cache import ProvenanceError
 
         nonexistent_parent = PageURI(
             root="test", type="gdoc", id="nonexistent", version=1
@@ -1161,7 +1165,7 @@ class TestProvenanceTracking:
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when child already exists."""
-        from praga_core import ProvenanceError
+        from praga_core.page_cache import PageCacheError
 
         # Store parent
         parent_doc = self.GoogleDocPage(
@@ -1181,13 +1185,12 @@ class TestProvenanceTracking:
 
         # Try to store with parent relationship (should fail because child exists)
         with pytest.raises(
-            ProvenanceError, match="Child page .* already exists in cache"
+            PageCacheError, match="already exists and cannot be updated"
         ):
             page_cache.store(chunk, parent_uri=parent_doc.uri)
 
     def test_provenance_precheck_same_page_type(self, page_cache: PageCache) -> None:
         """Test that storing fails when parent and child are same page type."""
-        from praga_core import ProvenanceError
 
         # Store parent doc
         parent_doc = self.GoogleDocPage(
@@ -1213,7 +1216,6 @@ class TestProvenanceTracking:
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when parent has invalid version number."""
-        from praga_core import ProvenanceError
 
         # Store parent with version 0 (should still be stored)
         parent_doc = self.GoogleDocPage(

@@ -400,6 +400,7 @@ class TestGoogleDocsToolkit:
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
         self.mock_context.get = Mock()
+        self.mock_context.get_page = Mock()
 
         set_global_context(self.mock_context)
 
@@ -423,12 +424,47 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_title(self):
         """Test search_documents_by_title tool."""
+        # Create real GDocHeader instances for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header1 = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document 1",
+            summary="Test summary 1",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+        header2 = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc2", version=1),
+            document_id="doc2",
+            title="Test Document 2",
+            summary="Test summary 2",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=200,
+            chunk_count=10,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc2/edit",
+            revision_id="rev2",
+        )
+
         # Mock search results
-        mock_headers = [Mock(spec=GDocHeader), Mock(spec=GDocHeader)]
-        self.mock_context.get.side_effect = mock_headers
+        mock_headers = [header1, header2]
+        self.mock_context.get_page.side_effect = mock_headers
 
         # Mock service search method
-        mock_uris = [Mock(spec=PageURI), Mock(spec=PageURI)]
+        mock_uris = [header1.uri, header2.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             "next_token",
@@ -447,10 +483,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_topic(self):
         """Test search_documents_by_topic tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get.return_value = mock_headers[0]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
 
-        mock_uris = [Mock(spec=PageURI)]
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
+        self.mock_context.get_page.return_value = mock_headers[0]
+
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_documents_by_topic("test topic")
@@ -463,10 +520,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_owner(self):
         """Test search_documents_by_owner tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get.return_value = mock_headers[0]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
 
-        mock_uris = [Mock(spec=PageURI)]
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="owner@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
+        self.mock_context.get_page.return_value = mock_headers[0]
+
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -488,10 +566,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_owner_with_name(self):
         """Test search_documents_by_owner tool with person name."""
-        mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get.return_value = mock_headers[0]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
 
-        mock_uris = [Mock(spec=PageURI)]
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="john.doe@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
+        self.mock_context.get_page.return_value = mock_headers[0]
+
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -513,10 +612,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_recently_modified_documents(self):
         """Test search_recently_modified_documents tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get.return_value = mock_headers[0]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
 
-        mock_uris = [Mock(spec=PageURI)]
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
+        self.mock_context.get_page.return_value = mock_headers[0]
+
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -531,10 +651,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_all_documents(self):
         """Test search_all_documents tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get.return_value = mock_headers[0]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
 
-        mock_uris = [Mock(spec=PageURI)]
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
+        self.mock_context.get_page.return_value = mock_headers[0]
+
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_all_documents()
@@ -570,12 +711,33 @@ class TestGoogleDocsToolkit:
 
     def test_pagination_with_cursor(self):
         """Test pagination using cursor."""
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
         # Mock service returns results with next cursor
         self.mock_service.search_documents.return_value = (
-            [Mock(spec=PageURI)],
+            [header.uri],
             "next_cursor_token",
         )
-        self.mock_context.get.return_value = Mock(spec=GDocHeader)
+        self.mock_context.get_page.return_value = header
 
         result = self.toolkit.search_documents_by_title("test", cursor="current_cursor")
 
