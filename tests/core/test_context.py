@@ -73,22 +73,21 @@ def sample_page_references() -> List[PageReference]:
 
 
 # Handler functions for testing
-def document_page_handler(page_id: str) -> DocumentPage:
+def document_page_handler(page_uri: PageURI) -> DocumentPage:
     """Test handler for DocumentPage."""
     return DocumentPage(
-        uri=f"test/document:{page_id}@1",
-        title=f"Test Page {page_id}",
-        content=f"Content for page {page_id}",
+        uri=str(page_uri),
+        title=f"Test Page {page_uri.id}",
+        content=f"Content for page {page_uri.id}",
     )
 
 
-def alternate_page_handler(page_id: str) -> AlternateTestPage:
+def alternate_page_handler(page_uri: PageURI) -> AlternateTestPage:
     """Test handler for AlternateTestPage."""
-    uri = PageURI(root="test", type="alternate", id=page_id, version=1)
     return AlternateTestPage(
-        uri=uri,
-        name=f"Alternate Page {page_id}",
-        data=f"Data for page {page_id}",
+        uri=page_uri,
+        name=f"Alternate Page {page_uri.id}",
+        data=f"Data for page {page_uri.id}",
     )
 
 
@@ -416,8 +415,8 @@ class TestIntegration:
         """Test full workflow using decorator registration."""
 
         @context.handler("test")
-        def handle_test_page(page_id: str) -> DocumentPage:
-            return document_page_handler(page_id)
+        def handle_test_page(page_uri: PageURI) -> DocumentPage:
+            return document_page_handler(page_uri)
 
         # Create some test references
         refs = [
@@ -478,14 +477,12 @@ class TestInvalidatorIntegration:
     def test_register_handler_with_invalidator(self, context: ServerContext) -> None:
         """Test registering a handler with an invalidator function."""
 
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+        def handle_gdoc(page_uri: PageURI) -> "TestInvalidatorIntegration.GoogleDocPage":
             # Mock handler that creates a document
             return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
+                uri=page_uri,
+                title=f"Document {page_uri.id}",
+                content=f"Content for {page_uri.id}",
                 revision="current",
             )
 
@@ -507,13 +504,11 @@ class TestInvalidatorIntegration:
             return page.revision == "current"
 
         @context.handler("gdoc", invalidator=validate_gdoc)
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+        def handle_gdoc(page_uri: PageURI) -> "TestInvalidatorIntegration.GoogleDocPage":
             return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
+                uri=page_uri,
+                title=f"Document {page_uri.id}",
+                content=f"Content for {page_uri.id}",
                 revision="current",
             )
 
@@ -526,15 +521,13 @@ class TestInvalidatorIntegration:
     ) -> None:
         """Test that getting a page properly uses the registered validator."""
 
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+        def handle_gdoc(page_uri: PageURI) -> "TestInvalidatorIntegration.GoogleDocPage":
             # Return different revisions based on doc_id to test validation
-            revision = "current" if doc_id != "old_doc" else "old"
+            revision = "current" if page_uri.id != "old_doc" else "old"
             return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
+                uri=page_uri,
+                title=f"Document {page_uri.id}",
+                content=f"Content for {page_uri.id}",
                 revision=revision,
             )
 

@@ -51,42 +51,33 @@ class GoogleDocsService(ToolkitService):
                 logger.warning(f"Failed to validate header {page.uri}: {e}")
                 return False
 
-        @self.context.handler("gdoc_header", invalidator=validate_gdoc_header)
-        def handle_gdoc_header(document_id: str) -> GDocHeader:
-            return self.handle_header_request(document_id)
+        @self.context.handler("gdoc_header", invalidator=validate_gdoc_header, cache=True)
+        def handle_gdoc_header(page_uri: PageURI) -> GDocHeader:
+            return self.handle_header_request(page_uri)
 
-        @self.context.handler("gdoc_chunk")
-        def handle_gdoc_chunk(chunk_id: str) -> GDocChunk:
-            return self.handle_chunk_request(chunk_id)
+        @self.context.handler("gdoc_chunk", cache=True)
+        def handle_gdoc_chunk(page_uri: PageURI) -> GDocChunk:
+            return self.handle_chunk_request(page_uri)
 
-    def handle_header_request(self, document_id: str) -> GDocHeader:
-        """Handle a Google Docs header page request - get from cache or ingest if not exists."""
-        page_cache = self.context.page_cache
-
-        # Construct URI from document_id
-        header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
-        cached_header = page_cache.get(GDocHeader, header_uri)
-        if cached_header:
-            logger.debug(f"Found existing document header in cache: {document_id}")
-            return cached_header
-
+    def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
+        """Handle a Google Docs header page request - ingest if not exists."""
+        # Note: Cache checking is now handled by ServerContext.get_page()
+        # This method is only called when the page is not in cache or caching is disabled
+        
         # Not in cache, ingest the document (ingest on touch)
-        logger.info(f"Document {document_id} not in cache, ingesting...")
-        header_page = self._ingest_document(document_id)
+        logger.info(f"Document {page_uri.id} not in cache, ingesting...")
+        header_page = self._ingest_document(page_uri.id)
         return header_page
 
-    def handle_chunk_request(self, chunk_id: str) -> GDocChunk:
-        """Handle a Google Docs chunk page request - get from cache or ingest if not exists."""
+    def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
+        """Handle a Google Docs chunk page request - ingest if not exists."""
+        # Note: Cache checking is now handled by ServerContext.get_page()
+        # This method is only called when the page is not in cache or caching is disabled
+        
         page_cache = self.context.page_cache
 
-        # Construct URI from chunk_id
-        chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
-        cached_chunk = page_cache.get(GDocChunk, chunk_uri)
-        if cached_chunk:
-            logger.debug(f"Found existing document chunk in cache: {chunk_id}")
-            return cached_chunk
-
         # Parse chunk_id to get document_id
+        chunk_id = page_uri.id
         if "(" not in chunk_id or not chunk_id.endswith(")"):
             raise ValueError(f"Invalid chunk ID format: {chunk_id}")
 
@@ -99,7 +90,7 @@ class GoogleDocsService(ToolkitService):
         self._ingest_document(document_id)
 
         # Now try to get the chunk again
-        cached_chunk = page_cache.get(GDocChunk, chunk_uri)
+        cached_chunk = page_cache.get(GDocChunk, page_uri)
         if not cached_chunk:
             raise ValueError(f"Chunk {chunk_id} not found after ingestion")
 
@@ -329,7 +320,8 @@ class GoogleDocsService(ToolkitService):
             raise ValueError(f"Invalid document header URI '{doc_header_uri}': {e}")
 
         # Ensure document is ingested (ingest on touch)
-        self.handle_header_request(document_id)
+        header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
+        self.handle_header_request(header_uri)
 
         # Get all chunks for this document from page cache
         page_cache = self.context.page_cache
