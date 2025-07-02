@@ -19,9 +19,6 @@ from pydantic import (
 
 logger = logging.getLogger(__name__)
 
-# Default version number indicating latest version
-DEFAULT_VERSION = 0
-
 
 class PageURI(BaseModel):
     """A structured URI for identifying pages with root/type:id@version format."""
@@ -29,13 +26,13 @@ class PageURI(BaseModel):
     root: str = Field(description="Root identifier for the server/context")
     type: str = Field(description="Type of the page")
     id: str = Field(description="Unique identifier within the type")
-    version: int = Field(
-        description="Version number of the page, or 0 for latest",
-        default=DEFAULT_VERSION,
+    version: Optional[int] = Field(
+        description="Version number of the page, or None for latest",
+        default=None,
     )
 
     def __init__(
-        self, root: str, type: str, id: str, version: int = DEFAULT_VERSION, **data: Any
+        self, root: str, type: str, id: str, version: Optional[int] = None, **data: Any
     ) -> None:
         """Initialize PageURI with validation."""
         # Validate that components don't contain forbidden characters
@@ -43,7 +40,7 @@ class PageURI(BaseModel):
             raise ValueError(f"Type cannot contain '/', ':', or '@' characters: {type}")
         if ":" in id or "@" in id:
             raise ValueError(f"ID cannot contain ':' or '@' characters: {id}")
-        if version < 0:
+        if version is not None and version < 0:
             raise ValueError(f"Version must be non-negative: {version}")
 
         super().__init__(root=root, type=type, id=id, version=version, **data)
@@ -90,9 +87,9 @@ class PageURI(BaseModel):
 
         root, type_name, id_part, version_str = match.groups()
 
-        # Default to default version if not specified
+        # Default to None version if not specified
         if version_str is None:
-            version = DEFAULT_VERSION
+            version = None
         else:
             try:
                 version = int(version_str)
@@ -103,8 +100,8 @@ class PageURI(BaseModel):
 
     def __str__(self) -> str:
         """Return string representation in root/type:id@version format."""
-        if self.version == DEFAULT_VERSION:
-            # Don't include version for default version
+        if self.version is None:
+            # Don't include version for None version (latest)
             return f"{self.root}/{self.type}:{self.id}"
         else:
             return f"{self.root}/{self.type}:{self.id}@{self.version}"
@@ -142,7 +139,7 @@ class Page(BaseModel, ABC):
         description="Structured URI for the page"
     )
     parent_uri: Optional[Annotated[PageURI, BeforeValidator(PageURI.parse)]] = Field(
-        None,
+        default=None,
         description="Optional parent page URI for provenance tracking",
         exclude=True,
     )

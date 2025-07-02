@@ -26,6 +26,16 @@ class TestCalendarService:
 
         self.mock_context.register_service = mock_register_service
 
+        # Mock create_page_uri method to return real PageURI objects
+        def mock_create_page_uri(page_type, type_path, id_val, version=None):
+            # Default to version 1 like the real implementation
+            actual_version = 1 if version is None else version
+            return PageURI(
+                root="test-root", type=type_path, id=id_val, version=actual_version
+            )
+
+        self.mock_context.create_page_uri = mock_create_page_uri
+
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient
@@ -100,7 +110,9 @@ class TestCalendarService:
         )
 
         # Verify URI
-        expected_uri = PageURI(root="test-root", type="calendar_event", id="event123")
+        expected_uri = PageURI(
+            root="test-root", type="calendar_event", id="event123", version=1
+        )
         assert result.uri == expected_uri
 
     def test_create_page_default_calendar(self):
@@ -266,6 +278,17 @@ class TestCalendarToolkit:
             self.mock_context.services[name] = service
 
         self.mock_context.register_service = mock_register_service
+
+        # Mock create_page_uri method to return real PageURI objects
+        def mock_create_page_uri(page_type, type_path, id_val, version=None):
+            # Default to version 1 like the real implementation
+            actual_version = 1 if version is None else version
+            return PageURI(
+                root="test-root", type=type_path, id=id_val, version=actual_version
+            )
+
+        self.mock_context.create_page_uri = mock_create_page_uri
+
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient and service

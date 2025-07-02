@@ -6,7 +6,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.types import PageURI, DEFAULT_VERSION
+from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -92,7 +92,7 @@ class GmailService(ToolkitService):
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
         # Create URI and return complete document
-        uri = PageURI(root=self.context.root, type="email", id=email_id, version=DEFAULT_VERSION)
+        uri = self.context.create_page_uri(EmailPage, "email", email_id)
         return EmailPage(
             uri=uri,
             message_id=email_id,
@@ -130,9 +130,7 @@ class GmailService(ToolkitService):
                 thread_subject = parsed["subject"]
 
             # Create URI for this email
-            email_uri = PageURI(
-                root=self.context.root, type="email", id=message["id"], version=DEFAULT_VERSION
-            )
+            email_uri = self.context.create_page_uri(EmailPage, "email", message["id"])
 
             # Create EmailSummary
             email_summary = EmailSummary(
@@ -150,9 +148,7 @@ class GmailService(ToolkitService):
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
         # Create URI and return complete thread document
-        uri = PageURI(
-            root=self.context.root, type="email_thread", id=thread_id, version=DEFAULT_VERSION
-        )
+        uri = self.context.create_page_uri(EmailThreadPage, "email_thread", thread_id)
         return EmailThreadPage(
             uri=uri,
             thread_id=thread_id,
@@ -176,7 +172,7 @@ class GmailService(ToolkitService):
 
             # Convert to PageURIs
             uris = [
-                PageURI(root=self.context.root, type="email", id=msg["id"], version=DEFAULT_VERSION)
+                self.context.create_page_uri(EmailPage, "email", msg["id"])
                 for msg in messages
             ]
 

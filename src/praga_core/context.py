@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, TypeVar
+from typing import Callable, Dict, List, Optional, Type, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
@@ -54,18 +54,38 @@ class ServerContext:
         """Get all registered services."""
         return self._services.copy()
 
-    def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
+    def create_page_uri(
+        self,
+        page_type: Type[Page],
+        type_path: str,
+        id: str,
+        version: Optional[int] = None,
+    ) -> PageURI:
         """Create a PageURI with this context's root.
 
+        When version is None, determines the next version number by checking
+        the cache for the latest existing version and incrementing it.
+
         Args:
-            type_name: Type name for the page
+            page_type: The Page class type
+            type_path: String path for the page type (e.g., "email", "calendar_event")
             id: Unique identifier
-            version: Version number (defaults to 1)
+            version: Version number (defaults to None for auto-increment)
 
         Returns:
-            PageURI object
+            PageURI object with resolved version number
         """
-        return PageURI(root=self.root, type=type_name, id=id, version=version)
+        if version is None:
+            # Create prefix to check for existing versions
+            prefix = f"{self.root}/{type_path}:{id}"
+
+            # Get the latest version for this page type and prefix
+            latest_version = self._page_cache.get_latest_version(page_type, prefix)
+
+            # If no existing versions found, start with 1. Otherwise increment the latest.
+            version = 1 if latest_version is None else (latest_version + 1)
+
+        return PageURI(root=self.root, type=type_path, id=id, version=version)
 
     def handler(self, page_type: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
         """Decorator to register a page handler function for a specific page type.

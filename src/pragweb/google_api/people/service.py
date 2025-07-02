@@ -8,7 +8,7 @@ from email.utils import parseaddr
 from typing import Any, Dict, List, Optional, Tuple
 
 from praga_core.agents import RetrieverToolkit, tool
-from praga_core.types import PageURI, DEFAULT_VERSION
+from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -34,6 +34,9 @@ class PersonInfo:
     def full_name(self) -> str:
         """Get the full name by combining first and last name."""
         return f"{self.first_name} {self.last_name}".strip()
+
+    def __str__(self) -> str:
+        return f"{self.full_name} <{self.email}> (from {self.source})"
 
 
 class PeopleService(ToolkitService):
@@ -604,7 +607,7 @@ class PeopleService(ToolkitService):
         """Store person information and create PersonPage."""
         person_id = self._generate_person_id(person_info.email)
 
-        uri = PageURI(root=self.context.root, type="person", id=person_id, version=DEFAULT_VERSION)
+        uri = self.context.create_page_uri(PersonPage, "person", person_id)
         person_page = PersonPage(uri=uri, **person_info.__dict__)
 
         # Store in page cache

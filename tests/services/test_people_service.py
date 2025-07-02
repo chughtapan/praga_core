@@ -400,6 +400,9 @@ class TestPeopleService:
         )
 
         self.mock_page_cache.store_page = Mock()
+        self.mock_context.create_page_uri.return_value = PageURI(
+            root="test-root", type="person", id="person123", version=1
+        )
 
         result = self.service._store_and_create_page(person_info)
 

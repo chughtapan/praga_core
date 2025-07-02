@@ -102,10 +102,10 @@ class TestPageURI:
         assert uri.id == "123"
         assert uri.version == 1
 
-    def test_page_uri_creation_default_version(self) -> None:
-        """Test creating a PageURI with default version."""
+    def test_page_uri_creation_none_version_default(self) -> None:
+        """Test creating a PageURI with None version (default)."""
         uri = PageURI(root="test", type="Email", id="123")
-        assert uri.version == 1
+        assert uri.version is None
 
     def test_page_uri_string_representation(self) -> None:
         """Test PageURI string representation."""
@@ -151,13 +151,13 @@ class TestPageURI:
             PageURI.parse("invalid-format")
 
     def test_page_uri_soft_parsing_without_version(self) -> None:
-        """Test soft parsing of URI without version (should default to version 1)."""
+        """Test soft parsing of URI without version (should default to None)."""
         uri_str = "server/Email:msg123"
         uri = PageURI.parse(uri_str)
         assert uri.root == "server"
         assert uri.type == "Email"
         assert uri.id == "msg123"
-        assert uri.version == 1
+        assert uri.version is None
 
     def test_page_uri_soft_parsing_with_empty_root(self) -> None:
         """Test soft parsing of URI with empty root and no version."""
@@ -166,7 +166,7 @@ class TestPageURI:
         assert uri.root == ""
         assert uri.type == "Email"
         assert uri.id == "msg123"
-        assert uri.version == 1
+        assert uri.version is None
 
     def test_page_uri_parsing_strict_still_works(self) -> None:
         """Test that strict parsing with version still works."""
@@ -197,25 +197,34 @@ class TestPageURI:
         assert uri1 != "not_a_uri"
 
 
-class TestDefaultVersionFunctionality:
-    """Test default version functionality in context."""
+class TestVersionFunctionality:
+    """Test version functionality in context."""
 
-    def test_create_page_uri_defaults_to_version_1(self, context: ServerContext) -> None:
-        """Test that create_page_uri defaults to version 1."""
-        uri = context.create_page_uri("email", "test123")
+    def test_create_page_uri_defaults_to_version_1(
+        self, context: ServerContext
+    ) -> None:
+        """Test that create_page_uri resolves None version to version 1 when no existing versions."""
+        # We need to use a real page class for this test
+        from praga_core.types import TextPage
+
+        uri = context.create_page_uri(TextPage, "text", "test123")
         assert uri.version == 1
 
-    def test_create_page_uri_explicit_version_overrides_default(self, context: ServerContext) -> None:
+    def test_create_page_uri_explicit_version_overrides_default(
+        self, context: ServerContext
+    ) -> None:
         """Test that explicit version parameter overrides the default behavior."""
-        from praga_core.types import DEFAULT_VERSION
-        
+        from praga_core.types import TextPage
+
         # Explicit version
-        uri = context.create_page_uri("email", "test123", version=5)
+        uri = context.create_page_uri(TextPage, "text", "test123", version=5)
         assert uri.version == 5
 
-        # Explicit default version
-        uri2 = context.create_page_uri("email", "test123", version=DEFAULT_VERSION)
-        assert uri2.version == DEFAULT_VERSION
+        # Explicit None version (latest)
+        uri2 = context.create_page_uri(TextPage, "text", "test123", version=None)
+        assert (
+            uri2.version == 1
+        )  # Should resolve to version 1 when no existing versions
 
 
 class TestServerContextInitialization:

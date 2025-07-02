@@ -176,7 +176,14 @@ class PageCache:
 
         Raises:
             ProvenanceError: If provenance tracking pre-checks fail
+            ValueError: If page URI has None version (cannot store latest version)
         """
+        # Check that page has a concrete version number
+        if page.uri.version is None:
+            raise ValueError(
+                "Cannot store page with None version (latest). Page must have a concrete version number."
+            )
+
         # Use provided parent_uri or fall back to page's parent_uri
         effective_parent_uri = parent_uri or page.parent_uri
 
@@ -242,11 +249,28 @@ class PageCache:
         """Get a page by URI regardless of its type.
 
         Args:
-            uri: The URI to look up
+            uri: The URI to look up. If version is None, returns latest version.
 
         Returns:
             Page instance if found, None otherwise
         """
+        # Handle None version by getting latest for each type
+        if uri.version is None:
+            table_registry = get_table_registry()
+
+            # Check all registered page types for latest version
+            for page_type_name in self._registered_types:
+                if (
+                    page_type_name in table_registry
+                    and page_type_name in self._page_classes
+                ):
+                    page_class = self._page_classes[page_type_name]
+                    latest_page = self.get_latest_page(page_class, uri.prefix)
+                    if latest_page is not None:
+                        return latest_page
+            return None
+
+        # Handle concrete version
         table_registry = get_table_registry()
 
         # Check all registered page types
@@ -274,7 +298,7 @@ class PageCache:
 
         Args:
             page_type: The Page class type to retrieve
-            uri: The PageURI to look up
+            uri: The PageURI to look up. If version is None, returns latest version.
 
         Returns:
             Page instance of the requested type if found, None otherwise
@@ -288,14 +312,18 @@ class PageCache:
         table_class = table_registry[page_type_name]
 
         with self.get_session() as session:
-            entity = (
+            results = (
                 session.query(table_class)
-                .filter_by(uri_prefix=uri.prefix, version=uri.version)
-                .first()
+                .filter_by(uri_prefix=uri.prefix)
+                .order_by(table_class.version.desc())
             )
+            if uri.version is not None:
+                results = results.filter_by(version=uri.version)
 
+            entity = results.first()
             if entity:
                 return self._convert_entity_to_page(entity, page_type)
+
             return None
 
     def get_latest_version(self, page_type: Type[P], uri_prefix: str) -> Optional[int]:
@@ -308,42 +336,16 @@ class PageCache:
         Returns:
             Latest version number if found, None otherwise
         """
-        page_type_name = page_type.__name__
-        table_registry = get_table_registry()
-
-        if page_type_name not in table_registry:
+        uri = PageURI.parse(uri_prefix)
+        page = self.get_page(page_type, uri)
+        if page is None:
             return None
-
-        table_class = table_registry[page_type_name]
-
-        with self.get_session() as session:
-            # Query for the maximum version for this prefix
-            result = (
-                session.query(table_class.version)
-                .filter_by(uri_prefix=uri_prefix)
-                .order_by(table_class.version.desc())
-                .first()
-            )
-
-            return result[0] if result else None
+        return page.uri.version
 
     def get_latest_page(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
-        """Get the latest version of a page for a URI prefix.
-
-        Args:
-            page_type: The Page class type to retrieve
-            uri_prefix: The URI prefix (without version) to look up
-
-        Returns:
-            Latest version of the page if found, None otherwise
-        """
-        latest_version = self.get_latest_version(page_type, uri_prefix)
-        if latest_version is None:
-            return None
-
-        # Reconstruct the full URI with the latest version
-        full_uri = PageURI.parse(f"{uri_prefix}@{latest_version}")
-        return self.get_page(page_type, full_uri)
+        """Get the latest version of a page for a URI prefix."""
+        uri = PageURI.parse(uri_prefix)
+        return self.get_page(page_type, uri)
 
     def find_pages_by_attribute(
         self,
