@@ -68,9 +68,8 @@ def test_context_mixin():
     set_global_context(context)
 
     # Register handler
-    def handle_test_page(page_id: str) -> TestPage:
-        uri = PageURI(root="test", type="test", id=page_id, version=1)
-        return TestPage(uri=uri, title=f"Test {page_id}", content="Test content")
+    def handle_test_page(page_uri: PageURI) -> TestPage:
+        return TestPage(uri=page_uri, title=f"Test {page_uri.id}", content="Test content")
 
     context.register_handler("test", handle_test_page)
 
@@ -103,9 +102,8 @@ def test_manual_context_setup():
     assert retrieved_context.root == "manual"
 
     # Can register handlers manually
-    def handle_my_type(type_id: str) -> TestPage:
-        uri = PageURI(root="manual", type="mytype", id=type_id, version=1)
-        return TestPage(uri=uri, title=f"My {type_id}", content="My content")
+    def handle_my_type(page_uri: PageURI) -> TestPage:
+        return TestPage(uri=page_uri, title=f"My {page_uri.id}", content="My content")
 
     context.register_handler("mytype", handle_my_type)
 
@@ -145,13 +143,11 @@ def test_multiple_services_same_context():
     set_global_context(context)
 
     # Register handlers for both types
-    def handle_shared(shared_id: str) -> TestPage:
-        uri = PageURI(root="shared", type="shared", id=shared_id, version=1)
-        return TestPage(uri=uri, title=f"Shared {shared_id}", content="Shared content")
+    def handle_shared(page_uri: PageURI) -> TestPage:
+        return TestPage(uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content")
 
-    def handle_test(test_id: str) -> TestPage:
-        uri = PageURI(root="shared", type="test", id=test_id, version=1)
-        return TestPage(uri=uri, title=f"Test {test_id}", content="Test content")
+    def handle_test(page_uri: PageURI) -> TestPage:
+        return TestPage(uri=page_uri, title=f"Test {page_uri.id}", content="Test content")
 
     context.register_handler("shared", handle_shared)
     context.register_handler("test", handle_test)

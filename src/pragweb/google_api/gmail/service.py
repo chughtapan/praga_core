@@ -32,13 +32,13 @@ class GmailService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler("email")
-        def handle_email(email_id: str) -> EmailPage:
-            return self.create_email_page(email_id)
+        @self.context.handler("email", cache=True)
+        def handle_email(page_uri: PageURI) -> EmailPage:
+            return self.create_email_page(page_uri.id)
 
-        @self.context.handler("email_thread")
-        def handle_thread(thread_id: str) -> EmailThreadPage:
-            return self.create_thread_page(thread_id)
+        @self.context.handler("email_thread", cache=True)
+        def handle_thread(page_uri: PageURI) -> EmailThreadPage:
+            return self.create_thread_page(page_uri.id)
 
     def _parse_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
         """Parse common email content from a Gmail message.

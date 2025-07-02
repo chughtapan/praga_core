@@ -51,20 +51,22 @@ class PeopleService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler("person")
-        def handle_person(person_id: str) -> PersonPage:
-            return self.handle_person_request(person_id)
+        @self.context.handler("person", cache=True)
+        def handle_person(page_uri: PageURI) -> PersonPage:
+            return self.handle_person_request(page_uri)
 
-    def handle_person_request(self, person_id: str) -> PersonPage:
+    def handle_person_request(self, page_uri: PageURI) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""
-        person_uri = PageURI(root=self.context.root, type="person", id=person_id)
-        cached_person = self.page_cache.get(PersonPage, person_uri)
+        # Note: Cache checking is now handled by ServerContext.get_page()
+        # This method is only called when the page is not in cache or caching is disabled
+        
+        cached_person = self.page_cache.get(PersonPage, page_uri)
 
         if cached_person:
-            logger.debug(f"Found existing person in cache: {person_id}")
+            logger.debug(f"Found existing person in cache: {page_uri.id}")
             return cached_person
 
-        raise RuntimeError(f"Invalid request: Person {person_id} not yet created.")
+        raise RuntimeError(f"Invalid request: Person {page_uri.id} not yet created.")
 
     def get_person_records(self, identifier: str) -> List[PersonPage]:
         """Get person records by trying lookup first, then create if not found.
