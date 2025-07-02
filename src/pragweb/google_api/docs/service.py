@@ -66,7 +66,7 @@ class GoogleDocsService(ToolkitService):
         
         # Not in cache, ingest the document (ingest on touch)
         logger.info(f"Document {page_uri.id} not in cache, ingesting...")
-        header_page = self._ingest_document(page_uri.id)
+        header_page = self._ingest_document(page_uri)
         return header_page
 
     def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
@@ -87,7 +87,9 @@ class GoogleDocsService(ToolkitService):
         logger.info(
             f"Chunk {chunk_id} not in cache, ingesting document {document_id}..."
         )
-        self._ingest_document(document_id)
+        # Create a temporary header URI for ingestion
+        header_uri = PageURI(root=page_uri.root, type="gdoc_header", id=document_id)
+        self._ingest_document(header_uri)
 
         # Now try to get the chunk again
         cached_chunk = page_cache.get(GDocChunk, page_uri)
@@ -96,8 +98,9 @@ class GoogleDocsService(ToolkitService):
 
         return cached_chunk
 
-    def _ingest_document(self, document_id: str) -> GDocHeader:
+    def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
         """Ingest a document by fetching content, chunking, and storing in page cache."""
+        document_id = header_page_uri.id
         logger.info(f"Starting ingestion for document: {document_id}")
 
         try:
@@ -147,10 +150,8 @@ class GoogleDocsService(ToolkitService):
         # Create permalink
         permalink = f"https://docs.google.com/document/d/{document_id}/edit"
 
-        # Create header URI that will be used as parent for chunks
-        header_uri = self.context.create_page_uri(
-            GDocHeader, "gdoc_header", id=document_id
-        )
+        # Use provided header URI instead of creating a new one
+        header_uri = header_page_uri
 
         # Store chunks in page cache first
         chunk_pages: List[GDocChunk] = []

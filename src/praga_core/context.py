@@ -122,6 +122,40 @@ class ServerContext:
 
         return decorator
 
+    def _try_get_from_cache(self, page_uri: PageURI) -> Optional[Page]:
+        """Try to get a page from cache if caching is enabled for this page type.
+        
+        Returns the cached page if found, None otherwise.
+        """
+        # Check if caching is enabled for this page type
+        cache_enabled = self._page_cache_enabled.get(page_uri.type, True)
+        
+        if not cache_enabled:
+            return None
+            
+        # Try to get from cache (determine page type from handler return type)
+        handler = self._page_handlers[page_uri.type]
+        # We need to inspect the handler's return type annotation to get the Page class
+        import typing
+        try:
+            # Try to get the return type annotation
+            if hasattr(handler, '__annotations__') and 'return' in handler.__annotations__:
+                page_type = handler.__annotations__['return']
+                cached_page = self._page_cache.get(page_type, page_uri)
+                if cached_page:
+                    logger.debug(f"Found cached page for {page_uri}")
+                    # Register invalidator with cache if we have one for this page type
+                    if page_uri.type in self._page_invalidators:
+                        invalidator = self._page_invalidators[page_uri.type]
+                        self._register_invalidator_with_cache(page_type, invalidator)
+                    return cached_page
+            else:
+                logger.debug(f"No return type annotation found for handler {page_uri.type}, skipping cache lookup")
+        except Exception as e:
+            logger.debug(f"Error checking cache for {page_uri}: {e}, falling back to handler")
+        
+        return None
+
     def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
 
@@ -135,32 +169,21 @@ class ServerContext:
         if page_uri.type not in self._page_handlers:
             raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
 
-        # Check if caching is enabled for this page type
-        cache_enabled = self._page_cache_enabled.get(page_uri.type, True)
-        
-        if cache_enabled:
-            # Try to get from cache first (determine page type from handler return type)
-            handler = self._page_handlers[page_uri.type]
-            # We need to inspect the handler's return type annotation to get the Page class
-            import typing
-            try:
-                # Try to get the return type annotation
-                if hasattr(handler, '__annotations__') and 'return' in handler.__annotations__:
-                    page_type = handler.__annotations__['return']
-                    cached_page = self._page_cache.get(page_type, page_uri)
-                    if cached_page:
-                        logger.debug(f"Found cached page for {page_uri}")
-                        # Register invalidator with cache if we have one for this page type
-                        if page_uri.type in self._page_invalidators:
-                            invalidator = self._page_invalidators[page_uri.type]
-                            self._register_invalidator_with_cache(page_type, invalidator)
-                        return cached_page
-                else:
-                    logger.debug(f"No return type annotation found for handler {page_uri.type}, skipping cache lookup")
-            except Exception as e:
-                logger.debug(f"Error checking cache for {page_uri}: {e}, falling back to handler")
+        # Try to get from cache first if caching is enabled
+        cached_page = self._try_get_from_cache(page_uri)
+        if cached_page:
+            return cached_page
 
         # Not in cache or caching disabled - call handler with full URI
+        # Before calling the handler, ensure we have a full URI with version number
+        if page_uri.version is None:
+            # Need to create a full URI with version number
+            # We need to determine the page type from the handler to call create_page_uri
+            handler = self._page_handlers[page_uri.type]
+            if hasattr(handler, '__annotations__') and 'return' in handler.__annotations__:
+                page_type = handler.__annotations__['return']
+                page_uri = self.create_page_uri(page_type, page_uri.type, page_uri.id)
+        
         handler = self._page_handlers[page_uri.type]
         page = handler(page_uri)
 

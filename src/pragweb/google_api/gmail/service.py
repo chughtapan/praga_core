@@ -34,11 +34,11 @@ class GmailService(ToolkitService):
 
         @self.context.handler("email", cache=True)
         def handle_email(page_uri: PageURI) -> EmailPage:
-            return self.create_email_page(page_uri.id)
+            return self.create_email_page(page_uri)
 
-        @self.context.handler("email_thread", cache=True)
+        @self.context.handler("email_thread", cache=False)
         def handle_thread(page_uri: PageURI) -> EmailThreadPage:
-            return self.create_thread_page(page_uri.id)
+            return self.create_thread_page(page_uri)
 
     def _parse_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
         """Parse common email content from a Gmail message.
@@ -76,8 +76,9 @@ class GmailService(ToolkitService):
             "time": email_time,
         }
 
-    def create_email_page(self, email_id: str) -> EmailPage:
+    def create_email_page(self, page_uri: PageURI) -> EmailPage:
         """Create an EmailPage from a Gmail message ID."""
+        email_id = page_uri.id
         # Fetch message from Gmail API
         try:
             message = self.api_client.get_message(email_id)
@@ -91,10 +92,9 @@ class GmailService(ToolkitService):
         thread_id = message.get("threadId", email_id)
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
-        # Create URI and return complete document
-        uri = self.context.create_page_uri(EmailPage, "email", email_id)
+        # Use provided URI instead of creating a new one
         return EmailPage(
-            uri=uri,
+            uri=page_uri,
             message_id=email_id,
             thread_id=thread_id,
             subject=parsed["subject"],
@@ -106,8 +106,9 @@ class GmailService(ToolkitService):
             permalink=permalink,
         )
 
-    def create_thread_page(self, thread_id: str) -> EmailThreadPage:
+    def create_thread_page(self, page_uri: PageURI) -> EmailThreadPage:
         """Create an EmailThreadPage from a Gmail thread ID."""
+        thread_id = page_uri.id
         try:
             thread_data = self.api_client.get_thread(thread_id)
         except Exception as e:
@@ -147,10 +148,9 @@ class GmailService(ToolkitService):
         # Create thread permalink
         permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
-        # Create URI and return complete thread document
-        uri = self.context.create_page_uri(EmailThreadPage, "email_thread", thread_id)
+        # Use provided URI instead of creating a new one
         return EmailThreadPage(
-            uri=uri,
+            uri=page_uri,
             thread_id=thread_id,
             subject=thread_subject,
             emails=email_summaries,

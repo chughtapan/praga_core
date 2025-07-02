@@ -60,12 +60,6 @@ class PeopleService(ToolkitService):
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
         
-        cached_person = self.page_cache.get(PersonPage, page_uri)
-
-        if cached_person:
-            logger.debug(f"Found existing person in cache: {page_uri.id}")
-            return cached_person
-
         raise RuntimeError(f"Invalid request: Person {page_uri.id} not yet created.")
 
     def get_person_records(self, identifier: str) -> List[PersonPage]:
