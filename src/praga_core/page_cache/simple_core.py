@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 P = TypeVar("P", bound=Page)
 
 
-class SimplePageCache:
+class PageCache:
     """A simplified, more readable PageCache implementation.
 
     This design separates concerns into focused components:
@@ -138,6 +138,12 @@ class SimplePageCache:
     def invalidate_prefix(self, uri_prefix: str) -> int:
         """Mark all versions of a URI prefix as invalid."""
         return self._storage.mark_invalid_by_prefix(uri_prefix)
+
+    # Versioning methods
+    def get_latest_version(self, page_type: Type[P], uri_prefix: str) -> Optional[int]:
+        """Get the latest version number for a URI prefix (used by ServerContext for auto-increment)."""
+        page = self._storage.get_latest(page_type, uri_prefix)
+        return page.uri.version if page else None
 
     # Provenance operations
     def get_children(self, parent_uri: PageURI) -> List[Page]:

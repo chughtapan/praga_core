@@ -214,7 +214,7 @@ class ServerContext:
         self, page_type: type, invalidator: PageInvalidator
     ) -> None:
         """Register an invalidator with the page cache for a specific page type."""
-        self._page_cache.register_invalidator(page_type, invalidator)
+        self._page_cache.register_validator(page_type, invalidator)
 
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:
@@ -244,7 +244,7 @@ class ServerContext:
         """
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
-        return self._page_cache.invalidate_page(page_uri)
+        return self._page_cache.invalidate(page_uri)
 
     def invalidate_pages_by_prefix(self, uri_prefix: str) -> int:
         """Invalidate all versions of pages with the given prefix.
@@ -255,4 +255,4 @@ class ServerContext:
         Returns:
             Number of pages invalidated
         """
-        return self._page_cache.invalidate_pages_by_prefix(uri_prefix)
+        return self._page_cache.invalidate_prefix(uri_prefix)

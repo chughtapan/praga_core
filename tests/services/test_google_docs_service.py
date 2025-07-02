@@ -66,18 +66,18 @@ class TestGoogleDocsService:
     def test_handle_header_request_cached(self):
         """Test handle_header_request returns cached header."""
         mock_header = Mock(spec=GDocHeader)
-        self.mock_page_cache.get_page.return_value = mock_header
+        self.mock_page_cache.get.return_value = mock_header
 
         result = self.service.handle_header_request("doc123")
 
         # Verify cache lookup
         expected_uri = PageURI(root="test-root", type="gdoc_header", id="doc123")
-        self.mock_page_cache.get_page.assert_called_once_with(GDocHeader, expected_uri)
+        self.mock_page_cache.get.assert_called_once_with(GDocHeader, expected_uri)
         assert result is mock_header
 
     def test_handle_header_request_not_cached(self):
         """Test handle_header_request ingests document when not cached."""
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
         mock_header = Mock(spec=GDocHeader)
 
         with patch.object(self.service, "_ingest_document", return_value=mock_header):
@@ -88,18 +88,18 @@ class TestGoogleDocsService:
     def test_handle_chunk_request_cached(self):
         """Test handle_chunk_request returns cached chunk."""
         mock_chunk = Mock(spec=GDocChunk)
-        self.mock_page_cache.get_page.return_value = mock_chunk
+        self.mock_page_cache.get.return_value = mock_chunk
 
         result = self.service.handle_chunk_request("chunk123")
 
         expected_uri = PageURI(root="test-root", type="gdoc_chunk", id="chunk123")
-        self.mock_page_cache.get_page.assert_called_once_with(GDocChunk, expected_uri)
+        self.mock_page_cache.get.assert_called_once_with(GDocChunk, expected_uri)
         assert result is mock_chunk
 
     def test_handle_chunk_request_not_found(self):
         """Test handle_chunk_request raises error when chunk not found."""
         # Use valid chunk ID format: document_id(chunk_index)
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
 
         # Mock that document ingestion doesn't create the chunk
         with patch.object(self.service, "_ingest_document"):
@@ -152,8 +152,8 @@ class TestGoogleDocsService:
         self.mock_context.create_page_uri = Mock()
         self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
 
-        # Mock page cache store_page method
-        self.mock_page_cache.store_page = Mock()
+        # Mock page cache store method
+        self.mock_page_cache.store = Mock()
 
         result = self.service._ingest_document(test_doc_id)
 
@@ -165,7 +165,7 @@ class TestGoogleDocsService:
         self.service.chunker.chunk.assert_called_once_with("Hello world!")
 
         # Verify pages were stored (header + 1 chunk)
-        assert self.mock_page_cache.store_page.call_count == 2
+        assert self.mock_page_cache.store.call_count == 2
 
         # Verify return type
         assert isinstance(result, GDocHeader)
@@ -335,11 +335,11 @@ class TestGoogleDocsService:
         mock_chunk3.document_id = "doc123"
         mock_chunk3.content = "Another chunk with search and term words"
 
-        self.mock_page_cache.find_pages_by_attribute.return_value = [
-            mock_chunk1,
-            mock_chunk2,
-            mock_chunk3,
-        ]
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = [mock_chunk1, mock_chunk2, mock_chunk3]
+        self.mock_page_cache.find.return_value = mock_query
 
         # Mock handle_header_request to ensure document is ingested
         with patch.object(self.service, "handle_header_request"):
@@ -357,7 +357,11 @@ class TestGoogleDocsService:
 
     def test_search_chunks_in_document_no_chunks(self):
         """Test searching chunks when document has no chunks."""
-        self.mock_page_cache.find_pages_by_attribute.return_value = []
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = []
+        self.mock_page_cache.find.return_value = mock_query
 
         with patch.object(self.service, "handle_header_request"):
             doc_header_uri = "test-root/gdoc_header:doc123@1"
@@ -396,7 +400,7 @@ class TestGoogleDocsToolkit:
         """Set up test environment."""
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
-        self.mock_context.get_page = Mock()
+        self.mock_context.get = Mock()
 
         set_global_context(self.mock_context)
 
@@ -422,7 +426,7 @@ class TestGoogleDocsToolkit:
         """Test search_documents_by_title tool."""
         # Mock search results
         mock_headers = [Mock(spec=GDocHeader), Mock(spec=GDocHeader)]
-        self.mock_context.get_page.side_effect = mock_headers
+        self.mock_context.get.side_effect = mock_headers
 
         # Mock service search method
         mock_uris = [Mock(spec=PageURI), Mock(spec=PageURI)]
@@ -445,7 +449,7 @@ class TestGoogleDocsToolkit:
     def test_search_documents_by_topic(self):
         """Test search_documents_by_topic tool."""
         mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get_page.return_value = mock_headers[0]
+        self.mock_context.get.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
         self.mock_service.search_documents.return_value = (mock_uris, None)
@@ -461,7 +465,7 @@ class TestGoogleDocsToolkit:
     def test_search_documents_by_owner(self):
         """Test search_documents_by_owner tool."""
         mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get_page.return_value = mock_headers[0]
+        self.mock_context.get.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
         self.mock_service.search_documents.return_value = (
@@ -486,7 +490,7 @@ class TestGoogleDocsToolkit:
     def test_search_documents_by_owner_with_name(self):
         """Test search_documents_by_owner tool with person name."""
         mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get_page.return_value = mock_headers[0]
+        self.mock_context.get.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
         self.mock_service.search_documents.return_value = (
@@ -511,7 +515,7 @@ class TestGoogleDocsToolkit:
     def test_search_recently_modified_documents(self):
         """Test search_recently_modified_documents tool."""
         mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get_page.return_value = mock_headers[0]
+        self.mock_context.get.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
         self.mock_service.search_documents.return_value = (
@@ -529,7 +533,7 @@ class TestGoogleDocsToolkit:
     def test_search_all_documents(self):
         """Test search_all_documents tool."""
         mock_headers = [Mock(spec=GDocHeader)]
-        self.mock_context.get_page.return_value = mock_headers[0]
+        self.mock_context.get.return_value = mock_headers[0]
 
         mock_uris = [Mock(spec=PageURI)]
         self.mock_service.search_documents.return_value = (mock_uris, None)
@@ -572,7 +576,7 @@ class TestGoogleDocsToolkit:
             [Mock(spec=PageURI)],
             "next_cursor_token",
         )
-        self.mock_context.get_page.return_value = Mock(spec=GDocHeader)
+        self.mock_context.get.return_value = Mock(spec=GDocHeader)
 
         result = self.toolkit.search_documents_by_title("test", cursor="current_cursor")
 
@@ -694,7 +698,7 @@ class TestGoogleDocsCacheInvalidation:
         self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
 
         # Mock page cache
-        self.mock_page_cache.store_page = Mock()
+        self.mock_page_cache.store = Mock()
 
         result = self.service._ingest_document("doc123")
 
@@ -750,7 +754,7 @@ class TestGoogleDocsCacheInvalidation:
 
     def test_check_document_freshness_not_cached(self):
         """Test freshness check when document is not cached."""
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
 
         result = self.service.check_document_freshness("doc123")
 
@@ -764,7 +768,7 @@ class TestGoogleDocsCacheInvalidation:
         mock_header.revision_id = "rev123"
         mock_header.modified_time = datetime(2023, 1, 2)
 
-        self.mock_page_cache.get_page.return_value = mock_header
+        self.mock_page_cache.get.return_value = mock_header
         self.mock_api_client.get_latest_revision_id.return_value = "rev123"
 
         result = self.service.check_document_freshness("doc123")
@@ -781,7 +785,7 @@ class TestGoogleDocsCacheInvalidation:
         mock_header.revision_id = "rev123"
         mock_header.modified_time = datetime(2023, 1, 2)
 
-        self.mock_page_cache.get_page.return_value = mock_header
+        self.mock_page_cache.get.return_value = mock_header
         self.mock_api_client.get_latest_revision_id.return_value = (
             "rev456"  # Different revision
         )
@@ -797,7 +801,7 @@ class TestGoogleDocsCacheInvalidation:
     def test_check_document_freshness_error(self):
         """Test freshness check when API call fails."""
         mock_header = Mock(spec=GDocHeader)
-        self.mock_page_cache.get_page.return_value = mock_header
+        self.mock_page_cache.get.return_value = mock_header
         self.mock_api_client.get_latest_revision_id.side_effect = Exception("API Error")
 
         result = self.service.check_document_freshness("doc123")

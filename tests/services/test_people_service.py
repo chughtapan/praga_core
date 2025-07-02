@@ -50,17 +50,17 @@ class TestPeopleService:
     def test_handle_person_request_cached(self):
         """Test handle_person_request returns cached person."""
         mock_person = Mock(spec=PersonPage)
-        self.mock_page_cache.get_page.return_value = mock_person
+        self.mock_page_cache.get.return_value = mock_person
 
         result = self.service.handle_person_request("person123")
 
         expected_uri = PageURI(root="test-root", type="person", id="person123")
-        self.mock_page_cache.get_page.assert_called_once_with(PersonPage, expected_uri)
+        self.mock_page_cache.get.assert_called_once_with(PersonPage, expected_uri)
         assert result is mock_person
 
     def test_handle_person_request_not_found(self):
         """Test handle_person_request raises error when person not found."""
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
 
         with pytest.raises(
             RuntimeError, match="Invalid request: Person person123 not yet created"
@@ -98,38 +98,54 @@ class TestPeopleService:
     def test_lookup_people_by_email(self):
         """Test lookup_people by email address (search path only)."""
         mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
-        self.mock_page_cache.find_pages_by_attribute.return_value = mock_people
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = mock_people
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service.search_existing_records("test@example.com")
 
         assert result == mock_people
-        self.mock_page_cache.find_pages_by_attribute.assert_called_once()
+        self.mock_page_cache.find.assert_called_once()
 
     def test_lookup_people_by_full_name(self):
         """Test lookup_people by full name when email match fails."""
         mock_people = [Mock(spec=PersonPage)]
+        # Mock the new fluent interface with side effects
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
         # First call (email) returns empty, second call (full name) returns results
-        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], mock_people]
+        mock_query.all.side_effect = [[], mock_people]
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service.search_existing_records("John Doe")
 
         assert result == mock_people
-        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
+        assert self.mock_page_cache.find.call_count == 2
 
     def test_lookup_people_by_first_name(self):
         """Test lookup_people by first name when other matches fail."""
         mock_people = [Mock(spec=PersonPage)]
+        # Mock the new fluent interface with side effects
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
         # Full name and first name calls
-        self.mock_page_cache.find_pages_by_attribute.side_effect = [[], mock_people]
+        mock_query.all.side_effect = [[], mock_people]
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service.search_existing_records("John")
 
         assert result == mock_people
-        assert self.mock_page_cache.find_pages_by_attribute.call_count == 2
+        assert self.mock_page_cache.find.call_count == 2
 
     def test_lookup_people_not_found(self):
         """Test lookup_people returns empty list when not found."""
-        self.mock_page_cache.find_pages_by_attribute.return_value = []
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = []
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service.search_existing_records("nonexistent@example.com")
 
@@ -173,9 +189,10 @@ class TestPeopleService:
                             self.service, "_is_real_person", return_value=True
                         ):
                             # Mock page cache to return no existing person
-                            self.mock_page_cache.find_pages_by_attribute.return_value = (
-                                []
-                            )
+                            mock_query = Mock()
+                            mock_query.where.return_value = mock_query
+                            mock_query.all.return_value = []
+                            self.mock_page_cache.find.return_value = mock_query
                             mock_person_page = Mock(spec=PersonPage)
                             with patch.object(
                                 self.service,
@@ -243,9 +260,10 @@ class TestPeopleService:
             existing_person.email = "john@example.com"
 
             # Mock page cache to return existing person
-            self.mock_page_cache.find_pages_by_attribute.return_value = [
-                existing_person
-            ]
+            mock_query = Mock()
+            mock_query.where.return_value = mock_query
+            mock_query.all.return_value = [existing_person]
+            self.mock_page_cache.find.return_value = mock_query
 
             mock_person_info = PersonInfo(
                 first_name="John",
@@ -399,7 +417,7 @@ class TestPeopleService:
             source="people_api",
         )
 
-        self.mock_page_cache.store_page = Mock()
+        self.mock_page_cache.store = Mock()
         self.mock_context.create_page_uri.return_value = PageURI(
             root="test-root", type="person", id="person123", version=1
         )
@@ -411,7 +429,7 @@ class TestPeopleService:
         assert result.last_name == "Doe"
         assert result.email == "john@example.com"
         assert result.source == "people_api"
-        self.mock_page_cache.store_page.assert_called_once_with(result)
+        self.mock_page_cache.store.assert_called_once_with(result)
 
     def test_toolkit_get_person_records(self):
         """Test toolkit get_person_records method."""
@@ -697,7 +715,11 @@ class TestPeopleServiceRefactored:
     def test_find_existing_person_by_email_found(self):
         """Test _find_existing_person_by_email returns existing person."""
         existing_person = Mock(spec=PersonPage)
-        self.mock_page_cache.find_pages_by_attribute.return_value = [existing_person]
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = [existing_person]
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service._find_existing_person_by_email("john@example.com")
 
@@ -705,7 +727,11 @@ class TestPeopleServiceRefactored:
 
     def test_find_existing_person_by_email_not_found(self):
         """Test _find_existing_person_by_email returns None when not found."""
-        self.mock_page_cache.find_pages_by_attribute.return_value = []
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = []
+        self.mock_page_cache.find.return_value = mock_query
 
         result = self.service._find_existing_person_by_email("john@example.com")
 

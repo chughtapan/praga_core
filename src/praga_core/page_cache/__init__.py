@@ -5,7 +5,7 @@ from Pydantic Page models and provides type-safe querying capabilities with
 provenance tracking support.
 """
 
-from .compat import PageCache
 from .exceptions import CacheValidationError, PageCacheError, ProvenanceError
+from .simple_core import PageCache
 
 __all__ = ["PageCache", "PageCacheError", "ProvenanceError", "CacheValidationError"]

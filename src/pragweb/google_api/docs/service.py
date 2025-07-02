@@ -82,7 +82,7 @@ class GoogleDocsService(ToolkitService):
 
         # Construct URI from document_id
         header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
-        cached_header = page_cache.get_page(GDocHeader, header_uri)
+        cached_header = page_cache.get(GDocHeader, header_uri)
         if cached_header:
             logger.debug(f"Found existing document header in cache: {document_id}")
             return cached_header
@@ -98,7 +98,7 @@ class GoogleDocsService(ToolkitService):
 
         # Construct URI from chunk_id
         chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
-        cached_chunk = page_cache.get_page(GDocChunk, chunk_uri)
+        cached_chunk = page_cache.get(GDocChunk, chunk_uri)
         if cached_chunk:
             logger.debug(f"Found existing document chunk in cache: {chunk_id}")
             return cached_chunk
@@ -116,7 +116,7 @@ class GoogleDocsService(ToolkitService):
         self._ingest_document(document_id)
 
         # Now try to get the chunk again
-        cached_chunk = page_cache.get_page(GDocChunk, chunk_uri)
+        cached_chunk = page_cache.get(GDocChunk, chunk_uri)
         if not cached_chunk:
             raise ValueError(f"Chunk {chunk_id} not found after ingestion")
 
@@ -251,11 +251,11 @@ class GoogleDocsService(ToolkitService):
         )
 
         # Store header in page cache first
-        self.context.page_cache.store_page(header_page)
+        self.context.page_cache.store(header_page)
 
         # Now store chunks with header as parent for provenance tracking
         for chunk_page in chunk_pages:
-            self.context.page_cache.store_page(chunk_page, parent_uri=header_uri)
+            self.context.page_cache.store(chunk_page, parent_uri=header_uri)
 
         logger.info(
             f"Successfully ingested document {document_id} with {chunk_count} chunks"
@@ -352,8 +352,10 @@ class GoogleDocsService(ToolkitService):
         page_cache = self.context.page_cache
 
         # Find all chunks for this document
-        chunk_pages = page_cache.find_pages_by_attribute(
-            GDocChunk, lambda chunk: chunk.document_id == document_id
+        chunk_pages = (
+            page_cache.find(GDocChunk)
+            .where(lambda chunk: chunk.document_id == document_id)
+            .all()
         )
 
         if not chunk_pages:
@@ -422,7 +424,7 @@ class GoogleDocsService(ToolkitService):
             header_uri = PageURI(
                 root=self.context.root, type="gdoc_header", id=document_id
             )
-            cached_header = self.context.page_cache.get_page(GDocHeader, header_uri)
+            cached_header = self.context.page_cache.get(GDocHeader, header_uri)
 
             if not cached_header:
                 return {
@@ -510,7 +512,7 @@ class GoogleDocsToolkit(RetrieverToolkit):
         # Resolve URIs to pages using context (this will trigger ingestion if needed)
         pages: List[GDocHeader] = []
         for uri in uris:
-            page_obj = self.context.get_page(uri)
+            page_obj = self.context.get(uri)
             if not isinstance(page_obj, GDocHeader):
                 raise TypeError(f"Expected GDocHeader but got {type(page_obj)}")
             pages.append(page_obj)
