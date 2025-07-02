@@ -25,6 +25,15 @@ class TestPageURIJSONSerialization:
         uri = PageURI(root="myserver", type="Document", id="abc", version=2)
         assert str(uri) == "myserver/Document:abc@2"
 
+    def test_page_uri_prefix_property(self) -> None:
+        """Test PageURI prefix property."""
+        uri = PageURI(root="myserver", type="Document", id="abc", version=2)
+        assert uri.prefix == "myserver/Document:abc"
+
+        # Test with empty root
+        uri_empty_root = PageURI(root="", type="Email", id="123", version=5)
+        assert uri_empty_root.prefix == "/Email:123"
+
 
 class TestPageJSONSerialization:
     """Test Page JSON serialization with PageURI encoder."""

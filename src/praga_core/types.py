@@ -99,6 +99,11 @@ class PageURI(BaseModel):
         """Return string representation in root/type:id@version format."""
         return f"{self.root}/{self.type}:{self.id}@{self.version}"
 
+    @property
+    def prefix(self) -> str:
+        """Return URI prefix without version (root/type:id format)."""
+        return f"{self.root}/{self.type}:{self.id}"
+
     def __hash__(self) -> int:
         """Make PageURI hashable for use as dict keys."""
         return hash((self.root, self.type, self.id, self.version))
@@ -127,9 +132,9 @@ class Page(BaseModel, ABC):
         description="Structured URI for the page"
     )
     parent_uri: Optional[Annotated[PageURI, BeforeValidator(PageURI.parse)]] = Field(
-        None, 
+        None,
         description="Optional parent page URI for provenance tracking",
-        exclude=True
+        exclude=True,
     )
     _metadata: PageMetadata = PrivateAttr(
         default_factory=lambda: PageMetadata(token_count=None)

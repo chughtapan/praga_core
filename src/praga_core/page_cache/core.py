@@ -18,7 +18,10 @@ from .schema import (
     create_page_table,
     get_table_registry,
 )
-from .serialization import convert_page_uris_for_storage, convert_page_uris_from_storage
+from .serialization import (
+    deserialize_from_storage,
+    serialize_for_storage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,15 +120,15 @@ class PageCache:
         Returns:
             Page instance of the specified type
         """
-        # Convert database entity back to Page instance
-        page_data = {"uri": PageURI.parse(entity.uri)}
+        # Reconstruct full URI from uri_prefix and version
+        full_uri_string = f"{entity.uri_prefix}@{entity.version}"
+        page_data = {"uri": PageURI.parse(full_uri_string)}
+
         for field_name, field_info in page_class.model_fields.items():
             if field_name not in ("uri",):
                 value = getattr(entity, field_name)
-                # Convert strings back to PageURI objects
-                converted_value = convert_page_uris_from_storage(
-                    value, field_info.annotation
-                )
+                # Deserialize stored values back to original types
+                converted_value = deserialize_from_storage(value, field_info.annotation)
                 page_data[field_name] = converted_value
 
         return page_class(**page_data)
@@ -193,8 +196,12 @@ class PageCache:
         table_class = table_registry[page_type_name]
 
         with self.get_session() as session:
-            # Check if page already exists
-            existing = session.query(table_class).filter_by(uri=str(page.uri)).first()
+            # Check if page already exists using composite key
+            existing = (
+                session.query(table_class)
+                .filter_by(uri_prefix=page.uri.prefix, version=page.uri.version)
+                .first()
+            )
 
             if existing:
                 # Pages are immutable - do not allow updates
@@ -204,13 +211,13 @@ class PageCache:
                     f"Page with URI {page.uri} already exists and cannot be updated"
                 )
             else:
-                # Create new page record
-                page_data = {"uri": str(page.uri)}
+                # Create new page record with split URI
+                page_data = {"uri_prefix": page.uri.prefix, "version": page.uri.version}
                 for field_name in page.__class__.model_fields:
                     if field_name not in ("uri",):
                         value = getattr(page, field_name)
-                        # Convert PageURI objects to strings
-                        page_data[field_name] = convert_page_uris_for_storage(value)
+                        # Serialize complex objects for storage
+                        page_data[field_name] = serialize_for_storage(value)
 
                 page_entity = table_class(**page_data)
                 session.add(page_entity)
@@ -252,7 +259,11 @@ class PageCache:
                 page_class = self._page_classes[page_type_name]
 
                 with self.get_session() as session:
-                    entity = session.query(table_class).filter_by(uri=str(uri)).first()
+                    entity = (
+                        session.query(table_class)
+                        .filter_by(uri_prefix=uri.prefix, version=uri.version)
+                        .first()
+                    )
 
                     if entity:
                         return self._convert_entity_to_page(entity, page_class)
@@ -277,11 +288,62 @@ class PageCache:
         table_class = table_registry[page_type_name]
 
         with self.get_session() as session:
-            entity = session.query(table_class).filter_by(uri=str(uri)).first()
+            entity = (
+                session.query(table_class)
+                .filter_by(uri_prefix=uri.prefix, version=uri.version)
+                .first()
+            )
 
             if entity:
                 return self._convert_entity_to_page(entity, page_type)
             return None
+
+    def get_latest_version(self, page_type: Type[P], uri_prefix: str) -> Optional[int]:
+        """Get the latest version number for a URI prefix.
+
+        Args:
+            page_type: The Page class type to query
+            uri_prefix: The URI prefix (without version) to look up
+
+        Returns:
+            Latest version number if found, None otherwise
+        """
+        page_type_name = page_type.__name__
+        table_registry = get_table_registry()
+
+        if page_type_name not in table_registry:
+            return None
+
+        table_class = table_registry[page_type_name]
+
+        with self.get_session() as session:
+            # Query for the maximum version for this prefix
+            result = (
+                session.query(table_class.version)
+                .filter_by(uri_prefix=uri_prefix)
+                .order_by(table_class.version.desc())
+                .first()
+            )
+
+            return result[0] if result else None
+
+    def get_latest_page(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
+        """Get the latest version of a page for a URI prefix.
+
+        Args:
+            page_type: The Page class type to retrieve
+            uri_prefix: The URI prefix (without version) to look up
+
+        Returns:
+            Latest version of the page if found, None otherwise
+        """
+        latest_version = self.get_latest_version(page_type, uri_prefix)
+        if latest_version is None:
+            return None
+
+        # Reconstruct the full URI with the latest version
+        full_uri = PageURI.parse(f"{uri_prefix}@{latest_version}")
+        return self.get_page(page_type, full_uri)
 
     def find_pages_by_attribute(
         self,
@@ -437,29 +499,3 @@ class PageCache:
     def page_classes(self) -> Dict[str, Type[Page]]:
         """Get the registered page classes."""
         return self._page_classes.copy()
-
-    # Method name aliases for backward compatibility
-    def _get_page_by_uri_any_type(self, uri: PageURI) -> Optional[Page]:
-        """Backward compatibility alias for get_page_by_uri_any_type."""
-        return self.get_page_by_uri_any_type(uri)
-
-    def _get_table_class(self, page_type: Type[P]) -> Any:
-        """Backward compatibility alias for get_table_class."""
-        return self.get_table_class(page_type)
-
-    def convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Convenience method for URI conversion from storage."""
-        return convert_page_uris_from_storage(value, field_type)
-
-    def convert_page_uris_for_storage(self, value: Any) -> Any:
-        """Convenience method for URI conversion for storage."""
-        return convert_page_uris_for_storage(value)
-
-    # Backward compatibility aliases
-    def _convert_page_uris_for_storage(self, value: Any) -> Any:
-        """Backward compatibility alias for convert_page_uris_for_storage."""
-        return self.convert_page_uris_for_storage(value)
-
-    def _convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Backward compatibility alias for convert_page_uris_from_storage."""
-        return self.convert_page_uris_from_storage(value, field_type)
