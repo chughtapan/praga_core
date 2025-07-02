@@ -1,6 +1,6 @@
 """Calendar service module."""
 
 from .page import CalendarEventPage
-from .service import CalendarService, CalendarToolkit
+from .service import CalendarService
 
-__all__ = ["CalendarEventPage", "CalendarService", "CalendarToolkit"]
+__all__ = ["CalendarEventPage", "CalendarService"]

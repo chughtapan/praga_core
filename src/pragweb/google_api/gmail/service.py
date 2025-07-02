@@ -5,7 +5,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
-from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
+from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
@@ -18,11 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 class GmailService(ToolkitService):
-    """Service for Gmail API interactions and EmailPage creation."""
+    """Service for Gmail API interactions and EmailPage creation with integrated toolkit functionality."""
 
     def __init__(self, api_client: GoogleAPIClient) -> None:
-        super().__init__()
-        self.api_client = api_client
+        super().__init__(api_client)
         self.parser = GmailParser()
 
         # Register handlers using decorators
@@ -182,29 +181,6 @@ class GmailService(ToolkitService):
             logger.error(f"Error searching emails: {e}")
             raise
 
-    @property
-    def toolkit(self) -> "GmailToolkit":
-        """Get the Gmail toolkit for this service."""
-        return GmailToolkit(gmail_service=self)
-
-    @property
-    def name(self) -> str:
-        return "email"
-
-
-class GmailToolkit(RetrieverToolkit):
-    """Toolkit for retrieving emails using Gmail service."""
-
-    def __init__(self, gmail_service: GmailService):
-        super().__init__()  # No explicit context - will use global context
-        self.gmail_service = gmail_service
-
-        logger.info("Gmail toolkit initialized")
-
-    @property
-    def name(self) -> str:
-        return "GmailToolkit"
-
     def _search_emails_paginated_response(
         self,
         query: str,
@@ -213,9 +189,7 @@ class GmailToolkit(RetrieverToolkit):
     ) -> PaginatedResponse[EmailPage]:
         """Search emails and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.gmail_service.search_emails(
-            query, cursor, page_size
-        )
+        uris, next_page_token = self.search_emails(query, cursor, page_size)
 
         # Resolve URIs to pages using context - throw errors, don't fail silently
         pages: List[EmailPage] = []
@@ -312,3 +286,12 @@ class GmailToolkit(RetrieverToolkit):
         """Get unread emails."""
         query = "is:unread"
         return self._search_emails_paginated_response(query, cursor)
+
+    @property
+    def toolkit(self) -> "GmailService":
+        """Get the Gmail toolkit for this service (returns self since this is now integrated)."""
+        return self
+
+    @property
+    def name(self) -> str:
+        return "email"
