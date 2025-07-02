@@ -67,6 +67,17 @@ class TestGmailService:
         assert "email" in self.mock_context.services
         assert self.mock_context.services["email"] is self.service
 
+    def test_toolkit_property(self):
+        """Test that toolkit property returns self (merged functionality)."""
+        toolkit = self.service.toolkit
+        assert toolkit is self.service
+        # Verify it has the toolkit methods
+        assert hasattr(toolkit, "search_emails_from_person")
+        assert hasattr(toolkit, "search_emails_to_person")
+        assert hasattr(toolkit, "search_emails_by_content")
+        assert hasattr(toolkit, "get_recent_emails")
+        assert hasattr(toolkit, "get_unread_emails")
+
     def test_root_property(self):
         """Test root property returns context root."""
         assert self.service.context.root == "test-root"
@@ -831,7 +842,7 @@ class TestEmailThreadPageIntegration:
 
 
 class TestGmailToolkit:
-    """Test suite for GmailToolkit methods."""
+    """Test suite for GmailService toolkit methods (now integrated into GmailService)."""
 
     def setup_method(self):
         """Set up test environment."""
@@ -853,7 +864,8 @@ class TestGmailToolkit:
         self.mock_api_client = Mock()
         self.mock_api_client.search_messages = Mock()
         self.service = GmailService(self.mock_api_client)
-        self.toolkit = self.service.toolkit
+        # Since GmailService now inherits from RetrieverToolkit, use service directly
+        self.toolkit = self.service
 
         # The toolkit will use the global context automatically
         # Don't try to override the context property directly

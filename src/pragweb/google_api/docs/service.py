@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from chonkie import RecursiveChunker
 
-from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
+from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import Page, PageURI
 from pragweb.toolkit_service import ToolkitService
 
@@ -369,28 +369,6 @@ class GoogleDocsService(ToolkitService):
 
         return result_chunks
 
-    @property
-    def toolkit(self) -> "GoogleDocsToolkit":
-        """Get the Google Docs toolkit."""
-        return GoogleDocsToolkit(self)
-
-    @property
-    def name(self) -> str:
-        return "google_docs"
-
-
-class GoogleDocsToolkit(RetrieverToolkit):
-    """Toolkit for searching and retrieving Google Docs headers and chunks."""
-
-    def __init__(self, google_docs_service: GoogleDocsService):
-        super().__init__()
-        self.google_docs_service = google_docs_service
-        logger.info("Google Docs toolkit initialized")
-
-    @property
-    def name(self) -> str:
-        return "GoogleDocsToolkit"
-
     def _search_documents_paginated_response(
         self,
         search_params: Dict[str, Any],
@@ -399,9 +377,7 @@ class GoogleDocsToolkit(RetrieverToolkit):
     ) -> PaginatedResponse[GDocHeader]:
         """Search documents and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.google_docs_service.search_documents(
-            search_params, cursor, page_size
-        )
+        uris, next_page_token = self.search_documents(search_params, cursor, page_size)
 
         # Resolve URIs to pages using context (this will trigger ingestion if needed)
         pages: List[GDocHeader] = []
@@ -485,7 +461,7 @@ class GoogleDocsToolkit(RetrieverToolkit):
         return self._search_documents_paginated_response({"query": ""}, cursor=cursor)
 
     @tool()
-    def search_chunks_in_document(
+    def find_chunks_in_document(
         self, doc_header_uri: str, query: str
     ) -> PaginatedResponse[GDocChunk]:
         """Search for specific content within a document's chunks.
@@ -495,11 +471,13 @@ class GoogleDocsToolkit(RetrieverToolkit):
             query: Search query to find within the document chunks
         """
         # Use the service's text matching search for chunks
-        matching_chunks = self.google_docs_service.search_chunks_in_document(
-            doc_header_uri, query
-        )
+        matching_chunks = self.search_chunks_in_document(doc_header_uri, query)
 
         return PaginatedResponse(
             results=matching_chunks,
             next_cursor=None,
         )
+
+    @property
+    def name(self) -> str:
+        return "google_docs"

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from email.utils import parseaddr
 from typing import Any, Dict, List, Optional, Tuple
 
-from praga_core.agents import RetrieverToolkit, tool
+from praga_core.agents import tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
@@ -43,8 +43,7 @@ class PeopleService(ToolkitService):
     """Service for managing person data and PersonPage creation using Google People API."""
 
     def __init__(self, api_client: GoogleAPIClient) -> None:
-        super().__init__()
-        self.api_client = api_client
+        super().__init__(api_client)
         self._register_handlers()
         logger.info("People service initialized and handlers registered")
 
@@ -66,6 +65,7 @@ class PeopleService(ToolkitService):
 
         raise RuntimeError(f"Invalid request: Person {person_id} not yet created.")
 
+    @tool()
     def get_person_records(self, identifier: str) -> List[PersonPage]:
         """Get person records by trying lookup first, then create if not found.
 
@@ -632,37 +632,5 @@ class PeopleService(ToolkitService):
         return "@" in text and "." in text.split("@")[-1]
 
     @property
-    def toolkit(self) -> "PeopleToolkit":
-        """Get the People toolkit for this service."""
-        return PeopleToolkit(people_service=self)
-
-    @property
     def name(self) -> str:
         return "people"
-
-
-class PeopleToolkit(RetrieverToolkit):
-    """Toolkit for managing people using People service."""
-
-    def __init__(self, people_service: PeopleService):
-        super().__init__()
-        self.people_service = people_service
-        logger.info("People toolkit initialized")
-
-    @property
-    def name(self) -> str:
-        return "people_toolkit"
-
-    @tool()
-    def get_person_records(self, identifier: str) -> List[PersonPage]:
-        """Get or create person records by email, full name, or first name.
-
-        Tries to lookup existing records first, then creates new records if not found.
-
-        Args:
-            identifier: Email address, full name, or first name to search for
-
-        Returns:
-            List of PersonPage objects found or created, empty list if not possible
-        """
-        return self.people_service.get_person_records(identifier)

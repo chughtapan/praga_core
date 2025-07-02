@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
+from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
@@ -115,29 +115,6 @@ class CalendarService(ToolkitService):
             logger.error(f"Error searching events: {e}")
             raise
 
-    @property
-    def toolkit(self) -> "CalendarToolkit":
-        """Get the Calendar toolkit for this service."""
-        return CalendarToolkit(calendar_service=self)
-
-    @property
-    def name(self) -> str:
-        return "calendar_event"
-
-
-class CalendarToolkit(RetrieverToolkit):
-    """Toolkit for retrieving calendar events using Calendar service."""
-
-    def __init__(self, calendar_service: CalendarService):
-        super().__init__()  # No explicit context - will use global context
-        self.calendar_service = calendar_service
-
-        logger.info("Calendar toolkit initialized")
-
-    @property
-    def name(self) -> str:
-        return "CalendarToolkit"
-
     def _search_events_paginated_response(
         self,
         query_params: Dict[str, Any],
@@ -146,9 +123,7 @@ class CalendarToolkit(RetrieverToolkit):
     ) -> PaginatedResponse[CalendarEventPage]:
         """Search events and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.calendar_service.search_events(
-            query_params, cursor, page_size
-        )
+        uris, next_page_token = self.search_events(query_params, cursor, page_size)
 
         # Resolve URIs to pages using context - throw errors, don't fail silently
         pages: List[CalendarEventPage] = []
@@ -268,3 +243,7 @@ class CalendarToolkit(RetrieverToolkit):
             "orderBy": "startTime",
         }
         return self._search_events_paginated_response(query_params, cursor)
+
+    @property
+    def name(self) -> str:
+        return "calendar_event"
