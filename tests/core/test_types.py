@@ -6,7 +6,13 @@ and related classes with the new json_encoders configuration.
 
 import json
 
-from praga_core.types import PageReference, PageURI, SearchResponse, TextPage, DEFAULT_VERSION
+from praga_core.types import (
+    DEFAULT_VERSION,
+    PageReference,
+    PageURI,
+    SearchResponse,
+    TextPage,
+)
 
 
 class TestPageURIJSONSerialization:
@@ -25,6 +31,15 @@ class TestPageURIJSONSerialization:
         uri = PageURI(root="myserver", type="Document", id="abc", version=2)
         assert str(uri) == "myserver/Document:abc@2"
 
+    def test_page_uri_prefix_property(self) -> None:
+        """Test PageURI prefix property."""
+        uri = PageURI(root="myserver", type="Document", id="abc", version=2)
+        assert uri.prefix == "myserver/Document:abc"
+
+        # Test with empty root
+        uri_empty_root = PageURI(root="", type="Email", id="123", version=5)
+        assert uri_empty_root.prefix == "/Email:123"
+
     def test_page_uri_default_version_serialization(self) -> None:
         """Test that default version PageURI serializes without version number."""
         uri = PageURI(root="test", type="Email", id="123", version=DEFAULT_VERSION)
@@ -35,7 +50,9 @@ class TestPageURIJSONSerialization:
 
     def test_page_uri_default_version_string_representation(self) -> None:
         """Test default version PageURI string representation."""
-        uri = PageURI(root="myserver", type="Document", id="abc", version=DEFAULT_VERSION)
+        uri = PageURI(
+            root="myserver", type="Document", id="abc", version=DEFAULT_VERSION
+        )
         assert str(uri) == "myserver/Document:abc"
 
     def test_page_uri_default_version_default(self) -> None:
@@ -52,7 +69,7 @@ class TestPageURIJSONSerialization:
     def test_page_uri_version_validation(self) -> None:
         """Test that invalid version numbers are rejected."""
         import pytest
-        
+
         # Test negative version
         with pytest.raises(ValueError, match="Version must be non-negative"):
             PageURI(root="test", type="Email", id="123", version=-1)

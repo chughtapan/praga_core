@@ -109,6 +109,11 @@ class PageURI(BaseModel):
         else:
             return f"{self.root}/{self.type}:{self.id}@{self.version}"
 
+    @property
+    def prefix(self) -> str:
+        """Return URI prefix without version (root/type:id format)."""
+        return f"{self.root}/{self.type}:{self.id}"
+
     def __hash__(self) -> int:
         """Make PageURI hashable for use as dict keys."""
         return hash((self.root, self.type, self.id, self.version))
