@@ -116,6 +116,40 @@ class GoogleAPIClient:
         result = self._drive.files().get(fileId=file_id, fields=fields).execute()
         return result  # type: ignore
 
+    def get_file_revisions(self, file_id: str) -> List[Dict[str, Any]]:
+        """Get all revisions for a Google Drive file."""
+        result = self._drive.revisions().list(fileId=file_id).execute()
+        return result.get("revisions", [])  # type: ignore
+
+    def get_latest_revision_id(self, file_id: str) -> Optional[str]:
+        """Get the latest revision ID for a Google Drive file."""
+        try:
+            revisions = self.get_file_revisions(file_id)
+            if revisions:
+                # Revisions are returned in chronological order, so the last one is the latest
+                return revisions[-1].get("id")
+            return None
+        except Exception:
+            # If we can't get revisions, return None to be safe
+            return None
+
+    def check_file_revision(self, file_id: str, cached_revision_id: str) -> bool:
+        """Check if the cached revision ID matches the current latest revision.
+        
+        Args:
+            file_id: Google Drive file ID
+            cached_revision_id: The revision ID stored in cache
+            
+        Returns:
+            True if the cached revision is still current, False otherwise
+        """
+        try:
+            current_revision_id = self.get_latest_revision_id(file_id)
+            return current_revision_id == cached_revision_id
+        except Exception:
+            # If we can't check, assume it's invalid to be safe
+            return False
+
     def search_documents(
         self,
         search_params: Dict[str, Any],

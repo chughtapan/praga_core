@@ -23,6 +23,8 @@ class GDocHeader(Page):
         description="List of chunk URIs for this document"
     )
     permalink: str = Field(description="Google Docs permalink URL", exclude=True)
+    # Revision tracking for cache invalidation
+    revision_id: str = Field(description="Document revision ID for cache validation", exclude=True)
 
 
 class GDocChunk(Page):
@@ -38,3 +40,5 @@ class GDocChunk(Page):
     next_chunk_uri: Optional[PageURI] = Field(None, description="URI of next chunk")
     header_uri: PageURI = Field(description="URI of the parent document header")
     permalink: str = Field(description="Google Docs permalink URL", exclude=True)
+    # Revision tracking for cache invalidation
+    doc_revision_id: str = Field(description="Parent document revision ID for cache validation", exclude=True)

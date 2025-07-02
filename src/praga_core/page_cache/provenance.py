@@ -32,12 +32,12 @@ class ProvenanceTracker:
             ProvenanceError: If any validation fails
         """
         # Pre-check 1: Ensure parent exists in cache
-        parent_page = self.cache.get_page_by_uri_any_type(parent_uri)
+        parent_page = self.cache._get_page_by_uri_any_type_no_validation(parent_uri)
         if parent_page is None:
             raise ProvenanceError(f"Parent page {parent_uri} does not exist in cache")
 
         # Pre-check 2: Ensure child does not already exist in cache
-        child_page = self.cache.get_page_by_uri_any_type(page.uri)
+        child_page = self.cache._get_page_by_uri_any_type_no_validation(page.uri)
         if child_page is not None:
             raise ProvenanceError(f"Child page {page.uri} already exists in cache")
 
@@ -50,7 +50,7 @@ class ProvenanceTracker:
             )
 
         # Pre-check 4: Check that parent URI has a fixed version number (not 0 or negative)
-        if parent_uri.version <= 0:
+        if parent_uri.version is None or parent_uri.version <= 0:
             raise ProvenanceError(
                 f"Parent URI must have a fixed version number (>0), got: {parent_uri.version}"
             )
@@ -119,7 +119,9 @@ class ProvenanceTracker:
             # For each child URI, get the actual page
             for relationship in child_relationships:
                 child_uri = PageURI.parse(str(relationship.source_uri))
-                child_page = self.cache.get_page_by_uri_any_type(child_uri)
+                child_page = self.cache._get_page_by_uri_any_type_no_validation(
+                    child_uri
+                )
                 if child_page:
                     children.append(child_page)
 
@@ -138,8 +140,8 @@ class ProvenanceTracker:
         current_uri: Optional[PageURI] = page_uri
 
         while current_uri:
-            # Get the current page
-            page = self.cache.get_page_by_uri_any_type(current_uri)
+            # Get the current page ignoring validity status for provenance chain construction
+            page = self.cache._get_page_by_uri_any_type_ignore_validity(current_uri)
             if page is None:
                 break
 
