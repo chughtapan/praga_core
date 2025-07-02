@@ -1,8 +1,7 @@
 """Tests for GoogleDocsService."""
 
-from unittest.mock import Mock, patch
 from datetime import datetime
-from unittest.mock import call
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -136,20 +135,29 @@ class TestGoogleDocsService:
         self.mock_api_client.get_document.return_value = mock_doc_data
         self.mock_api_client.get_file_metadata.return_value = mock_file_metadata
 
+        # Create a real PageURI for testing
+        test_doc_id = "doc123"
+        header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
+        chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
+
         # Mock the service's chunker directly
         mock_chunk = Mock()
         mock_chunk.text = "Hello world!"
         mock_chunk.token_count = 3
         self.service.chunker.chunk = Mock(return_value=[mock_chunk])
 
+        # Mock context's create_page_uri to return our real URIs
+        self.mock_context.create_page_uri = Mock()
+        self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
+
         # Mock page cache store_page method
         self.mock_page_cache.store_page = Mock()
 
-        result = self.service._ingest_document("doc123")
+        result = self.service._ingest_document(test_doc_id)
 
         # Verify API calls made
-        self.mock_api_client.get_document.assert_called_once_with("doc123")
-        self.mock_api_client.get_file_metadata.assert_called_once_with("doc123")
+        self.mock_api_client.get_document.assert_called_once_with(test_doc_id)
+        self.mock_api_client.get_file_metadata.assert_called_once_with(test_doc_id)
 
         # Verify chunk creation (text extraction strips trailing space)
         self.service.chunker.chunk.assert_called_once_with("Hello world!")
@@ -159,7 +167,7 @@ class TestGoogleDocsService:
 
         # Verify return type
         assert isinstance(result, GDocHeader)
-        assert result.document_id == "doc123"
+        assert result.document_id == test_doc_id
         assert result.title == "Test Document"
 
     def test_extract_text_from_content_paragraph(self):
@@ -669,7 +677,7 @@ class TestGoogleDocsCacheInvalidation:
 
         # Verify revision ID was captured
         assert result.revision_id == "revision123"
-        
+
         # Verify API calls
         self.mock_api_client.get_latest_revision_id.assert_called_once_with("doc123")
 
@@ -678,9 +686,9 @@ class TestGoogleDocsCacheInvalidation:
         # The invalidators should be registered in _register_handlers
         # We can't easily test the decorator registration, but we can test
         # that the validation functions exist and work
-        
+
         # Create a mock header page
-        mock_header = GDocHeader(
+        _ = GDocHeader(
             uri=PageURI(root="test", type="gdoc_header", id="doc1"),
             document_id="doc1",
             title="Test Doc",
@@ -691,7 +699,7 @@ class TestGoogleDocsCacheInvalidation:
             chunk_count=1,
             chunk_uris=[],
             permalink="https://docs.google.com/document/d/doc1/edit",
-            revision_id="rev123"
+            revision_id="rev123",
         )
 
         # Test header validation
@@ -701,12 +709,15 @@ class TestGoogleDocsCacheInvalidation:
 
     def test_invalidate_document(self):
         """Test manual document invalidation."""
-        self.mock_context.invalidate_pages_by_prefix.side_effect = [2, 5]  # header + chunks
+        self.mock_context.invalidate_pages_by_prefix.side_effect = [
+            2,
+            5,
+        ]  # header + chunks
 
         result = self.service.invalidate_document("doc123")
 
         assert result == 7  # 2 + 5
-        
+
         # Verify correct prefixes were used
         expected_calls = [
             call("test-root/gdoc_header:doc123"),
@@ -729,7 +740,7 @@ class TestGoogleDocsCacheInvalidation:
         mock_header = Mock(spec=GDocHeader)
         mock_header.revision_id = "rev123"
         mock_header.modified_time = datetime(2023, 1, 2)
-        
+
         self.mock_page_cache.get_page.return_value = mock_header
         self.mock_api_client.get_latest_revision_id.return_value = "rev123"
 
@@ -746,9 +757,11 @@ class TestGoogleDocsCacheInvalidation:
         mock_header = Mock(spec=GDocHeader)
         mock_header.revision_id = "rev123"
         mock_header.modified_time = datetime(2023, 1, 2)
-        
+
         self.mock_page_cache.get_page.return_value = mock_header
-        self.mock_api_client.get_latest_revision_id.return_value = "rev456"  # Different revision
+        self.mock_api_client.get_latest_revision_id.return_value = (
+            "rev456"  # Different revision
+        )
 
         result = self.service.check_document_freshness("doc123")
 
@@ -773,9 +786,11 @@ class TestGoogleDocsCacheInvalidation:
     def test_refresh_document(self):
         """Test force refresh of a document."""
         mock_header = Mock(spec=GDocHeader)
-        
-        with patch.object(self.service, 'invalidate_document') as mock_invalidate:
-            with patch.object(self.service, '_ingest_document', return_value=mock_header) as mock_ingest:
+
+        with patch.object(self.service, "invalidate_document") as mock_invalidate:
+            with patch.object(
+                self.service, "_ingest_document", return_value=mock_header
+            ) as mock_ingest:
                 result = self.service.refresh_document("doc123")
 
                 mock_invalidate.assert_called_once_with("doc123")
@@ -785,17 +800,17 @@ class TestGoogleDocsCacheInvalidation:
     def test_toolkit_cache_methods(self):
         """Test toolkit methods for cache management."""
         from pragweb.google_api.docs.service import GoogleDocsToolkit
-        
+
         toolkit = GoogleDocsToolkit(self.service)
 
         # Test check_document_freshness
-        with patch.object(self.service, 'check_document_freshness') as mock_check:
+        with patch.object(self.service, "check_document_freshness") as mock_check:
             mock_check.return_value = {"fresh": True}
             result = toolkit.check_document_freshness("doc123")
             assert result == {"fresh": True}
 
         # Test invalidate_document_cache
-        with patch.object(self.service, 'invalidate_document') as mock_invalidate:
+        with patch.object(self.service, "invalidate_document") as mock_invalidate:
             mock_invalidate.return_value = 5
             result = toolkit.invalidate_document_cache("doc123")
             assert result["success"] is True
@@ -803,7 +818,7 @@ class TestGoogleDocsCacheInvalidation:
 
         # Test refresh_document
         mock_header = Mock(spec=GDocHeader)
-        with patch.object(self.service, 'refresh_document') as mock_refresh:
+        with patch.object(self.service, "refresh_document") as mock_refresh:
             mock_refresh.return_value = mock_header
             result = toolkit.refresh_document("doc123")
             assert result is mock_header
@@ -811,12 +826,12 @@ class TestGoogleDocsCacheInvalidation:
     def test_toolkit_invalidate_error_handling(self):
         """Test toolkit error handling for invalidation."""
         from pragweb.google_api.docs.service import GoogleDocsToolkit
-        
+
         toolkit = GoogleDocsToolkit(self.service)
 
-        with patch.object(self.service, 'invalidate_document') as mock_invalidate:
+        with patch.object(self.service, "invalidate_document") as mock_invalidate:
             mock_invalidate.side_effect = Exception("Invalidation failed")
             result = toolkit.invalidate_document_cache("doc123")
-            
+
             assert result["success"] is False
             assert "Invalidation failed" in result["error"]

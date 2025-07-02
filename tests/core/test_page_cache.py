@@ -95,7 +95,7 @@ def page_cache(temp_db_url: str) -> PageCache:
 def sample_user() -> UserPage:
     """Provide a sample user page."""
     return UserPage(
-        uri=PageURI(root="test", type="user", id="user1"),
+        uri=PageURI(root="test", type="user", id="user1", version=1),
         name="Test User",
         email="test@example.com",
         age=30,
@@ -106,7 +106,7 @@ def sample_user() -> UserPage:
 def sample_post() -> PostPage:
     """Provide a sample post page."""
     return PostPage(
-        uri=PageURI(root="test", type="post", id="post1"),
+        uri=PageURI(root="test", type="post", id="post1", version=1),
         title="Test Post",
         content="Test content for the post",
         author_email="test@example.com",
@@ -117,7 +117,7 @@ def sample_post() -> PostPage:
 def sample_event() -> EventPage:
     """Provide a sample event page."""
     return EventPage(
-        uri=PageURI(root="test", type="event", id="event1"),
+        uri=PageURI(root="test", type="event", id="event1", version=1),
         title="Test Event",
         start_time=datetime(2024, 1, 1, 10, 0),
         end_time=datetime(2024, 1, 1, 11, 0),
@@ -282,19 +282,19 @@ class TestSqlAlchemyQueries:
         # Create and store multiple users
         users = [
             UserPage(
-                uri=PageURI(root="test", type="user", id="user1"),
+                uri=PageURI(root="test", type="user", id="user1", version=1),
                 name="John Doe",
                 email="john@example.com",
                 age=30,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user2"),
+                uri=PageURI(root="test", type="user", id="user2", version=1),
                 name="Jane Doe",
                 email="jane@example.com",
                 age=30,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user3"),
+                uri=PageURI(root="test", type="user", id="user3", version=1),
                 name="Bob Smith",
                 email="bob@example.com",
                 age=25,
@@ -322,17 +322,17 @@ class TestSqlAlchemyQueries:
         # Create and store multiple users
         users = [
             UserPage(
-                uri=PageURI(root="test", type="user", id="user1"),
+                uri=PageURI(root="test", type="user", id="user1", version=1),
                 name="John Doe",
                 email="john@example.com",
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user2"),
+                uri=PageURI(root="test", type="user", id="user2", version=1),
                 name="Jane Doe",
                 email="jane@example.com",
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user3"),
+                uri=PageURI(root="test", type="user", id="user3", version=1),
                 name="Bob Smith",
                 email="bob@example.com",
             ),
@@ -360,19 +360,19 @@ class TestSqlAlchemyQueries:
         # Create and store multiple users
         users = [
             UserPage(
-                uri=PageURI(root="test", type="user", id="user1"),
+                uri=PageURI(root="test", type="user", id="user1", version=1),
                 name="John Doe",
                 email="john@company.com",
                 age=30,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user2"),
+                uri=PageURI(root="test", type="user", id="user2", version=1),
                 name="Jane Smith",
                 email="jane@company.com",
                 age=25,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user3"),
+                uri=PageURI(root="test", type="user", id="user3", version=1),
                 name="Bob Johnson",
                 email="bob@personal.org",
                 age=35,
@@ -401,7 +401,7 @@ class TestSqlAlchemyQueries:
         """Test finding pages using direct table reference."""
         # Store a user
         user = UserPage(
-            uri=PageURI(root="test", type="user", id="user1"),
+            uri=PageURI(root="test", type="user", id="user1", version=1),
             name="Test User",
             email="test@example.com",
         )
@@ -455,13 +455,13 @@ class TestDateTimeHandling:
         # Create events with different times
         events = [
             EventPage(
-                uri=PageURI(root="test", type="event", id="event1"),
+                uri=PageURI(root="test", type="event", id="event1", version=1),
                 title="Morning Event",
                 start_time=datetime(2024, 1, 1, 10, 0),
                 end_time=datetime(2024, 1, 1, 11, 0),
             ),
             EventPage(
-                uri=PageURI(root="test", type="event", id="event2"),
+                uri=PageURI(root="test", type="event", id="event2", version=1),
                 title="Afternoon Event",
                 start_time=datetime(2024, 1, 1, 14, 0),
                 end_time=datetime(2024, 1, 1, 15, 0),
@@ -481,7 +481,7 @@ class TestDateTimeHandling:
     def test_datetime_with_microseconds(self, page_cache: PageCache) -> None:
         """Test datetime fields with microseconds."""
         event = EventPage(
-            uri=PageURI(root="test", type="event", id="event_micro"),
+            uri=PageURI(root="test", type="event", id="event_micro", version=1),
             title="Event with Microseconds",
             start_time=datetime(2024, 1, 1, 10, 0, 0, 123456),
             end_time=datetime(2024, 1, 1, 11, 0, 0, 789012),
@@ -502,7 +502,7 @@ class TestOptionalFields:
     def test_store_page_with_none_values(self, page_cache: PageCache) -> None:
         """Test storing pages with None values in optional fields."""
         user = UserPage(
-            uri=PageURI(root="test", type="user", id="user_no_age"),
+            uri=PageURI(root="test", type="user", id="user_no_age", version=1),
             name="User Without Age",
             email="noage@example.com",
             age=None,
@@ -527,19 +527,19 @@ class TestAdvancedQueries:
         # Store some users
         users = [
             UserPage(
-                uri=PageURI(root="test", type="user", id="user1"),
+                uri=PageURI(root="test", type="user", id="user1", version=1),
                 name="Alice",
                 email="alice@example.com",
                 age=25,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user2"),
+                uri=PageURI(root="test", type="user", id="user2", version=1),
                 name="Bob",
                 email="bob@example.com",
                 age=30,
             ),
             UserPage(
-                uri=PageURI(root="test", type="user", id="user3"),
+                uri=PageURI(root="test", type="user", id="user3", version=1),
                 name="Charlie",
                 email="charlie@example.com",
                 age=35,
@@ -578,7 +578,7 @@ class TestTableReuse:
 
         # Store a page
         user = UserPage(
-            uri=PageURI(root="test", type="user", id="user1"),
+            uri=PageURI(root="test", type="user", id="user1", version=1),
             name="Test User",
             email="test@example.com",
         )
@@ -636,12 +636,12 @@ class TestURIHandling:
     def test_different_uris_different_records(self, page_cache: PageCache) -> None:
         """Test that different URIs create different records."""
         user1 = UserPage(
-            uri=PageURI(root="test", type="user", id="user1"),
+            uri=PageURI(root="test", type="user", id="user1", version=1),
             name="User 1",
             email="user1@example.com",
         )
         user2 = UserPage(
-            uri=PageURI(root="test", type="user", id="user2"),
+            uri=PageURI(root="test", type="user", id="user2", version=1),
             name="User 2",
             email="user2@example.com",
         )
@@ -668,7 +668,7 @@ class TestPageURISerialization:
     def test_convert_page_uris_for_storage_single_uri(self) -> None:
         """Test converting a single PageURI to string for storage."""
 
-        uri = PageURI(root="test", type="doc", id="123")
+        uri = PageURI(root="test", type="doc", id="123", version=1)
         result = serialize_for_storage(uri)
         assert result == str(uri)
         assert isinstance(result, str)
@@ -677,8 +677,8 @@ class TestPageURISerialization:
         """Test converting a list of PageURIs to strings for storage."""
 
         uris = [
-            PageURI(root="test", type="doc", id="123"),
-            PageURI(root="test", type="doc", id="456"),
+            PageURI(root="test", type="doc", id="123", version=1),
+            PageURI(root="test", type="doc", id="456", version=1),
         ]
         result = serialize_for_storage(uris)
         expected = [str(uri) for uri in uris]
@@ -792,15 +792,15 @@ class TestPageWithPageURIFields:
     def sample_document_with_uris(self) -> "TestPageWithPageURIFields.DocumentPage":
         """Provide a sample document with PageURI fields."""
         return self.DocumentPage(
-            uri=PageURI(root="test", type="document", id="doc1"),
+            uri=PageURI(root="test", type="document", id="doc1", version=1),
             title="Test Document",
             content="This is test content for the document",
-            author_uri=PageURI(root="test", type="user", id="author1"),
+            author_uri=PageURI(root="test", type="user", id="author1", version=1),
             related_docs=[
-                PageURI(root="test", type="document", id="related1"),
-                PageURI(root="test", type="document", id="related2"),
+                PageURI(root="test", type="document", id="related1", version=1),
+                PageURI(root="test", type="document", id="related2", version=1),
             ],
-            parent_doc=PageURI(root="test", type="document", id="parent1"),
+            parent_doc=PageURI(root="test", type="document", id="parent1", version=1),
         )
 
     def test_store_and_retrieve_page_with_page_uris(
@@ -841,7 +841,7 @@ class TestPageWithPageURIFields:
     ) -> None:
         """Test storing and retrieving a page with None PageURI fields."""
         doc = self.DocumentPage(
-            uri=PageURI(root="test", type="document", id="doc2"),
+            uri=PageURI(root="test", type="document", id="doc2", version=1),
             title="Document Without URIs",
             content="Content without related URIs",
             author_uri=None,
@@ -865,27 +865,29 @@ class TestPageWithPageURIFields:
     def test_find_pages_by_page_uri_fields(self, page_cache: PageCache) -> None:
         """Test finding pages by PageURI field values."""
         # Create documents with specific author
-        author_uri = PageURI(root="test", type="user", id="author123")
+        author_uri = PageURI(root="test", type="user", id="author123", version=1)
 
         doc1 = self.DocumentPage(
-            uri=PageURI(root="test", type="document", id="doc1"),
+            uri=PageURI(root="test", type="document", id="doc1", version=1),
             title="Document 1",
             content="Content 1",
             author_uri=author_uri,
         )
 
         doc2 = self.DocumentPage(
-            uri=PageURI(root="test", type="document", id="doc2"),
+            uri=PageURI(root="test", type="document", id="doc2", version=1),
             title="Document 2",
             content="Content 2",
             author_uri=author_uri,
         )
 
         doc3 = self.DocumentPage(
-            uri=PageURI(root="test", type="document", id="doc3"),
+            uri=PageURI(root="test", type="document", id="doc3", version=1),
             title="Document 3",
             content="Content 3",
-            author_uri=PageURI(root="test", type="user", id="different_author"),
+            author_uri=PageURI(
+                root="test", type="user", id="different_author", version=1
+            ),
         )
 
         # Store all documents
@@ -938,14 +940,20 @@ class TestGoogleDocsPageURIs:
 
         # Create chunk URIs
         chunk_uris = [
-            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(0)"),
-            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(1)"),
-            PageURI(root="google", type="gdoc_chunk", id=f"{document_id}(2)"),
+            PageURI(
+                root="google", type="gdoc_chunk", id=f"{document_id}(0)", version=1
+            ),
+            PageURI(
+                root="google", type="gdoc_chunk", id=f"{document_id}(1)", version=1
+            ),
+            PageURI(
+                root="google", type="gdoc_chunk", id=f"{document_id}(2)", version=1
+            ),
         ]
 
         # Create header with chunk URIs
         header = self.GDocHeader(
-            uri=PageURI(root="google", type="gdoc_header", id=document_id),
+            uri=PageURI(root="google", type="gdoc_header", id=document_id, version=1),
             document_id=document_id,
             title="Test Google Doc",
             chunk_count=3,
@@ -1010,11 +1018,18 @@ class TestGoogleDocsPageURIs:
         chunks = []
         for i in range(3):
             chunk = self.GDocChunk(
-                uri=PageURI(root="google", type="gdoc_chunk", id=f"{document_id}({i})"),
+                uri=PageURI(
+                    root="google",
+                    type="gdoc_chunk",
+                    id=f"{document_id}({i})",
+                    version=1,
+                ),
                 document_id=document_id,
                 chunk_index=i,
                 content=f"Chunk {i} content",
-                header_uri=PageURI(root="google", type="gdoc_header", id=document_id),
+                header_uri=PageURI(
+                    root="google", type="gdoc_header", id=document_id, version=1
+                ),
             )
             chunks.append(chunk)
             page_cache.store_page(chunk)
@@ -1783,7 +1798,7 @@ class TestComprehensiveSerialization:
         nested_model = self.NestedModel(
             name="Test Nested",
             value=42,
-            uri=PageURI(root="test", type="nested", id="nested1"),
+            uri=PageURI(root="test", type="nested", id="nested1", version=1),
         )
 
         model_list = [
@@ -1791,12 +1806,12 @@ class TestComprehensiveSerialization:
             self.NestedModel(
                 name="Item 2",
                 value=20,
-                uri=PageURI(root="test", type="item", id="item2"),
+                uri=PageURI(root="test", type="item", id="item2", version=1),
             ),
         ]
 
         complex_page = self.ComplexPage(
-            uri=PageURI(root="test", type="complex", id="complex1"),
+            uri=PageURI(root="test", type="complex", id="complex1", version=1),
             title="Complex Page Test",
             nested_model=nested_model,
             model_list=model_list,
@@ -1846,11 +1861,11 @@ class TestComprehensiveSerialization:
         optional_model = self.NestedModel(
             name="Optional Model",
             value=99,
-            uri=PageURI(root="test", type="optional", id="opt1"),
+            uri=PageURI(root="test", type="optional", id="opt1", version=1),
         )
 
         complex_page = self.ComplexPage(
-            uri=PageURI(root="test", type="complex", id="complex2"),
+            uri=PageURI(root="test", type="complex", id="complex2", version=1),
             title="Complex Page with Optional",
             nested_model=self.NestedModel(name="Required", value=1),
             model_list=[],
@@ -1878,14 +1893,14 @@ class TestComprehensiveSerialization:
         """Test querying pages that contain complex Pydantic models."""
         # Create pages with different nested model names
         page1 = self.ComplexPage(
-            uri=PageURI(root="test", type="complex", id="find1"),
+            uri=PageURI(root="test", type="complex", id="find1", version=1),
             title="Find Test 1",
             nested_model=self.NestedModel(name="Search Target", value=100),
             model_list=[],
         )
 
         page2 = self.ComplexPage(
-            uri=PageURI(root="test", type="complex", id="find2"),
+            uri=PageURI(root="test", type="complex", id="find2", version=1),
             title="Find Test 2",
             nested_model=self.NestedModel(name="Different Name", value=200),
             model_list=[],
@@ -1999,7 +2014,7 @@ class TestVersioning:
         prefix = "test/user:user1"
 
         # Should return None when no versions exist
-        latest_page = page_cache.get_latest_page(UserPage, prefix)
+        latest_page = page_cache.get_page(UserPage, prefix)
         assert latest_page is None
 
         # Store multiple versions
@@ -2088,6 +2103,63 @@ class TestVersioning:
         assert user2_latest_page.name == "User 2 Version 1"
 
 
+class TestPageCacheDefaultVersionFunctionality:
+    """Test default version functionality in PageCache."""
+
+    def test_store_page_with_default_version_raises_error(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that storing a page with default version raises an error."""
+        import pytest
+
+        # Create page with default version URI
+        user = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=None),
+            name="Test User",
+            email="test@example.com",
+            age=30,
+        )
+
+        # Should raise ValueError
+        with pytest.raises(ValueError, match="Cannot store page with None version"):
+            page_cache.store_page(user)
+
+    def test_retrieve_default_version_gets_highest_version(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test that requesting default version returns the highest actual version."""
+        # Store multiple versions
+        user_v1 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=1),
+            name="User v1",
+            email="test@example.com",
+        )
+        user_v3 = UserPage(
+            uri=PageURI(root="test", type="user", id="user1", version=3),
+            name="User v3",
+            email="test@example.com",
+        )
+
+        page_cache.store_page(user_v1)
+        page_cache.store_page(user_v3)
+
+        # Request default version should return v3 (highest)
+        default_uri = PageURI(root="test", type="user", id="user1", version=None)
+        retrieved = page_cache.get_page(UserPage, default_uri)
+
+        assert retrieved is not None
+        assert retrieved.name == "User v3"  # Should get version 3
+        assert retrieved.uri.version == 3  # Page should have actual version
+
+    def test_retrieve_default_version_for_nonexistent_page(
+        self, page_cache: PageCache
+    ) -> None:
+        """Test getting default version for a page that doesn't exist."""
+        uri = PageURI(root="test", type="user", id="nonexistent", version=None)
+        result = page_cache.get_page(UserPage, uri)
+        assert result is None
+
+
 class TestCacheInvalidation:
     """Test cache invalidation functionality."""
 
@@ -2115,12 +2187,13 @@ class TestCacheInvalidation:
 
     def test_register_invalidator(self, page_cache: PageCache) -> None:
         """Test registering an invalidator function."""
+
         def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             # Mock validation - check if revision is "current"
             return page.revision == "current"
 
         page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
-        
+
         # Verify invalidator is stored
         assert "GoogleDocPage" in page_cache._invalidators
 
@@ -2131,7 +2204,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc1"),
             title="Test Doc",
             content="Test content",
-            revision="current"
+            revision="current",
         )
         page_cache.store_page(doc)
 
@@ -2155,7 +2228,7 @@ class TestCacheInvalidation:
                 uri=PageURI(root="test", type="doc", id="doc1", version=version),
                 title=f"Test Doc v{version}",
                 content=f"Test content v{version}",
-                revision="current"
+                revision="current",
             )
             page_cache.store_page(doc)
 
@@ -2177,6 +2250,7 @@ class TestCacheInvalidation:
 
     def test_page_validation_with_invalidator(self, page_cache: PageCache) -> None:
         """Test that pages are validated using registered invalidators."""
+
         def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             # Mock validation - only "current" revision is valid
             return page.revision == "current"
@@ -2188,7 +2262,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc1"),
             title="Current Doc",
             content="Current content",
-            revision="current"
+            revision="current",
         )
         page_cache.store_page(doc_current)
 
@@ -2197,7 +2271,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc2"),
             title="Old Doc",
             content="Old content",
-            revision="old"
+            revision="old",
         )
         page_cache.store_page(doc_old)
 
@@ -2212,6 +2286,7 @@ class TestCacheInvalidation:
 
     def test_ancestor_validation(self, page_cache: PageCache) -> None:
         """Test that ancestor pages are validated when retrieving child pages."""
+
         def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             return page.revision == "current"
 
@@ -2226,7 +2301,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc1"),
             title="Parent Doc",
             content="Parent content",
-            revision="current"
+            revision="current",
         )
         page_cache.store_page(parent_doc)
 
@@ -2236,7 +2311,7 @@ class TestCacheInvalidation:
             chunk_index=1,
             content="Chunk content",
             doc_revision="current",
-            parent_uri=parent_doc.uri
+            parent_uri=parent_doc.uri,
         )
         page_cache.store_page(child_chunk)
 
@@ -2252,7 +2327,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc1", version=2),
             title="Parent Doc Updated",
             content="Updated parent content",
-            revision="old"  # This will make it invalid
+            revision="old",  # This will make it invalid
         )
         page_cache.store_page(updated_parent)
 
@@ -2262,12 +2337,14 @@ class TestCacheInvalidation:
             chunk_index=1,
             content="Chunk content",
             doc_revision="current",  # Child is still current
-            parent_uri=updated_parent.uri
+            parent_uri=updated_parent.uri,
         )
         page_cache.store_page(updated_child)
 
         # The updated parent should be invalid
-        retrieved_updated_parent = page_cache.get_page(self.GoogleDocPage, updated_parent.uri)
+        retrieved_updated_parent = page_cache.get_page(
+            self.GoogleDocPage, updated_parent.uri
+        )
         assert retrieved_updated_parent is None
 
         # The child should also be invalid because its parent is invalid
@@ -2276,6 +2353,7 @@ class TestCacheInvalidation:
 
     def test_find_pages_respects_validity(self, page_cache: PageCache) -> None:
         """Test that find_pages_by_attribute only returns valid pages."""
+
         def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             return page.revision == "current"
 
@@ -2287,19 +2365,19 @@ class TestCacheInvalidation:
                 uri=PageURI(root="test", type="doc", id="doc1"),
                 title="Current Doc 1",
                 content="Content 1",
-                revision="current"
+                revision="current",
             ),
             self.GoogleDocPage(
                 uri=PageURI(root="test", type="doc", id="doc2"),
                 title="Current Doc 2",
                 content="Content 2",
-                revision="current"
+                revision="current",
             ),
             self.GoogleDocPage(
                 uri=PageURI(root="test", type="doc", id="doc3"),
                 title="Old Doc 3",
                 content="Content 3",
-                revision="old"
+                revision="old",
             ),
         ]
 
@@ -2308,8 +2386,7 @@ class TestCacheInvalidation:
 
         # Find all documents with "Doc" in title
         results = page_cache.find_pages_by_attribute(
-            self.GoogleDocPage,
-            lambda t: t.title.like("%Doc%")
+            self.GoogleDocPage, lambda t: t.title.like("%Doc%")
         )
 
         # Should only return the 2 current documents, not the old one
@@ -2324,7 +2401,7 @@ class TestCacheInvalidation:
             uri=PageURI(root="test", type="doc", id="doc1"),
             title="Test Doc",
             content="Test content",
-            revision="old"  # Would be invalid if invalidator was registered
+            revision="old",  # Would be invalid if invalidator was registered
         )
         page_cache.store_page(doc)
 

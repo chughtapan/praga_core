@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, TypeVar
+from typing import Callable, Dict, List, Optional, Type, TypeVar
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
@@ -57,20 +57,42 @@ class ServerContext:
         """Get all registered services."""
         return self._services.copy()
 
-    def create_page_uri(self, type_name: str, id: str, version: int = 1) -> PageURI:
+    def create_page_uri(
+        self,
+        page_type: Type[Page],
+        type_path: str,
+        id: str,
+        version: Optional[int] = None,
+    ) -> PageURI:
         """Create a PageURI with this context's root.
 
+        When version is None, determines the next version number by checking
+        the cache for the latest existing version and incrementing it.
+
         Args:
-            type_name: Type name for the page
+            page_type: The Page class type
+            type_path: String path for the page type (e.g., "email", "calendar_event")
             id: Unique identifier
-            version: Version number (defaults to 1)
+            version: Version number (defaults to None for auto-increment)
 
         Returns:
-            PageURI object
+            PageURI object with resolved version number
         """
-        return PageURI(root=self.root, type=type_name, id=id, version=version)
+        if version is None:
+            # Create prefix to check for existing versions
+            prefix = f"{self.root}/{type_path}:{id}"
 
-    def handler(self, page_type: str, invalidator: Optional[PageInvalidator] = None) -> Callable[[Callable[..., T]], Callable[..., T]]:
+            # Get the latest version for this page type and prefix
+            latest_version = self._page_cache.get_latest_version(page_type, prefix)
+
+            # If no existing versions found, start with 1. Otherwise increment the latest.
+            version = 1 if latest_version is None else (latest_version + 1)
+
+        return PageURI(root=self.root, type=type_path, id=id, version=version)
+
+    def handler(
+        self, page_type: str, invalidator: Optional[PageInvalidator] = None
+    ) -> Callable[[Callable[..., T]], Callable[..., T]]:
         """Decorator to register a page handler function for a specific page type.
 
         Usage:
@@ -82,7 +104,7 @@ class ServerContext:
             # With invalidator:
             def validate_email(page: EmailPage) -> bool:
                 return check_email_still_exists(page)
-            
+
             @ctx.handler("email", invalidator=validate_email)
             def handle_email(email_id: str) -> EmailPage:
                 return EmailPage(...)
@@ -108,15 +130,15 @@ class ServerContext:
             raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
 
         handler = self._page_handlers[page_uri.type]
-        
+
         # Call handler with just the id - handlers are responsible for cache management
         page = handler(page_uri.id)
-        
+
         # Register invalidator with cache if we have one for this page type
         if page_uri.type in self._page_invalidators:
             invalidator = self._page_invalidators[page_uri.type]
             self._register_invalidator_with_cache(page.__class__, invalidator)
-        
+
         return page
 
     def search(
@@ -180,15 +202,17 @@ class ServerContext:
             raise RuntimeError(f"Page handler already registered for type: {type_name}")
 
         self._page_handlers[type_name] = handler_func
-        
+
         if invalidator_func is not None:
             self._page_invalidators[type_name] = invalidator_func
-            
+
             # Register invalidator with page cache if we have a sample page type
             # We'll need to get the page type from the handler function's return annotation
             # For now, we'll store it and register it when we first encounter a page of this type
-            
-    def _register_invalidator_with_cache(self, page_type: type, invalidator: PageInvalidator) -> None:
+
+    def _register_invalidator_with_cache(
+        self, page_type: type, invalidator: PageInvalidator
+    ) -> None:
         """Register an invalidator with the page cache for a specific page type."""
         self._page_cache.register_invalidator(page_type, invalidator)
 
@@ -208,26 +232,26 @@ class ServerContext:
     def page_cache(self) -> PageCache:
         """Get access to the SQL-based page cache."""
         return self._page_cache
-        
+
     def invalidate_page(self, page_uri: str | PageURI) -> bool:
         """Invalidate a specific page in the cache.
-        
+
         Args:
             page_uri: URI of the page to invalidate
-            
+
         Returns:
             True if page was found and invalidated, False if not found
         """
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
         return self._page_cache.invalidate_page(page_uri)
-        
+
     def invalidate_pages_by_prefix(self, uri_prefix: str) -> int:
         """Invalidate all versions of pages with the given prefix.
-        
+
         Args:
             uri_prefix: URI prefix (without version) to invalidate
-            
+
         Returns:
             Number of pages invalidated
         """

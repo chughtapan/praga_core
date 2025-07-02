@@ -26,10 +26,13 @@ class PageURI(BaseModel):
     root: str = Field(description="Root identifier for the server/context")
     type: str = Field(description="Type of the page")
     id: str = Field(description="Unique identifier within the type")
-    version: int = Field(description="Version number of the page", default=1)
+    version: Optional[int] = Field(
+        description="Version number of the page, or None for latest",
+        default=None,
+    )
 
     def __init__(
-        self, root: str, type: str, id: str, version: int = 1, **data: Any
+        self, root: str, type: str, id: str, version: Optional[int] = None, **data: Any
     ) -> None:
         """Initialize PageURI with validation."""
         # Validate that components don't contain forbidden characters
@@ -37,14 +40,14 @@ class PageURI(BaseModel):
             raise ValueError(f"Type cannot contain '/', ':', or '@' characters: {type}")
         if ":" in id or "@" in id:
             raise ValueError(f"ID cannot contain ':' or '@' characters: {id}")
-        if version < 0:
+        if version is not None and version < 0:
             raise ValueError(f"Version must be non-negative: {version}")
 
         super().__init__(root=root, type=type, id=id, version=version, **data)
 
     @overload
     @classmethod
-    def parse(cls, uri: PageURI) -> "PageURI":
+    def parse(cls, uri: "PageURI") -> "PageURI":
         """Parse a PageURI object."""
         ...
 
@@ -61,7 +64,7 @@ class PageURI(BaseModel):
         ...
 
     @classmethod
-    def parse(cls, uri: Union[PageURI, str, dict[str, Any]]) -> "PageURI":
+    def parse(cls, uri: Union["PageURI", str, dict[str, Any]]) -> "PageURI":
         """Parse a URI from various formats into a PageURI object."""
         if isinstance(uri, PageURI):
             return uri
@@ -84,9 +87,9 @@ class PageURI(BaseModel):
 
         root, type_name, id_part, version_str = match.groups()
 
-        # Default to version 1 if not specified
+        # Default to None version if not specified
         if version_str is None:
-            version = 1
+            version = None
         else:
             try:
                 version = int(version_str)
@@ -97,7 +100,11 @@ class PageURI(BaseModel):
 
     def __str__(self) -> str:
         """Return string representation in root/type:id@version format."""
-        return f"{self.root}/{self.type}:{self.id}@{self.version}"
+        if self.version is None:
+            # Don't include version for None version (latest)
+            return f"{self.root}/{self.type}:{self.id}"
+        else:
+            return f"{self.root}/{self.type}:{self.id}@{self.version}"
 
     @property
     def prefix(self) -> str:
@@ -132,7 +139,7 @@ class Page(BaseModel, ABC):
         description="Structured URI for the page"
     )
     parent_uri: Optional[Annotated[PageURI, BeforeValidator(PageURI.parse)]] = Field(
-        None,
+        default=None,
         description="Optional parent page URI for provenance tracking",
         exclude=True,
     )

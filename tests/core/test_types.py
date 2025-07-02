@@ -6,7 +6,12 @@ and related classes with the new json_encoders configuration.
 
 import json
 
-from praga_core.types import PageReference, PageURI, SearchResponse, TextPage
+from praga_core.types import (
+    PageReference,
+    PageURI,
+    SearchResponse,
+    TextPage,
+)
 
 
 class TestPageURIJSONSerialization:
@@ -33,6 +38,42 @@ class TestPageURIJSONSerialization:
         # Test with empty root
         uri_empty_root = PageURI(root="", type="Email", id="123", version=5)
         assert uri_empty_root.prefix == "/Email:123"
+
+    def test_page_uri_none_version_serialization(self) -> None:
+        """Test that None version PageURI serializes without version number."""
+        uri = PageURI(root="test", type="Email", id="123", version=None)
+
+        serialized = uri.model_dump(mode="json")
+        expected = "test/Email:123"
+        assert serialized == expected
+
+    def test_page_uri_none_version_string_representation(self) -> None:
+        """Test None version PageURI string representation."""
+        uri = PageURI(root="myserver", type="Document", id="abc", version=None)
+        assert str(uri) == "myserver/Document:abc"
+
+    def test_page_uri_none_version_default(self) -> None:
+        """Test that PageURI defaults to None version."""
+        uri = PageURI(root="test", type="Email", id="123")
+        assert uri.version is None
+        assert str(uri) == "test/Email:123"
+
+    def test_page_uri_none_version_parsing(self) -> None:
+        """Test parsing URI string without version defaults to None version."""
+        uri = PageURI.parse("test/Email:123")
+        assert uri.version is None
+
+    def test_page_uri_version_validation(self) -> None:
+        """Test that invalid version numbers are rejected."""
+        import pytest
+
+        # Test negative version
+        with pytest.raises(ValueError, match="Version must be non-negative"):
+            PageURI(root="test", type="Email", id="123", version=-1)
+
+        # Test that None is allowed
+        uri = PageURI(root="test", type="Email", id="123", version=None)
+        assert uri.version is None
 
 
 class TestPageJSONSerialization:

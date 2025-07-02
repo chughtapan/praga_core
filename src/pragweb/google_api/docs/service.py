@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from chonkie import RecursiveChunker
 
 from praga_core.agents import PaginatedResponse, RetrieverToolkit, tool
-from praga_core.types import PageURI
+from praga_core.types import Page, PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -23,6 +23,7 @@ class GoogleDocsService(ToolkitService):
     def __init__(self, api_client: GoogleAPIClient, chunk_size: int = 4000) -> None:
         super().__init__()
         self.api_client = api_client
+        self.chunk_size = chunk_size
 
         # Initialize Chonkie chunker with configurable chunk size
         self.chunker = RecursiveChunker(
@@ -39,20 +40,30 @@ class GoogleDocsService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        def validate_gdoc_header(page: GDocHeader) -> bool:
+        def validate_gdoc_header(page: Page) -> bool:
             """Validate a Google Docs header page by checking if revision is current."""
             try:
-                return self.api_client.check_file_revision(page.document_id, page.revision_id)
+                if not isinstance(page, GDocHeader):
+                    return False
+                result = self.api_client.check_file_revision(
+                    page.document_id, page.revision_id
+                )
+                return bool(result)
             except Exception as e:
-                logger.warning(f"Failed to validate header {page.document_id}: {e}")
+                logger.warning(f"Failed to validate header {page.uri}: {e}")
                 return False
 
-        def validate_gdoc_chunk(page: GDocChunk) -> bool:
+        def validate_gdoc_chunk(page: Page) -> bool:
             """Validate a Google Docs chunk page by checking if parent document revision is current."""
             try:
-                return self.api_client.check_file_revision(page.document_id, page.doc_revision_id)
+                if not isinstance(page, GDocChunk):
+                    return False
+                result = self.api_client.check_file_revision(
+                    page.document_id, page.doc_revision_id
+                )
+                return bool(result)
             except Exception as e:
-                logger.warning(f"Failed to validate chunk {page.document_id}: {e}")
+                logger.warning(f"Failed to validate chunk {page.uri}: {e}")
                 return False
 
         @self.context.handler("gdoc_header", invalidator=validate_gdoc_header)
@@ -163,8 +174,8 @@ class GoogleDocsService(ToolkitService):
         permalink = f"https://docs.google.com/document/d/{document_id}/edit"
 
         # Create header URI that will be used as parent for chunks
-        header_uri = PageURI(
-            root=self.context.root, type="gdoc_header", id=document_id
+        header_uri = self.context.create_page_uri(
+            GDocHeader, "gdoc_header", id=document_id
         )
 
         # Store chunks in page cache first
@@ -194,7 +205,9 @@ class GoogleDocsService(ToolkitService):
                 )
 
             # Create chunk page
-            chunk_uri = PageURI(root=self.context.root, type="gdoc_chunk", id=chunk_id)
+            chunk_uri = self.context.create_page_uri(
+                GDocChunk, "gdoc_chunk", id=chunk_id
+            )
             chunk_page = GDocChunk(
                 uri=chunk_uri,
                 document_id=document_id,
@@ -373,82 +386,90 @@ class GoogleDocsService(ToolkitService):
 
     def invalidate_document(self, document_id: str) -> int:
         """Manually invalidate all cached pages for a specific document.
-        
+
         Args:
             document_id: Google Docs document ID to invalidate
-            
+
         Returns:
             Number of pages invalidated
         """
         invalidated_count = 0
-        
+
         # Invalidate header page
         header_uri_prefix = f"{self.context.root}/gdoc_header:{document_id}"
         invalidated_count += self.context.invalidate_pages_by_prefix(header_uri_prefix)
-        
+
         # Invalidate all chunk pages for this document
         chunk_uri_prefix = f"{self.context.root}/gdoc_chunk:{document_id}"
         invalidated_count += self.context.invalidate_pages_by_prefix(chunk_uri_prefix)
-        
-        logger.info(f"Manually invalidated {invalidated_count} pages for document {document_id}")
+
+        logger.info(
+            f"Manually invalidated {invalidated_count} pages for document {document_id}"
+        )
         return invalidated_count
 
     def check_document_freshness(self, document_id: str) -> Dict[str, Any]:
         """Check if a cached document is still fresh compared to the online version.
-        
+
         Args:
             document_id: Google Docs document ID to check
-            
+
         Returns:
             Dictionary with freshness information
         """
         try:
             # Get cached header if it exists
-            header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
+            header_uri = PageURI(
+                root=self.context.root, type="gdoc_header", id=document_id
+            )
             cached_header = self.context.page_cache.get_page(GDocHeader, header_uri)
-            
+
             if not cached_header:
                 return {
                     "cached": False,
                     "fresh": False,
-                    "message": "Document not in cache"
+                    "message": "Document not in cache",
                 }
-            
+
             # Check if cached revision matches current revision
             current_revision_id = self.api_client.get_latest_revision_id(document_id)
-            is_fresh = (current_revision_id == cached_header.revision_id)
-            
+            is_fresh = current_revision_id == cached_header.revision_id
+
             return {
                 "cached": True,
                 "fresh": is_fresh,
                 "cached_revision": cached_header.revision_id,
                 "current_revision": current_revision_id,
                 "cached_modified_time": cached_header.modified_time.isoformat(),
-                "message": "Document is fresh" if is_fresh else "Document has been modified online"
+                "message": (
+                    "Document is fresh"
+                    if is_fresh
+                    else "Document has been modified online"
+                ),
             }
-            
+
         except Exception as e:
             return {
-                "cached": bool(cached_header) if 'cached_header' in locals() else False,
+                "cached": bool(cached_header) if "cached_header" in locals() else False,
                 "fresh": False,
                 "error": str(e),
-                "message": f"Error checking document freshness: {e}"
+                "message": f"Error checking document freshness: {e}",
             }
 
     def refresh_document(self, document_id: str) -> GDocHeader:
         """Force refresh a document by invalidating cache and re-ingesting.
-        
+
         Args:
             document_id: Google Docs document ID to refresh
-            
+
         Returns:
             Freshly ingested document header
         """
         logger.info(f"Force refreshing document {document_id}")
-        
+
         # Invalidate all cached pages for this document
         self.invalidate_document(document_id)
-        
+
         # Re-ingest the document
         return self._ingest_document(document_id)
 
@@ -609,23 +630,25 @@ class GoogleDocsToolkit(RetrieverToolkit):
             Dictionary with invalidation results
         """
         try:
-            invalidated_count = self.google_docs_service.invalidate_document(document_id)
+            invalidated_count = self.google_docs_service.invalidate_document(
+                document_id
+            )
             return {
                 "success": True,
                 "document_id": document_id,
                 "invalidated_pages": invalidated_count,
-                "message": f"Successfully invalidated {invalidated_count} cached pages"
+                "message": f"Successfully invalidated {invalidated_count} cached pages",
             }
         except Exception as e:
             return {
                 "success": False,
                 "document_id": document_id,
                 "error": str(e),
-                "message": f"Failed to invalidate document cache: {e}"
+                "message": f"Failed to invalidate document cache: {e}",
             }
 
     @tool()
-    def refresh_document(self, document_id: str) -> GDocHeader:
+    def refresh_document(self, document_id: str) -> List[Page]:
         """Force refresh a Google Docs document by invalidating cache and re-ingesting.
 
         Args:
@@ -634,4 +657,5 @@ class GoogleDocsToolkit(RetrieverToolkit):
         Returns:
             Freshly ingested document header page
         """
-        return self.google_docs_service.refresh_document(document_id)
+        header = self.google_docs_service.refresh_document(document_id)
+        return [header]
