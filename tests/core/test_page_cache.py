@@ -13,6 +13,10 @@ from pydantic import BaseModel
 
 from praga_core.page_cache import PageCache, PageCacheError
 from praga_core.page_cache.schema import PageRelationships
+from praga_core.page_cache.serialization import (
+    deserialize_from_storage,
+    serialize_for_storage,
+)
 from praga_core.types import Page, PageURI
 
 
@@ -404,7 +408,7 @@ class TestSqlAlchemyQueries:
         page_cache.store_page(user)
 
         # Get table class and use direct reference
-        table = page_cache._get_table_class(UserPage)
+        table = page_cache.get_table_class(UserPage)
         results = page_cache.find_pages_by_attribute(
             UserPage, table.email == "test@example.com"
         )
@@ -546,7 +550,7 @@ class TestAdvancedQueries:
             page_cache.store_page(user)
 
         # Use direct table access for complex queries
-        table = page_cache._get_table_class(UserPage)
+        table = page_cache.get_table_class(UserPage)
 
         # Find users with age between 25 and 30
         results = page_cache.find_pages_by_attribute(
@@ -560,7 +564,7 @@ class TestAdvancedQueries:
     def test_get_table_class_unregistered_type(self, page_cache: PageCache) -> None:
         """Test getting table class for unregistered page type."""
         with pytest.raises(ValueError, match="Page type UserPage not registered"):
-            page_cache._get_table_class(UserPage)
+            page_cache.get_table_class(UserPage)
 
 
 class TestTableReuse:
@@ -596,12 +600,12 @@ class TestErrorHandling:
     def test_get_table_class_unregistered_type(self, page_cache: PageCache) -> None:
         """Test getting table class for unregistered type."""
         with pytest.raises(ValueError, match="Page type UserPage not registered"):
-            page_cache._get_table_class(UserPage)
+            page_cache.get_table_class(UserPage)
 
     def test_get_table_class_registered_type(self, page_cache: PageCache) -> None:
         """Test getting table class for registered type."""
         page_cache.register_page_type(UserPage)
-        table_class = page_cache._get_table_class(UserPage)
+        table_class = page_cache.get_table_class(UserPage)
         assert table_class is not None
         assert hasattr(table_class, "uri_prefix")
         assert hasattr(table_class, "version")
@@ -661,32 +665,29 @@ class TestURIHandling:
 class TestPageURISerialization:
     """Test PageURI serialization and deserialization in page_cache."""
 
-    def test_convert_page_uris_for_storage_single_uri(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_for_storage_single_uri(self) -> None:
         """Test converting a single PageURI to string for storage."""
+
         uri = PageURI(root="test", type="doc", id="123")
-        result = page_cache._convert_page_uris_for_storage(uri)
+        result = serialize_for_storage(uri)
         assert result == str(uri)
         assert isinstance(result, str)
 
-    def test_convert_page_uris_for_storage_list_of_uris(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_for_storage_list_of_uris(self) -> None:
         """Test converting a list of PageURIs to strings for storage."""
+
         uris = [
             PageURI(root="test", type="doc", id="123"),
             PageURI(root="test", type="doc", id="456"),
         ]
-        result = page_cache._convert_page_uris_for_storage(uris)
+        result = serialize_for_storage(uris)
         expected = [str(uri) for uri in uris]
         assert result == expected
         assert all(isinstance(item, str) for item in result)
 
-    def test_convert_page_uris_for_storage_nested_structure(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_for_storage_nested_structure(self) -> None:
         """Test converting nested structures containing PageURIs."""
+
         uri1 = PageURI(root="test", type="doc", id="123")
         uri2 = PageURI(root="test", type="doc", id="456")
 
@@ -697,17 +698,16 @@ class TestPageURISerialization:
             "number": 42,
         }
 
-        result = page_cache._convert_page_uris_for_storage(nested_data)
+        result = serialize_for_storage(nested_data)
 
         assert result["single_uri"] == str(uri1)
         assert result["uri_list"] == [str(uri1), str(uri2)]
         assert result["regular_data"] == "some string"
         assert result["number"] == 42
 
-    def test_convert_page_uris_for_storage_non_uri_values(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_for_storage_non_uri_values(self) -> None:
         """Test that non-PageURI values are returned unchanged."""
+
         test_values = [
             "string",
             42,
@@ -719,54 +719,36 @@ class TestPageURISerialization:
         ]
 
         for value in test_values:
-            result = page_cache._convert_page_uris_for_storage(value)
+            result = serialize_for_storage(value)
             assert result == value
 
     def test_convert_page_uris_from_storage_single_uri(
         self, page_cache: PageCache
     ) -> None:
         """Test converting a string back to PageURI from storage."""
-        from praga_core.types import PageURI
-
         uri_string = "test/doc:123@1"
-        result = page_cache._convert_page_uris_from_storage(uri_string, PageURI)
+        result = deserialize_from_storage(uri_string, PageURI)
 
         assert isinstance(result, PageURI)
         assert result.root == "test"
         assert result.type == "doc"
         assert result.id == "123"
 
-    def test_convert_page_uris_from_storage_optional_uri(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_from_storage_optional_uri(self) -> None:
         """Test converting Optional[PageURI] from storage."""
-        from typing import Optional
-
-        from praga_core.types import PageURI
-
         # Test with actual URI string
         uri_string = "test/doc:123@1"
-        result = page_cache._convert_page_uris_from_storage(
-            uri_string, Optional[PageURI]
-        )
+        result = deserialize_from_storage(uri_string, Optional[PageURI])
         assert isinstance(result, PageURI)
 
         # Test with None
-        result_none = page_cache._convert_page_uris_from_storage(
-            None, Optional[PageURI]
-        )
+        result_none = deserialize_from_storage(None, Optional[PageURI])
         assert result_none is None
 
-    def test_convert_page_uris_from_storage_list_of_uris(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_from_storage_list_of_uris(self) -> None:
         """Test converting List[PageURI] from storage."""
-        from typing import List
-
-        from praga_core.types import PageURI
-
         uri_strings = ["test/doc:123@1", "test/doc:456@1"]
-        result = page_cache._convert_page_uris_from_storage(uri_strings, List[PageURI])
+        result = deserialize_from_storage(uri_strings, List[PageURI])
 
         assert isinstance(result, list)
         assert len(result) == 2
@@ -774,9 +756,7 @@ class TestPageURISerialization:
         assert result[0].id == "123"
         assert result[1].id == "456"
 
-    def test_convert_page_uris_from_storage_non_uri_types(
-        self, page_cache: PageCache
-    ) -> None:
+    def test_convert_page_uris_from_storage_non_uri_types(self) -> None:
         """Test that non-PageURI types are returned unchanged."""
         test_cases = [
             ("string", str),
@@ -788,7 +768,7 @@ class TestPageURISerialization:
         ]
 
         for value, field_type in test_cases:
-            result = page_cache.convert_page_uris_from_storage(value, field_type)
+            result = deserialize_from_storage(value, field_type)
             assert result == value
 
 

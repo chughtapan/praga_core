@@ -499,37 +499,3 @@ class PageCache:
     def page_classes(self) -> Dict[str, Type[Page]]:
         """Get the registered page classes."""
         return self._page_classes.copy()
-
-    # Method name aliases for backward compatibility
-    def _get_page_by_uri_any_type(self, uri: PageURI) -> Optional[Page]:
-        """Backward compatibility alias for get_page_by_uri_any_type."""
-        return self.get_page_by_uri_any_type(uri)
-
-    def _get_table_class(self, page_type: Type[P]) -> Any:
-        """Backward compatibility alias for get_table_class."""
-        return self.get_table_class(page_type)
-
-    def convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Convenience method for URI conversion from storage."""
-        return deserialize_from_storage(value, field_type)
-
-    def convert_page_uris_for_storage(self, value: Any) -> Any:
-        """Convenience method for URI conversion for storage."""
-        return serialize_for_storage(value)
-
-    def serialize_for_storage(self, value: Any) -> Any:
-        """Convenience method for serializing complex objects for storage."""
-        return serialize_for_storage(value)
-
-    def deserialize_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Convenience method for deserializing stored values."""
-        return deserialize_from_storage(value, field_type)
-
-    # Backward compatibility aliases
-    def _convert_page_uris_for_storage(self, value: Any) -> Any:
-        """Backward compatibility alias for serialize_for_storage."""
-        return self.serialize_for_storage(value)
-
-    def _convert_page_uris_from_storage(self, value: Any, field_type: Any) -> Any:
-        """Backward compatibility alias for deserialize_from_storage."""
-        return self.deserialize_from_storage(value, field_type)

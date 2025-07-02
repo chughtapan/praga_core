@@ -140,37 +140,3 @@ def _deserialize_pydantic_model_dict(
             deserialized[field_name] = field_value
 
     return deserialized
-
-
-# Backward compatibility functions (delegating to new implementations)
-def convert_page_uris_for_storage(value: Any) -> Any:
-    """Convert PageURI objects to strings for database storage.
-
-    Args:
-        value: Value that may contain PageURI objects
-
-    Returns:
-        Value with PageURI objects converted to strings
-
-    Note:
-        This function is kept for backward compatibility.
-        New code should use serialize_for_storage() instead.
-    """
-    return serialize_for_storage(value)
-
-
-def convert_page_uris_from_storage(value: Any, field_type: Any) -> Any:
-    """Convert strings back to PageURI objects after database retrieval.
-
-    Args:
-        value: Value from database storage
-        field_type: Expected type annotation for the field
-
-    Returns:
-        Value with strings converted back to PageURI objects where appropriate
-
-    Note:
-        This function is kept for backward compatibility.
-        New code should use deserialize_from_storage() instead.
-    """
-    return deserialize_from_storage(value, field_type)
