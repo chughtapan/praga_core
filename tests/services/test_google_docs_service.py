@@ -134,20 +134,29 @@ class TestGoogleDocsService:
         self.mock_api_client.get_document.return_value = mock_doc_data
         self.mock_api_client.get_file_metadata.return_value = mock_file_metadata
 
+        # Create a real PageURI for testing
+        test_doc_id = "doc123"
+        header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
+        chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
+
         # Mock the service's chunker directly
         mock_chunk = Mock()
         mock_chunk.text = "Hello world!"
         mock_chunk.token_count = 3
         self.service.chunker.chunk = Mock(return_value=[mock_chunk])
 
+        # Mock context's create_page_uri to return our real URIs
+        self.mock_context.create_page_uri = Mock()
+        self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
+
         # Mock page cache store_page method
         self.mock_page_cache.store_page = Mock()
 
-        result = self.service._ingest_document("doc123")
+        result = self.service._ingest_document(test_doc_id)
 
         # Verify API calls made
-        self.mock_api_client.get_document.assert_called_once_with("doc123")
-        self.mock_api_client.get_file_metadata.assert_called_once_with("doc123")
+        self.mock_api_client.get_document.assert_called_once_with(test_doc_id)
+        self.mock_api_client.get_file_metadata.assert_called_once_with(test_doc_id)
 
         # Verify chunk creation (text extraction strips trailing space)
         self.service.chunker.chunk.assert_called_once_with("Hello world!")
@@ -157,7 +166,7 @@ class TestGoogleDocsService:
 
         # Verify return type
         assert isinstance(result, GDocHeader)
-        assert result.document_id == "doc123"
+        assert result.document_id == test_doc_id
         assert result.title == "Test Document"
 
     def test_extract_text_from_content_paragraph(self):
