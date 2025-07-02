@@ -1,6 +1,6 @@
 """People service module."""
 
 from .page import PersonPage
-from .service import PeopleService, PeopleToolkit
+from .service import PeopleService
 
-__all__ = ["PersonPage", "PeopleService", "PeopleToolkit"]
+__all__ = ["PersonPage", "PeopleService"]

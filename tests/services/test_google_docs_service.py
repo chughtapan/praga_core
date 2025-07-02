@@ -382,10 +382,16 @@ class TestGoogleDocsService:
             self.service.search_chunks_in_document(chunk_uri, "query")
 
     def test_toolkit_property(self):
-        """Test toolkit property returns GoogleDocsToolkit."""
+        """Test toolkit property returns self (merged functionality)."""
         toolkit = self.service.toolkit
-        assert toolkit.google_docs_service is self.service
-        assert toolkit.name == "GoogleDocsToolkit"
+        assert toolkit is self.service
+        # Verify it has the toolkit methods
+        assert hasattr(toolkit, "search_documents_by_title")
+        assert hasattr(toolkit, "search_documents_by_topic")
+        assert hasattr(toolkit, "search_documents_by_owner")
+        assert hasattr(toolkit, "search_recently_modified_documents")
+        assert hasattr(toolkit, "search_all_documents")
+        assert hasattr(toolkit, "find_chunks_in_document")
 
     def test_name_property(self):
         """Test name property returns correct service name."""
@@ -393,34 +399,34 @@ class TestGoogleDocsService:
 
 
 class TestGoogleDocsToolkit:
-    """Test suite for GoogleDocsToolkit."""
+    """Test suite for GoogleDocsService toolkit methods (now integrated into GoogleDocsService)."""
 
     def setup_method(self):
         """Set up test environment."""
+        # Clear any existing global context first
+        clear_global_context()
+
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
-        self.mock_context.get = Mock()
+        self.mock_context.services = {}
         self.mock_context.get_page = Mock()
 
+        def mock_register_service(name, service):
+            self.mock_context.services[name] = service
+
+        self.mock_context.register_service = mock_register_service
         set_global_context(self.mock_context)
 
-        # Create mock service
-        self.mock_service = Mock(spec=GoogleDocsService)
-        self.mock_service.context = self.mock_context
-
-        # Import here to avoid circular import issues
-        from pragweb.google_api.docs.service import GoogleDocsToolkit
-
-        self.toolkit = GoogleDocsToolkit(self.mock_service)
+        # Create mock GoogleAPIClient and service
+        self.mock_api_client = Mock()
+        self.mock_api_client.search_documents = Mock()
+        self.service = GoogleDocsService(self.mock_api_client)
+        # Since GoogleDocsService now inherits from RetrieverToolkit, use service directly
+        self.toolkit = self.service
 
     def teardown_method(self):
         """Clean up test environment."""
         clear_global_context()
-
-    def test_init(self):
-        """Test GoogleDocsToolkit initialization."""
-        assert self.toolkit.google_docs_service is self.mock_service
-        assert self.toolkit.name == "GoogleDocsToolkit"
 
     def test_search_documents_by_title(self):
         """Test search_documents_by_title tool."""
@@ -465,17 +471,13 @@ class TestGoogleDocsToolkit:
 
         # Mock service search method
         mock_uris = [header1.uri, header2.uri]
-        self.mock_service.search_documents.return_value = (
-            mock_uris,
-            "next_token",
-        )
+        with patch.object(
+            self.service, "search_documents", return_value=(mock_uris, "next_token")
+        ) as mock_search:
+            result = self.toolkit.search_documents_by_title("test title")
 
-        result = self.toolkit.search_documents_by_title("test title")
-
-        # Verify service method called
-        self.mock_service.search_documents.assert_called_once_with(
-            {"title_query": "test title"}, None, 10
-        )
+            # Verify service method called
+            mock_search.assert_called_once_with({"title_query": "test title"}, None, 10)
 
         # Verify result structure
         assert result.results == mock_headers
@@ -508,13 +510,13 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [header.uri]
-        self.mock_service.search_documents.return_value = (mock_uris, None)
+        with patch.object(
+            self.service, "search_documents", return_value=(mock_uris, None)
+        ) as mock_search:
+            result = self.toolkit.search_documents_by_topic("test topic")
 
-        result = self.toolkit.search_documents_by_topic("test topic")
+            mock_search.assert_called_once_with({"query": "test topic"}, None, 10)
 
-        self.mock_service.search_documents.assert_called_once_with(
-            {"query": "test topic"}, None, 10
-        )
         assert result.results == mock_headers
         assert result.next_cursor is None
 
@@ -545,23 +547,24 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [header.uri]
-        self.mock_service.search_documents.return_value = (
-            mock_uris,
-            None,
-        )
-
         # Mock resolve_person_identifier
-        with patch(
-            "pragweb.google_api.docs.service.resolve_person_identifier"
-        ) as mock_resolve:
-            mock_resolve.return_value = "owner@example.com"
+        with (
+            patch(
+                "pragweb.google_api.docs.service.resolve_person_identifier"
+            ) as mock_resolve,
+            patch.object(
+                self.service, "search_documents", return_value=(mock_uris, None)
+            ) as mock_search,
+        ):
 
+            mock_resolve.return_value = "owner@example.com"
             result = self.toolkit.search_documents_by_owner("owner@example.com")
 
-        mock_resolve.assert_called_once_with("owner@example.com")
-        self.mock_service.search_documents.assert_called_once_with(
-            {"owner_email": "owner@example.com"}, None, 10
-        )
+            mock_resolve.assert_called_once_with("owner@example.com")
+            mock_search.assert_called_once_with(
+                {"owner_email": "owner@example.com"}, None, 10
+            )
+
         assert result.results == mock_headers
 
     def test_search_documents_by_owner_with_name(self):
@@ -591,23 +594,24 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [header.uri]
-        self.mock_service.search_documents.return_value = (
-            mock_uris,
-            None,
-        )
-
         # Mock resolve_person_identifier to resolve name to email query
-        with patch(
-            "pragweb.google_api.docs.service.resolve_person_identifier"
-        ) as mock_resolve:
-            mock_resolve.return_value = "John Doe OR john.doe@example.com"
+        with (
+            patch(
+                "pragweb.google_api.docs.service.resolve_person_identifier"
+            ) as mock_resolve,
+            patch.object(
+                self.service, "search_documents", return_value=(mock_uris, None)
+            ) as mock_search,
+        ):
 
+            mock_resolve.return_value = "John Doe OR john.doe@example.com"
             result = self.toolkit.search_documents_by_owner("John Doe")
 
-        mock_resolve.assert_called_once_with("John Doe")
-        self.mock_service.search_documents.assert_called_once_with(
-            {"owner_email": "John Doe OR john.doe@example.com"}, None, 10
-        )
+            mock_resolve.assert_called_once_with("John Doe")
+            mock_search.assert_called_once_with(
+                {"owner_email": "John Doe OR john.doe@example.com"}, None, 10
+            )
+
         assert result.results == mock_headers
 
     def test_search_recently_modified_documents(self):
@@ -637,16 +641,13 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [header.uri]
-        self.mock_service.search_documents.return_value = (
-            mock_uris,
-            None,
-        )
+        with patch.object(
+            self.service, "search_documents", return_value=(mock_uris, None)
+        ) as mock_search:
+            result = self.toolkit.search_recently_modified_documents(days=14)
 
-        result = self.toolkit.search_recently_modified_documents(days=14)
+            mock_search.assert_called_once_with({"days": 14}, None, 10)
 
-        self.mock_service.search_documents.assert_called_once_with(
-            {"days": 14}, None, 10
-        )
         assert result.results == mock_headers
 
     def test_search_all_documents(self):
@@ -676,35 +677,37 @@ class TestGoogleDocsToolkit:
         self.mock_context.get_page.return_value = mock_headers[0]
 
         mock_uris = [header.uri]
-        self.mock_service.search_documents.return_value = (mock_uris, None)
+        with patch.object(
+            self.service, "search_documents", return_value=(mock_uris, None)
+        ) as mock_search:
+            result = self.toolkit.search_all_documents()
 
-        result = self.toolkit.search_all_documents()
+            mock_search.assert_called_once_with({"query": ""}, None, 10)
 
-        self.mock_service.search_documents.assert_called_once_with(
-            {"query": ""}, None, 10
-        )
         assert result.results == mock_headers
 
-    def test_search_chunks_in_document(self):
-        """Test search_chunks_in_document tool."""
+    def test_find_chunks_in_document(self):
+        """Test find_chunks_in_document tool."""
         mock_chunks = [Mock(spec=GDocChunk), Mock(spec=GDocChunk)]
-        self.mock_service.search_chunks_in_document.return_value = mock_chunks
 
-        doc_header_uri = "test-root/gdoc_header:doc123@1"
-        result = self.toolkit.search_chunks_in_document(doc_header_uri, "test query")
+        with patch.object(
+            self.service, "search_chunks_in_document", return_value=mock_chunks
+        ) as mock_search:
+            doc_header_uri = "test-root/gdoc_header:doc123@1"
+            result = self.toolkit.find_chunks_in_document(doc_header_uri, "test query")
 
-        self.mock_service.search_chunks_in_document.assert_called_once_with(
-            doc_header_uri, "test query"
-        )
+            mock_search.assert_called_once_with(doc_header_uri, "test query")
+
         assert result.results == mock_chunks
         assert result.next_cursor is None
 
     def test_pagination_no_more_pages(self):
         """Test pagination when no more pages are available."""
         # Mock that there are no more pages
-        self.mock_service.search_documents.return_value = ([], None)
-
-        result = self.toolkit.search_documents_by_title("test", cursor="some_cursor")
+        with patch.object(self.service, "search_documents", return_value=([], None)):
+            result = self.toolkit.search_documents_by_title(
+                "test", cursor="some_cursor"
+            )
 
         assert result.results == []
         assert result.next_cursor is None
@@ -733,18 +736,22 @@ class TestGoogleDocsToolkit:
         )
 
         # Mock service returns results with next cursor
-        self.mock_service.search_documents.return_value = (
-            [header.uri],
-            "next_cursor_token",
-        )
         self.mock_context.get_page.return_value = header
 
-        result = self.toolkit.search_documents_by_title("test", cursor="current_cursor")
+        with patch.object(
+            self.service,
+            "search_documents",
+            return_value=([header.uri], "next_cursor_token"),
+        ) as mock_search:
+            result = self.toolkit.search_documents_by_title(
+                "test", cursor="current_cursor"
+            )
 
-        # Should be called once with the cursor
-        self.mock_service.search_documents.assert_called_once_with(
-            {"title_query": "test"}, "current_cursor", 10
-        )
+            # Should be called once with the cursor
+            mock_search.assert_called_once_with(
+                {"title_query": "test"}, "current_cursor", 10
+            )
+
         assert len(result.results) == 1
         assert result.next_cursor == "next_cursor_token"
 

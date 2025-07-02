@@ -22,7 +22,6 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
-from praga_core.global_context import ContextMixin
 from praga_core.types import Page
 
 from .tool import PaginatedResponse, Tool
@@ -315,7 +314,7 @@ class RetrieverToolkitMeta(abc.ABC):
         pass
 
 
-class RetrieverToolkit(RetrieverToolkitMeta, ContextMixin):
+class RetrieverToolkit(RetrieverToolkitMeta):
     """Base class for retriever toolkits that use the global context pattern."""
 
     def __init__(self) -> None:
