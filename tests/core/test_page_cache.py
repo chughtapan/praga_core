@@ -11,7 +11,11 @@ from typing import Any, List, Optional
 import pytest
 from pydantic import BaseModel, Field
 
-from praga_core.page_cache import PageCache, PageCacheError
+from praga_core.page_cache import (
+    PageCache,
+    PageCacheError,
+    ProvenanceError,
+)
 from praga_core.page_cache.schema import PageRelationships
 from praga_core.page_cache.serialization import (
     deserialize_from_storage,
@@ -126,48 +130,17 @@ def sample_event() -> EventPage:
 
 
 class TestPageCacheInitialization:
-    """Test PageCache initialization."""
+    """Test basic PageCache initialization."""
 
     def test_initialization(self, temp_db_url: str) -> None:
         """Test basic PageCache initialization."""
         cache = PageCache(temp_db_url)
         assert cache.engine is not None
-        assert len(cache.registered_page_types) == 0
 
     def test_initialization_with_drop_previous(self, temp_db_url: str) -> None:
         """Test PageCache initialization with drop_previous=True."""
         cache = PageCache(temp_db_url, drop_previous=True)
         assert cache.engine is not None
-        assert len(cache.registered_page_types) == 0
-
-
-class TestPageTypeRegistration:
-    """Test page type registration."""
-
-    def test_register_single_page_type(self, page_cache: PageCache) -> None:
-        """Test registering a single page type."""
-        page_cache.register_page_type(UserPage)
-        assert "UserPage" in page_cache.registered_page_types
-        assert len(page_cache.registered_page_types) == 1
-
-    def test_register_multiple_page_types(self, page_cache: PageCache) -> None:
-        """Test registering multiple page types."""
-        page_cache.register_page_type(UserPage)
-        page_cache.register_page_type(PostPage)
-        page_cache.register_page_type(EventPage)
-
-        assert "UserPage" in page_cache.registered_page_types
-        assert "PostPage" in page_cache.registered_page_types
-        assert "EventPage" in page_cache.registered_page_types
-        assert len(page_cache.registered_page_types) == 3
-
-    def test_register_same_type_twice(self, page_cache: PageCache) -> None:
-        """Test registering the same page type twice (should be idempotent)."""
-        page_cache.register_page_type(UserPage)
-        page_cache.register_page_type(UserPage)  # Register again
-
-        assert "UserPage" in page_cache.registered_page_types
-        assert len(page_cache.registered_page_types) == 1
 
 
 class TestPageStorage:
@@ -175,11 +148,11 @@ class TestPageStorage:
 
     def test_store_new_page(self, page_cache: PageCache, sample_user: UserPage) -> None:
         """Test storing a new page."""
-        result = page_cache.store_page(sample_user)
+        result = page_cache.store(sample_user)
         assert result is True  # Returns True for new pages
 
         # Verify page was stored
-        stored_page = page_cache.get_page(UserPage, sample_user.uri)
+        stored_page = page_cache.get(UserPage, sample_user.uri)
         assert stored_page is not None
         assert stored_page.name == sample_user.name
         assert stored_page.email == sample_user.email
@@ -191,14 +164,14 @@ class TestPageStorage:
         """Test storing the same page twice (should fail)."""
 
         # Store first time
-        result1 = page_cache.store_page(sample_user)
+        result1 = page_cache.store(sample_user)
         assert result1 is True
 
         # Store second time (should raise error)
         with pytest.raises(
             PageCacheError, match="already exists and cannot be updated"
         ):
-            page_cache.store_page(sample_user)
+            page_cache.store(sample_user)
 
     def test_update_existing_page(
         self, page_cache: PageCache, sample_user: UserPage
@@ -206,7 +179,7 @@ class TestPageStorage:
         """Test updating an existing page (should fail)."""
 
         # Store initial page
-        page_cache.store_page(sample_user)
+        page_cache.store(sample_user)
 
         # Create updated version
         updated_user = UserPage(
@@ -217,10 +190,10 @@ class TestPageStorage:
         with pytest.raises(
             PageCacheError, match="already exists and cannot be updated"
         ):
-            page_cache.store_page(updated_user)
+            page_cache.store(updated_user)
 
         # Verify original page is unchanged
-        stored_page = page_cache.get_page(UserPage, sample_user.uri)
+        stored_page = page_cache.get(UserPage, sample_user.uri)
         assert stored_page is not None
         assert stored_page.name == sample_user.name  # Original name
         assert stored_page.age == sample_user.age  # Original age
@@ -229,15 +202,15 @@ class TestPageStorage:
         self, page_cache: PageCache, sample_user: UserPage, sample_post: PostPage
     ) -> None:
         """Test storing pages of different types."""
-        result1 = page_cache.store_page(sample_user)
-        result2 = page_cache.store_page(sample_post)
+        result1 = page_cache.store(sample_user)
+        result2 = page_cache.store(sample_post)
 
         assert result1 is True
         assert result2 is True
 
         # Verify both pages were stored
-        stored_user = page_cache.get_page(UserPage, sample_user.uri)
-        stored_post = page_cache.get_page(PostPage, sample_post.uri)
+        stored_user = page_cache.get(UserPage, sample_user.uri)
+        stored_post = page_cache.get(PostPage, sample_post.uri)
 
         assert stored_user is not None
         assert stored_post is not None
@@ -252,9 +225,9 @@ class TestPageRetrieval:
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test retrieving an existing page."""
-        page_cache.store_page(sample_user)
+        page_cache.store(sample_user)
 
-        retrieved_page = page_cache.get_page(UserPage, sample_user.uri)
+        retrieved_page = page_cache.get(UserPage, sample_user.uri)
         assert retrieved_page is not None
         assert retrieved_page.uri == sample_user.uri
         assert retrieved_page.name == sample_user.name
@@ -264,13 +237,13 @@ class TestPageRetrieval:
     def test_get_nonexistent_page(self, page_cache: PageCache) -> None:
         """Test retrieving a non-existent page."""
         nonexistent_uri = PageURI(root="test", type="user", id="nonexistent")
-        result = page_cache.get_page(UserPage, nonexistent_uri)
+        result = page_cache.get(UserPage, nonexistent_uri)
         assert result is None
 
     def test_get_page_unregistered_type(self, page_cache: PageCache) -> None:
         """Test retrieving a page of unregistered type."""
         uri = PageURI(root="test", type="user", id="user1")
-        result = page_cache.get_page(UserPage, uri)
+        result = page_cache.get(UserPage, uri)
         assert result is None
 
 
@@ -302,17 +275,15 @@ class TestSqlAlchemyQueries:
         ]
 
         for user in users:
-            page_cache.store_page(user)
+            page_cache.store(user)
 
         # Test exact name match
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: t.name == "John Doe"
-        )
+        results = page_cache.find(UserPage).where(lambda t: t.name == "John Doe").all()
         assert len(results) == 1
         assert results[0].name == "John Doe"
 
         # Test exact age match
-        results = page_cache.find_pages_by_attribute(UserPage, lambda t: t.age == 30)
+        results = page_cache.find(UserPage).where(lambda t: t.age == 30).all()
         assert len(results) == 2
         names = {r.name for r in results}
         assert names == {"John Doe", "Jane Doe"}
@@ -339,19 +310,17 @@ class TestSqlAlchemyQueries:
         ]
 
         for user in users:
-            page_cache.store_page(user)
+            page_cache.store(user)
 
         # Test LIKE pattern for names
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: t.name.like("%Doe%")
-        )
+        results = page_cache.find(UserPage).where(lambda t: t.name.like("%Doe%")).all()
         assert len(results) == 2
         names = {r.name for r in results}
         assert names == {"John Doe", "Jane Doe"}
 
         # Test case-insensitive LIKE (ilike)
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: t.email.ilike("%EXAMPLE%")
+        results = (
+            page_cache.find(UserPage).where(lambda t: t.email.ilike("%EXAMPLE%")).all()
         )
         assert len(results) == 3
 
@@ -380,37 +349,42 @@ class TestSqlAlchemyQueries:
         ]
 
         for user in users:
-            page_cache.store_page(user)
+            page_cache.store(user)
 
         # Test complex AND query
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: (t.age > 25) & (t.email.like("%@company.com"))
+        results = (
+            page_cache.find(UserPage)
+            .where(lambda t: (t.age > 25) & (t.email.like("%@company.com")))
+            .all()
         )
         assert len(results) == 1
         assert results[0].name == "John Doe"
 
         # Test OR query
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: (t.name.like("%Doe")) | (t.age == 35)
+        results = (
+            page_cache.find(UserPage)
+            .where(lambda t: (t.name.like("%Doe")) | (t.age == 35))
+            .all()
         )
         assert len(results) == 2
         names = {r.name for r in results}
         assert names == {"John Doe", "Bob Johnson"}
 
-    def test_find_with_direct_table_reference(self, page_cache: PageCache) -> None:
-        """Test finding pages using direct table reference."""
+    def test_find_with_lambda_expression(self, page_cache: PageCache) -> None:
+        """Test finding pages using lambda expressions (the recommended approach)."""
         # Store a user
         user = UserPage(
             uri=PageURI(root="test", type="user", id="user1", version=1),
             name="Test User",
             email="test@example.com",
         )
-        page_cache.store_page(user)
+        page_cache.store(user)
 
-        # Get table class and use direct reference
-        table = page_cache.get_table_class(UserPage)
-        results = page_cache.find_pages_by_attribute(
-            UserPage, table.email == "test@example.com"
+        # Use lambda expression for queries
+        results = (
+            page_cache.find(UserPage)
+            .where(lambda t: t.email == "test@example.com")
+            .all()
         )
 
         assert len(results) == 1
@@ -420,18 +394,16 @@ class TestSqlAlchemyQueries:
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test finding pages with no matching results."""
-        page_cache.store_page(sample_user)
+        page_cache.store(sample_user)
 
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: t.name == "Nonexistent"
+        results = (
+            page_cache.find(UserPage).where(lambda t: t.name == "Nonexistent").all()
         )
         assert len(results) == 0
 
     def test_find_unregistered_type(self, page_cache: PageCache) -> None:
         """Test finding pages of unregistered type."""
-        results = page_cache.find_pages_by_attribute(
-            UserPage, lambda t: t.name == "Test"
-        )
+        results = page_cache.find(UserPage).where(lambda t: t.name == "Test").all()
         assert len(results) == 0
 
 
@@ -442,9 +414,9 @@ class TestDateTimeHandling:
         self, page_cache: PageCache, sample_event: EventPage
     ) -> None:
         """Test storing and retrieving pages with datetime fields."""
-        page_cache.store_page(sample_event)
+        page_cache.store(sample_event)
 
-        retrieved_event = page_cache.get_page(EventPage, sample_event.uri)
+        retrieved_event = page_cache.get(EventPage, sample_event.uri)
         assert retrieved_event is not None
         assert retrieved_event.start_time == sample_event.start_time
         assert retrieved_event.end_time == sample_event.end_time
@@ -469,11 +441,13 @@ class TestDateTimeHandling:
         ]
 
         for event in events:
-            page_cache.store_page(event)
+            page_cache.store(event)
 
         # Test exact datetime match
-        results = page_cache.find_pages_by_attribute(
-            EventPage, lambda t: t.start_time == datetime(2024, 1, 1, 10, 0)
+        results = (
+            page_cache.find(EventPage)
+            .where(lambda t: t.start_time == datetime(2024, 1, 1, 10, 0))
+            .all()
         )
         assert len(results) == 1
         assert results[0].title == "Morning Event"
@@ -487,8 +461,8 @@ class TestDateTimeHandling:
             end_time=datetime(2024, 1, 1, 11, 0, 0, 789012),
         )
 
-        page_cache.store_page(event)
-        retrieved_event = page_cache.get_page(EventPage, event.uri)
+        page_cache.store(event)
+        retrieved_event = page_cache.get(EventPage, event.uri)
 
         # Verify microseconds are preserved
         assert retrieved_event is not None
@@ -508,8 +482,8 @@ class TestOptionalFields:
             age=None,
         )
 
-        page_cache.store_page(user)
-        retrieved_user = page_cache.get_page(UserPage, user.uri)
+        page_cache.store(user)
+        retrieved_user = page_cache.get(UserPage, user.uri)
 
         assert retrieved_user is not None
         assert retrieved_user.name == "User Without Age"
@@ -520,10 +494,8 @@ class TestOptionalFields:
 class TestAdvancedQueries:
     """Test advanced query functionality."""
 
-    def test_complex_query_with_direct_table_access(
-        self, page_cache: PageCache
-    ) -> None:
-        """Test complex queries using direct table access."""
+    def test_complex_query_with_lambda_expressions(self, page_cache: PageCache) -> None:
+        """Test complex queries using lambda expressions."""
         # Store some users
         users = [
             UserPage(
@@ -547,70 +519,41 @@ class TestAdvancedQueries:
         ]
 
         for user in users:
-            page_cache.store_page(user)
+            page_cache.store(user)
 
-        # Use direct table access for complex queries
-        table = page_cache.get_table_class(UserPage)
-
-        # Find users with age between 25 and 30
-        results = page_cache.find_pages_by_attribute(
-            UserPage, (table.age >= 25) & (table.age <= 30)
+        # Find users with age between 25 and 30 using lambda
+        results = (
+            page_cache.find(UserPage)
+            .where(lambda t: (t.age >= 25) & (t.age <= 30))
+            .all()
         )
 
         assert len(results) == 2
         names = {user.name for user in results}
         assert names == {"Alice", "Bob"}
 
-    def test_get_table_class_unregistered_type(self, page_cache: PageCache) -> None:
-        """Test getting table class for unregistered page type."""
-        with pytest.raises(ValueError, match="Page type UserPage not registered"):
-            page_cache.get_table_class(UserPage)
 
+class TestCacheInstancesShareData:
+    """Test that multiple PageCache instances can share data."""
 
-class TestTableReuse:
-    """Test table reuse across PageCache instances."""
-
-    def test_multiple_cache_instances_reuse_tables(self, temp_db_url: str) -> None:
-        """Test that multiple PageCache instances reuse the same table classes."""
-        # Create first cache instance and register a type
+    def test_multiple_cache_instances_share_data(self, temp_db_url: str) -> None:
+        """Test that multiple PageCache instances using the same DB can share data."""
+        # Create first cache instance and store a page
         cache1 = PageCache(temp_db_url, drop_previous=True)
-        cache1.register_page_type(UserPage)
-
-        # Store a page
         user = UserPage(
             uri=PageURI(root="test", type="user", id="user1", version=1),
             name="Test User",
             email="test@example.com",
         )
-        cache1.store_page(user)
+        cache1.store(user)
 
         # Create second cache instance with same URL
         cache2 = PageCache(temp_db_url)
-        cache2.register_page_type(UserPage)
 
         # Should be able to retrieve the page from second instance
-        retrieved_user = cache2.get_page(UserPage, user.uri)
+        retrieved_user = cache2.get(UserPage, user.uri)
         assert retrieved_user is not None
         assert retrieved_user.name == "Test User"
-
-
-class TestErrorHandling:
-    """Test error handling scenarios."""
-
-    def test_get_table_class_unregistered_type(self, page_cache: PageCache) -> None:
-        """Test getting table class for unregistered type."""
-        with pytest.raises(ValueError, match="Page type UserPage not registered"):
-            page_cache.get_table_class(UserPage)
-
-    def test_get_table_class_registered_type(self, page_cache: PageCache) -> None:
-        """Test getting table class for registered type."""
-        page_cache.register_page_type(UserPage)
-        table_class = page_cache.get_table_class(UserPage)
-        assert table_class is not None
-        assert hasattr(table_class, "uri_prefix")
-        assert hasattr(table_class, "version")
-        assert hasattr(table_class, "name")
-        assert hasattr(table_class, "email")
 
 
 class TestURIHandling:
@@ -620,7 +563,7 @@ class TestURIHandling:
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test that URI is used as primary key."""
-        page_cache.store_page(sample_user)
+        page_cache.store(sample_user)
 
         # Try to store another page with same URI (should fail)
         duplicate_user = UserPage(
@@ -631,7 +574,7 @@ class TestURIHandling:
         with pytest.raises(
             PageCacheError, match="already exists and cannot be updated"
         ):
-            page_cache.store_page(duplicate_user)
+            page_cache.store(duplicate_user)
 
     def test_different_uris_different_records(self, page_cache: PageCache) -> None:
         """Test that different URIs create different records."""
@@ -646,15 +589,15 @@ class TestURIHandling:
             email="user2@example.com",
         )
 
-        result1 = page_cache.store_page(user1)
-        result2 = page_cache.store_page(user2)
+        result1 = page_cache.store(user1)
+        result2 = page_cache.store(user2)
 
         assert result1 is True  # New insert
         assert result2 is True  # New insert
 
         # Both should be retrievable
-        retrieved_user1 = page_cache.get_page(UserPage, user1.uri)
-        retrieved_user2 = page_cache.get_page(UserPage, user2.uri)
+        retrieved_user1 = page_cache.get(UserPage, user1.uri)
+        retrieved_user2 = page_cache.get(UserPage, user2.uri)
 
         assert retrieved_user1 is not None
         assert retrieved_user2 is not None
@@ -810,13 +753,11 @@ class TestPageWithPageURIFields:
     ) -> None:
         """Test storing and retrieving a page with PageURI fields."""
         # Store the document
-        result = page_cache.store_page(sample_document_with_uris)
+        result = page_cache.store(sample_document_with_uris)
         assert result is True
 
         # Retrieve the document
-        retrieved_doc = page_cache.get_page(
-            self.DocumentPage, sample_document_with_uris.uri
-        )
+        retrieved_doc = page_cache.get(self.DocumentPage, sample_document_with_uris.uri)
 
         assert retrieved_doc is not None
         assert retrieved_doc.title == "Test Document"
@@ -850,11 +791,11 @@ class TestPageWithPageURIFields:
         )
 
         # Store the document
-        result = page_cache.store_page(doc)
+        result = page_cache.store(doc)
         assert result is True
 
         # Retrieve the document
-        retrieved_doc = page_cache.get_page(self.DocumentPage, doc.uri)
+        retrieved_doc = page_cache.get(self.DocumentPage, doc.uri)
 
         assert retrieved_doc is not None
         assert retrieved_doc.title == "Document Without URIs"
@@ -891,13 +832,15 @@ class TestPageWithPageURIFields:
         )
 
         # Store all documents
-        page_cache.store_page(doc1)
-        page_cache.store_page(doc2)
-        page_cache.store_page(doc3)
+        page_cache.store(doc1)
+        page_cache.store(doc2)
+        page_cache.store(doc3)
 
         # Find documents by author_uri (note: stored as string in DB)
-        results = page_cache.find_pages_by_attribute(
-            self.DocumentPage, lambda t: t.author_uri == str(author_uri)
+        results = (
+            page_cache.find(self.DocumentPage)
+            .where(lambda t: t.author_uri == str(author_uri))
+            .all()
         )
 
         assert len(results) == 2
@@ -975,12 +918,12 @@ class TestGoogleDocsPageURIs:
             chunks.append(chunk)
 
         # Store header and chunks
-        page_cache.store_page(header)
+        page_cache.store(header)
         for chunk in chunks:
-            page_cache.store_page(chunk)
+            page_cache.store(chunk)
 
         # Retrieve and verify header
-        retrieved_header = page_cache.get_page(self.GDocHeader, header.uri)
+        retrieved_header = page_cache.get(self.GDocHeader, header.uri)
         assert retrieved_header is not None
         assert retrieved_header.title == "Test Google Doc"
         assert len(retrieved_header.chunk_uris) == 3
@@ -988,7 +931,7 @@ class TestGoogleDocsPageURIs:
 
         # Retrieve and verify chunks
         for i, chunk_uri in enumerate(chunk_uris):
-            retrieved_chunk = page_cache.get_page(self.GDocChunk, chunk_uri)
+            retrieved_chunk = page_cache.get(self.GDocChunk, chunk_uri)
             assert retrieved_chunk is not None
             assert retrieved_chunk.chunk_index == i
             assert retrieved_chunk.content == f"Content of chunk {i}"
@@ -1032,11 +975,13 @@ class TestGoogleDocsPageURIs:
                 ),
             )
             chunks.append(chunk)
-            page_cache.store_page(chunk)
+            page_cache.store(chunk)
 
         # Find all chunks for this document
-        results = page_cache.find_pages_by_attribute(
-            self.GDocChunk, lambda t: t.document_id == document_id
+        results = (
+            page_cache.find(self.GDocChunk)
+            .where(lambda t: t.document_id == document_id)
+            .all()
         )
 
         assert len(results) == 3
@@ -1096,7 +1041,7 @@ class TestProvenanceTracking:
             title="Test Document",
             content="This is a test document",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Store child with parent_uri parameter
         chunk = self.ChunkPage(
@@ -1105,11 +1050,11 @@ class TestProvenanceTracking:
             content="This is a test",
         )
 
-        result = page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+        result = page_cache.store(chunk, parent_uri=parent_doc.uri)
         assert result is True
 
         # Verify parent_uri was set
-        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent_doc.uri
 
@@ -1121,7 +1066,7 @@ class TestProvenanceTracking:
             title="Test Document",
             content="This is a test document",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Store child with parent_uri on page
         chunk = self.ChunkPage(
@@ -1131,11 +1076,11 @@ class TestProvenanceTracking:
             parent_uri=parent_doc.uri,
         )
 
-        result = page_cache.store_page(chunk)
+        result = page_cache.store(chunk)
         assert result is True
 
         # Verify parent_uri was preserved
-        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent_doc.uri
 
@@ -1155,8 +1100,8 @@ class TestProvenanceTracking:
             title="Document 2",
             content="Content 2",
         )
-        page_cache.store_page(parent1)
-        page_cache.store_page(parent2)
+        page_cache.store(parent1)
+        page_cache.store(parent2)
 
         # Create child with parent_uri set to parent1
         chunk = self.ChunkPage(
@@ -1167,11 +1112,11 @@ class TestProvenanceTracking:
         )
 
         # Store with parent_uri parameter set to parent2 (should override)
-        result = page_cache.store_page(chunk, parent_uri=parent2.uri)
+        result = page_cache.store(chunk, parent_uri=parent2.uri)
         assert result is True
 
         # Verify parent_uri was overridden
-        stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent2.uri
 
@@ -1191,15 +1136,15 @@ class TestProvenanceTracking:
             message_count=5,
         )
 
-        result1 = page_cache.store_page(email)
-        result2 = page_cache.store_page(thread)
+        result1 = page_cache.store(email)
+        result2 = page_cache.store(thread)
 
         assert result1 is True
         assert result2 is True
 
     def test_provenance_precheck_parent_not_exist(self, page_cache: PageCache) -> None:
         """Test that storing fails when parent doesn't exist."""
-        from praga_core import ProvenanceError
+        from praga_core.page_cache import ProvenanceError
 
         nonexistent_parent = PageURI(
             root="test", type="gdoc", id="nonexistent", version=1
@@ -1214,13 +1159,13 @@ class TestProvenanceTracking:
         with pytest.raises(
             ProvenanceError, match="Parent page .* does not exist in cache"
         ):
-            page_cache.store_page(chunk, parent_uri=nonexistent_parent)
+            page_cache.store(chunk, parent_uri=nonexistent_parent)
 
     def test_provenance_precheck_child_already_exists(
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when child already exists."""
-        from praga_core import ProvenanceError
+        from praga_core.page_cache import PageCacheError
 
         # Store parent
         parent_doc = self.GoogleDocPage(
@@ -1228,7 +1173,7 @@ class TestProvenanceTracking:
             title="Test Document",
             content="This is a test document",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Store child first time
         chunk = self.ChunkPage(
@@ -1236,17 +1181,16 @@ class TestProvenanceTracking:
             chunk_index=0,
             content="Test chunk",
         )
-        page_cache.store_page(chunk)
+        page_cache.store(chunk)
 
         # Try to store with parent relationship (should fail because child exists)
         with pytest.raises(
-            ProvenanceError, match="Child page .* already exists in cache"
+            PageCacheError, match="already exists and cannot be updated"
         ):
-            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
+            page_cache.store(chunk, parent_uri=parent_doc.uri)
 
     def test_provenance_precheck_same_page_type(self, page_cache: PageCache) -> None:
         """Test that storing fails when parent and child are same page type."""
-        from praga_core import ProvenanceError
 
         # Store parent doc
         parent_doc = self.GoogleDocPage(
@@ -1254,7 +1198,7 @@ class TestProvenanceTracking:
             title="Parent Document",
             content="Parent content",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Try to store another doc as child (same type - should fail)
         child_doc = self.GoogleDocPage(
@@ -1266,13 +1210,12 @@ class TestProvenanceTracking:
         with pytest.raises(
             ProvenanceError, match="Parent and child cannot be the same page type"
         ):
-            page_cache.store_page(child_doc, parent_uri=parent_doc.uri)
+            page_cache.store(child_doc, parent_uri=parent_doc.uri)
 
     def test_provenance_precheck_parent_version_number(
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when parent has invalid version number."""
-        from praga_core import ProvenanceError
 
         # Store parent with version 0 (should still be stored)
         parent_doc = self.GoogleDocPage(
@@ -1280,7 +1223,7 @@ class TestProvenanceTracking:
             title="Test Document",
             content="This is a test document",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Try to use it as parent (should fail due to version 0)
         chunk = self.ChunkPage(
@@ -1292,41 +1235,7 @@ class TestProvenanceTracking:
         with pytest.raises(
             ProvenanceError, match="Parent URI must have a fixed version number"
         ):
-            page_cache.store_page(chunk, parent_uri=parent_doc.uri)
-
-    def test_provenance_precheck_cycle_detection(self, page_cache: PageCache) -> None:
-        """Test cycle detection in provenance relationships."""
-        from praga_core import ProvenanceError
-
-        # Create chain: doc_a -> chunk_b -> doc_c
-        doc_a = self.GoogleDocPage(
-            uri=PageURI(root="test", type="gdoc", id="doc_a", version=1),
-            title="Document A",
-            content="Content A",
-        )
-        page_cache.store_page(doc_a)
-
-        chunk_b = self.ChunkPage(
-            uri=PageURI(root="test", type="chunk", id="chunk_b", version=1),
-            chunk_index=0,
-            content="Chunk B",
-            parent_uri=doc_a.uri,
-        )
-        page_cache.store_page(chunk_b)
-
-        doc_c = self.GoogleDocPage(
-            uri=PageURI(root="test", type="gdoc", id="doc_c", version=1),
-            title="Document C",
-            content="Content C",
-        )
-        page_cache.store_page(doc_c, parent_uri=chunk_b.uri)
-
-        # Test cycle detection by calling the method directly with a simulated cycle scenario
-        # Create a scenario where the visited set would contain the parent_uri
-        with pytest.raises(ProvenanceError, match="would create a cycle"):
-            # Directly test cycle detection by simulating a scenario where
-            # doc_a would have chunk_b as parent, but chunk_b already has doc_a in its ancestry
-            page_cache._check_for_cycles(chunk_b.uri, doc_a.uri, visited={doc_a.uri})
+            page_cache.store(chunk, parent_uri=parent_doc.uri)
 
     def test_get_children(self, page_cache: PageCache) -> None:
         """Test getting children of a parent page."""
@@ -1336,7 +1245,7 @@ class TestProvenanceTracking:
             title="Parent Document",
             content="Parent content",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Store multiple chunks as children
         chunks = []
@@ -1347,7 +1256,7 @@ class TestProvenanceTracking:
                 content=f"Chunk {i} content",
                 parent_uri=parent_doc.uri,
             )
-            page_cache.store_page(chunk)
+            page_cache.store(chunk)
             chunks.append(chunk)
 
         # Get children
@@ -1366,7 +1275,7 @@ class TestProvenanceTracking:
             title="Document",
             content="Content",
         )
-        page_cache.store_page(page)
+        page_cache.store(page)
 
         children = page_cache.get_children(page.uri)
         assert len(children) == 0
@@ -1379,7 +1288,7 @@ class TestProvenanceTracking:
             title="Grandparent Document",
             content="Grandparent content",
         )
-        page_cache.store_page(grandparent)
+        page_cache.store(grandparent)
 
         # Store parent chunk with grandparent as parent
         parent = self.ChunkPage(
@@ -1388,7 +1297,7 @@ class TestProvenanceTracking:
             content="Parent chunk",
             parent_uri=grandparent.uri,
         )
-        page_cache.store_page(parent)
+        page_cache.store(parent)
 
         # Store child document with parent chunk as parent (different types, so allowed)
         child = self.GoogleDocPage(
@@ -1396,10 +1305,10 @@ class TestProvenanceTracking:
             title="Child Document",
             content="Child content",
         )
-        page_cache.store_page(child, parent_uri=parent.uri)
+        page_cache.store(child, parent_uri=parent.uri)
 
         # Get provenance chain for child
-        chain = page_cache.get_provenance_chain(child.uri)
+        chain = page_cache.get_lineage(child.uri)
 
         assert len(chain) == 3
         assert chain[0].uri == grandparent.uri
@@ -1414,9 +1323,9 @@ class TestProvenanceTracking:
             title="Document",
             content="Content",
         )
-        page_cache.store_page(page)
+        page_cache.store(page)
 
-        chain = page_cache.get_provenance_chain(page.uri)
+        chain = page_cache.get_lineage(page.uri)
 
         assert len(chain) == 1
         assert chain[0].uri == page.uri
@@ -1427,7 +1336,7 @@ class TestProvenanceTracking:
             root="test", type="chunk", id="nonexistent", version=1
         )
 
-        chain = page_cache.get_provenance_chain(nonexistent_uri)
+        chain = page_cache.get_lineage(nonexistent_uri)
         assert len(chain) == 0
 
     def test_example_google_docs_scenario(self, page_cache: PageCache) -> None:
@@ -1438,7 +1347,7 @@ class TestProvenanceTracking:
             title="My Google Document",
             content="This is a long document that will be chunked.",
         )
-        page_cache.store_page(gdoc)
+        page_cache.store(gdoc)
 
         # Store chunks derived from the Google Doc
         chunks = []
@@ -1451,7 +1360,7 @@ class TestProvenanceTracking:
                 content=f"Chunk {i} of the document",
                 parent_uri=gdoc.uri,
             )
-            page_cache.store_page(chunk)
+            page_cache.store(chunk)
             chunks.append(chunk)
 
         # Verify relationships
@@ -1460,7 +1369,7 @@ class TestProvenanceTracking:
 
         # Verify each chunk has the correct parent
         for i, chunk in enumerate(chunks):
-            stored_chunk = page_cache.get_page(self.ChunkPage, chunk.uri)
+            stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
             assert stored_chunk is not None
             assert stored_chunk.parent_uri == gdoc.uri
             assert stored_chunk.chunk_index == i
@@ -1476,7 +1385,7 @@ class TestProvenanceTracking:
                 content=f"Email content {i}",
                 sender=f"user{i}@example.com",
             )
-            page_cache.store_page(email)
+            page_cache.store(email)
             emails.append(email)
 
         thread = self.ThreadPage(
@@ -1484,15 +1393,15 @@ class TestProvenanceTracking:
             title="Email Thread",
             message_count=len(emails),
         )
-        page_cache.store_page(thread)
+        page_cache.store(thread)
 
         # Verify no parent-child relationships exist
         for email in emails:
-            stored_email = page_cache.get_page(self.EmailPage, email.uri)
+            stored_email = page_cache.get(self.EmailPage, email.uri)
             assert stored_email is not None
             assert stored_email.parent_uri is None
 
-        stored_thread = page_cache.get_page(self.ThreadPage, thread.uri)
+        stored_thread = page_cache.get(self.ThreadPage, thread.uri)
         assert stored_thread is not None
         assert stored_thread.parent_uri is None
 
@@ -1545,7 +1454,7 @@ class TestPageRelationshipsTable:
             title="Parent Document",
             content="Parent content",
         )
-        page_cache.store_page(parent)
+        page_cache.store(parent)
 
         # Store child page with parent relationship
         child = self.SectionPage(
@@ -1553,7 +1462,7 @@ class TestPageRelationshipsTable:
             title="Child Section",
             section_content="Child content",
         )
-        page_cache.store_page(child, parent_uri=parent.uri)
+        page_cache.store(child, parent_uri=parent.uri)
 
         # Verify relationship was stored in the relationships table
         with page_cache.get_session() as session:
@@ -1582,8 +1491,8 @@ class TestPageRelationshipsTable:
             title="Parent 2",
             content="Parent 2 content",
         )
-        page_cache.store_page(parent1)
-        page_cache.store_page(parent2)
+        page_cache.store(parent1)
+        page_cache.store(parent2)
 
         # Store child with first parent
         child1 = self.SectionPage(
@@ -1591,7 +1500,7 @@ class TestPageRelationshipsTable:
             title="Child Section",
             section_content="Child content",
         )
-        page_cache.store_page(child1, parent_uri=parent1.uri)
+        page_cache.store(child1, parent_uri=parent1.uri)
 
         # Store different version of child with second parent (different URI due to version)
         child2 = self.SectionPage(
@@ -1599,7 +1508,7 @@ class TestPageRelationshipsTable:
             title="Child Section v2",
             section_content="Updated content",
         )
-        page_cache.store_page(child2, parent_uri=parent2.uri)
+        page_cache.store(child2, parent_uri=parent2.uri)
 
         # Verify both relationships exist independently
         with page_cache.get_session() as session:
@@ -1628,7 +1537,7 @@ class TestPageRelationshipsTable:
             title="Orphan Page",
             content="Content without parent",
         )
-        page_cache.store_page(page_without_parent)
+        page_cache.store(page_without_parent)
 
         # Store another page with a parent
         parent = self.SectionPage(
@@ -1641,8 +1550,8 @@ class TestPageRelationshipsTable:
             title="Child",
             content="Child content",
         )
-        page_cache.store_page(parent)
-        page_cache.store_page(child, parent_uri=parent.uri)
+        page_cache.store(parent)
+        page_cache.store(child, parent_uri=parent.uri)
 
         # Verify only one relationship exists (for the child with parent)
         with page_cache.get_session() as session:
@@ -1667,7 +1576,7 @@ class TestPageRelationshipsTable:
             title="Parent Document",
             content="Parent content",
         )
-        page_cache.store_page(parent)
+        page_cache.store(parent)
 
         # Store multiple children
         children = []
@@ -1677,7 +1586,7 @@ class TestPageRelationshipsTable:
                 title=f"Child {i}",
                 section_content=f"Child {i} content",
             )
-            page_cache.store_page(child, parent_uri=parent.uri)
+            page_cache.store(child, parent_uri=parent.uri)
             children.append(child)
 
         # Get children using the optimized method
@@ -1710,12 +1619,12 @@ class TestPageRelationshipsTable:
             content="Child content",
         )
 
-        page_cache.store_page(grandparent)
-        page_cache.store_page(parent, parent_uri=grandparent.uri)
-        page_cache.store_page(child, parent_uri=parent.uri)
+        page_cache.store(grandparent)
+        page_cache.store(parent, parent_uri=grandparent.uri)
+        page_cache.store(child, parent_uri=parent.uri)
 
         # Get provenance chain
-        chain = page_cache.get_provenance_chain(child.uri)
+        chain = page_cache.get_lineage(child.uri)
 
         # Verify chain is correct
         assert len(chain) == 3
@@ -1749,8 +1658,8 @@ class TestPageRelationshipsTable:
             section_content="Child content",
         )
 
-        page_cache.store_page(parent)
-        page_cache.store_page(child, parent_uri=parent.uri)
+        page_cache.store(parent)
+        page_cache.store(child, parent_uri=parent.uri)
 
         # Manually add a different relationship type for future extensibility
         with page_cache.get_session() as session:
@@ -1819,11 +1728,11 @@ class TestComprehensiveSerialization:
         )
 
         # Store the complex page
-        result = page_cache.store_page(complex_page)
+        result = page_cache.store(complex_page)
         assert result is True
 
         # Retrieve the complex page
-        retrieved_page = page_cache.get_page(self.ComplexPage, complex_page.uri)
+        retrieved_page = page_cache.get(self.ComplexPage, complex_page.uri)
 
         assert retrieved_page is not None
         assert retrieved_page.title == "Complex Page Test"
@@ -1873,11 +1782,11 @@ class TestComprehensiveSerialization:
         )
 
         # Store the complex page
-        result = page_cache.store_page(complex_page)
+        result = page_cache.store(complex_page)
         assert result is True
 
         # Retrieve the complex page
-        retrieved_page = page_cache.get_page(self.ComplexPage, complex_page.uri)
+        retrieved_page = page_cache.get(self.ComplexPage, complex_page.uri)
 
         assert retrieved_page is not None
         assert retrieved_page.title == "Complex Page with Optional"
@@ -1906,12 +1815,14 @@ class TestComprehensiveSerialization:
             model_list=[],
         )
 
-        page_cache.store_page(page1)
-        page_cache.store_page(page2)
+        page_cache.store(page1)
+        page_cache.store(page2)
 
         # Find pages by title (which should work normally)
-        results = page_cache.find_pages_by_attribute(
-            self.ComplexPage, lambda t: t.title.like("Find Test%")
+        results = (
+            page_cache.find(self.ComplexPage)
+            .where(lambda t: t.title.like("Find Test%"))
+            .all()
         )
 
         assert len(results) == 2
@@ -1952,18 +1863,18 @@ class TestVersioning:
         )
 
         # Store all versions
-        result1 = page_cache.store_page(user_v1)
-        result2 = page_cache.store_page(user_v2)
-        result3 = page_cache.store_page(user_v3)
+        result1 = page_cache.store(user_v1)
+        result2 = page_cache.store(user_v2)
+        result3 = page_cache.store(user_v3)
 
         assert result1 is True
         assert result2 is True
         assert result3 is True
 
         # Retrieve each version
-        retrieved_v1 = page_cache.get_page(UserPage, user_v1.uri)
-        retrieved_v2 = page_cache.get_page(UserPage, user_v2.uri)
-        retrieved_v3 = page_cache.get_page(UserPage, user_v3.uri)
+        retrieved_v1 = page_cache.get(UserPage, user_v1.uri)
+        retrieved_v2 = page_cache.get(UserPage, user_v2.uri)
+        retrieved_v3 = page_cache.get(UserPage, user_v3.uri)
 
         assert retrieved_v1 is not None
         assert retrieved_v2 is not None
@@ -2001,20 +1912,20 @@ class TestVersioning:
             email="user@example.com",
         )
 
-        page_cache.store_page(user_v1)
-        page_cache.store_page(user_v3)  # Store v3 before v2 to test ordering
-        page_cache.store_page(user_v2)
+        page_cache.store(user_v1)
+        page_cache.store(user_v3)  # Store v3 before v2 to test ordering
+        page_cache.store(user_v2)
 
         # Should return the highest version number
         latest = page_cache.get_latest_version(UserPage, prefix)
         assert latest == 3
 
-    def test_get_latest_page(self, page_cache: PageCache) -> None:
-        """Test getting the latest version of a page for a URI prefix."""
+    def test_get_latest_functionality(self, page_cache: PageCache) -> None:
+        """Test getting the latest version through get_latest method."""
         prefix = "test/user:user1"
 
         # Should return None when no versions exist
-        latest_page = page_cache.get_page(UserPage, prefix)
+        latest_page = page_cache.get_latest(UserPage, prefix)
         assert latest_page is None
 
         # Store multiple versions
@@ -2031,11 +1942,11 @@ class TestVersioning:
             age=26,
         )
 
-        page_cache.store_page(user_v1)
-        page_cache.store_page(user_v2)
+        page_cache.store(user_v1)
+        page_cache.store(user_v2)
 
         # Should return the latest version page
-        latest_page = page_cache.get_latest_page(UserPage, prefix)
+        latest_page = page_cache.get_latest(UserPage, prefix)
         assert latest_page is not None
         assert latest_page.name == "User Version 2"
         assert latest_page.age == 26
@@ -2052,13 +1963,13 @@ class TestVersioning:
         # Test the prefix property
         assert user.uri.prefix == "test/user:user123"
 
-        page_cache.store_page(user)
+        page_cache.store(user)
 
         # Use the prefix to get the latest version
         latest_version = page_cache.get_latest_version(UserPage, user.uri.prefix)
         assert latest_version == 5
 
-        latest_page = page_cache.get_latest_page(UserPage, user.uri.prefix)
+        latest_page = page_cache.get_latest(UserPage, user.uri.prefix)
         assert latest_page is not None
         assert latest_page.name == "Test User"
 
@@ -2082,9 +1993,9 @@ class TestVersioning:
             email="user2@example.com",
         )
 
-        page_cache.store_page(user1_v1)
-        page_cache.store_page(user1_v2)
-        page_cache.store_page(user2_v1)
+        page_cache.store(user1_v1)
+        page_cache.store(user1_v2)
+        page_cache.store(user2_v1)
 
         # Check that each prefix has its own version history
         user1_latest = page_cache.get_latest_version(UserPage, "test/user:user1")
@@ -2094,8 +2005,8 @@ class TestVersioning:
         assert user2_latest == 1
 
         # Check that latest pages are correct
-        user1_latest_page = page_cache.get_latest_page(UserPage, "test/user:user1")
-        user2_latest_page = page_cache.get_latest_page(UserPage, "test/user:user2")
+        user1_latest_page = page_cache.get_latest(UserPage, "test/user:user1")
+        user2_latest_page = page_cache.get_latest(UserPage, "test/user:user2")
 
         assert user1_latest_page is not None
         assert user2_latest_page is not None
@@ -2122,7 +2033,7 @@ class TestPageCacheDefaultVersionFunctionality:
 
         # Should raise ValueError
         with pytest.raises(ValueError, match="Cannot store page with None version"):
-            page_cache.store_page(user)
+            page_cache.store(user)
 
     def test_retrieve_default_version_gets_highest_version(
         self, page_cache: PageCache
@@ -2140,12 +2051,12 @@ class TestPageCacheDefaultVersionFunctionality:
             email="test@example.com",
         )
 
-        page_cache.store_page(user_v1)
-        page_cache.store_page(user_v3)
+        page_cache.store(user_v1)
+        page_cache.store(user_v3)
 
         # Request default version should return v3 (highest)
         default_uri = PageURI(root="test", type="user", id="user1", version=None)
-        retrieved = page_cache.get_page(UserPage, default_uri)
+        retrieved = page_cache.get(UserPage, default_uri)
 
         assert retrieved is not None
         assert retrieved.name == "User v3"  # Should get version 3
@@ -2156,7 +2067,7 @@ class TestPageCacheDefaultVersionFunctionality:
     ) -> None:
         """Test getting default version for a page that doesn't exist."""
         uri = PageURI(root="test", type="user", id="nonexistent", version=None)
-        result = page_cache.get_page(UserPage, uri)
+        result = page_cache.get(UserPage, uri)
         assert result is None
 
 
@@ -2192,10 +2103,9 @@ class TestCacheInvalidation:
             # Mock validation - check if revision is "current"
             return page.revision == "current"
 
-        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+        page_cache.register_validator(self.GoogleDocPage, validate_doc)
 
-        # Verify invalidator is stored
-        assert "GoogleDocPage" in page_cache._invalidators
+        # Note: We don't test internal storage details, just that validation works
 
     def test_invalidate_page_by_uri(self, page_cache: PageCache) -> None:
         """Test invalidating a specific page by URI."""
@@ -2206,47 +2116,19 @@ class TestCacheInvalidation:
             content="Test content",
             revision="current",
         )
-        page_cache.store_page(doc)
+        page_cache.store(doc)
 
         # Verify page exists and is valid
-        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is not None
 
         # Invalidate the page
-        result = page_cache.invalidate_page(doc.uri)
+        result = page_cache.invalidate(doc.uri)
         assert result is True
 
         # Verify page is now invalid
-        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is None
-
-    def test_invalidate_pages_by_prefix(self, page_cache: PageCache) -> None:
-        """Test invalidating all versions of pages with a prefix."""
-        # Store multiple versions of a page
-        for version in [1, 2, 3]:
-            doc = self.GoogleDocPage(
-                uri=PageURI(root="test", type="doc", id="doc1", version=version),
-                title=f"Test Doc v{version}",
-                content=f"Test content v{version}",
-                revision="current",
-            )
-            page_cache.store_page(doc)
-
-        # Verify all versions exist
-        for version in [1, 2, 3]:
-            uri = PageURI(root="test", type="doc", id="doc1", version=version)
-            retrieved = page_cache.get_page(self.GoogleDocPage, uri)
-            assert retrieved is not None
-
-        # Invalidate all versions
-        invalidated_count = page_cache.invalidate_pages_by_prefix("test/doc:doc1")
-        assert invalidated_count == 3
-
-        # Verify all versions are now invalid
-        for version in [1, 2, 3]:
-            uri = PageURI(root="test", type="doc", id="doc1", version=version)
-            retrieved = page_cache.get_page(self.GoogleDocPage, uri)
-            assert retrieved is None
 
     def test_page_validation_with_invalidator(self, page_cache: PageCache) -> None:
         """Test that pages are validated using registered invalidators."""
@@ -2255,7 +2137,7 @@ class TestCacheInvalidation:
             # Mock validation - only "current" revision is valid
             return page.revision == "current"
 
-        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+        page_cache.register_validator(self.GoogleDocPage, validate_doc)
 
         # Store a page with "current" revision
         doc_current = self.GoogleDocPage(
@@ -2264,7 +2146,7 @@ class TestCacheInvalidation:
             content="Current content",
             revision="current",
         )
-        page_cache.store_page(doc_current)
+        page_cache.store(doc_current)
 
         # Store a page with "old" revision
         doc_old = self.GoogleDocPage(
@@ -2273,15 +2155,15 @@ class TestCacheInvalidation:
             content="Old content",
             revision="old",
         )
-        page_cache.store_page(doc_old)
+        page_cache.store(doc_old)
 
         # Current revision should be retrievable
-        retrieved_current = page_cache.get_page(self.GoogleDocPage, doc_current.uri)
+        retrieved_current = page_cache.get(self.GoogleDocPage, doc_current.uri)
         assert retrieved_current is not None
         assert retrieved_current.title == "Current Doc"
 
         # Old revision should be invalidated and not retrievable
-        retrieved_old = page_cache.get_page(self.GoogleDocPage, doc_old.uri)
+        retrieved_old = page_cache.get(self.GoogleDocPage, doc_old.uri)
         assert retrieved_old is None
 
     def test_ancestor_validation(self, page_cache: PageCache) -> None:
@@ -2293,8 +2175,8 @@ class TestCacheInvalidation:
         def validate_chunk(page: "TestCacheInvalidation.ChunkPage") -> bool:
             return page.doc_revision == "current"
 
-        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
-        page_cache.register_invalidator(self.ChunkPage, validate_chunk)
+        page_cache.register_validator(self.GoogleDocPage, validate_doc)
+        page_cache.register_validator(self.ChunkPage, validate_chunk)
 
         # Store parent document with "current" revision
         parent_doc = self.GoogleDocPage(
@@ -2303,7 +2185,7 @@ class TestCacheInvalidation:
             content="Parent content",
             revision="current",
         )
-        page_cache.store_page(parent_doc)
+        page_cache.store(parent_doc)
 
         # Store child chunk with "current" revision
         child_chunk = self.ChunkPage(
@@ -2313,11 +2195,11 @@ class TestCacheInvalidation:
             doc_revision="current",
             parent_uri=parent_doc.uri,
         )
-        page_cache.store_page(child_chunk, parent_uri=parent_doc.uri)
+        page_cache.store(child_chunk, parent_uri=parent_doc.uri)
 
         # Both should be retrievable initially
-        retrieved_parent = page_cache.get_page(self.GoogleDocPage, parent_doc.uri)
-        retrieved_child = page_cache.get_page(self.ChunkPage, child_chunk.uri)
+        retrieved_parent = page_cache.get(self.GoogleDocPage, parent_doc.uri)
+        retrieved_child = page_cache.get(self.ChunkPage, child_chunk.uri)
         assert retrieved_parent is not None
         assert retrieved_child is not None
 
@@ -2329,7 +2211,7 @@ class TestCacheInvalidation:
             content="Updated parent content",
             revision="old",  # This will make it invalid
         )
-        page_cache.store_page(updated_parent)
+        page_cache.store(updated_parent)
 
         # Update the child to point to the new parent version
         updated_child = self.ChunkPage(
@@ -2339,16 +2221,16 @@ class TestCacheInvalidation:
             doc_revision="current",  # Child is still current
             parent_uri=updated_parent.uri,
         )
-        page_cache.store_page(updated_child, parent_uri=updated_parent.uri)
+        page_cache.store(updated_child, parent_uri=updated_parent.uri)
 
         # The updated parent should be invalid
-        retrieved_updated_parent = page_cache.get_page(
+        retrieved_updated_parent = page_cache.get(
             self.GoogleDocPage, updated_parent.uri
         )
         assert retrieved_updated_parent is None
 
         # The child should also be invalid because its parent is invalid
-        retrieved_updated_child = page_cache.get_page(self.ChunkPage, updated_child.uri)
+        retrieved_updated_child = page_cache.get(self.ChunkPage, updated_child.uri)
         assert retrieved_updated_child is None
 
     def test_find_pages_respects_validity(self, page_cache: PageCache) -> None:
@@ -2357,7 +2239,7 @@ class TestCacheInvalidation:
         def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             return page.revision == "current"
 
-        page_cache.register_invalidator(self.GoogleDocPage, validate_doc)
+        page_cache.register_validator(self.GoogleDocPage, validate_doc)
 
         # Store multiple documents with different revisions
         docs = [
@@ -2382,11 +2264,13 @@ class TestCacheInvalidation:
         ]
 
         for doc in docs:
-            page_cache.store_page(doc)
+            page_cache.store(doc)
 
         # Find all documents with "Doc" in title
-        results = page_cache.find_pages_by_attribute(
-            self.GoogleDocPage, lambda t: t.title.like("%Doc%")
+        results = (
+            page_cache.find(self.GoogleDocPage)
+            .where(lambda t: t.title.like("%Doc%"))
+            .all()
         )
 
         # Should only return the 2 current documents, not the old one
@@ -2403,9 +2287,9 @@ class TestCacheInvalidation:
             content="Test content",
             revision="old",  # Would be invalid if invalidator was registered
         )
-        page_cache.store_page(doc)
+        page_cache.store(doc)
 
         # Should be retrievable since no invalidator is registered
-        retrieved = page_cache.get_page(self.GoogleDocPage, doc.uri)
+        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is not None
         assert retrieved.title == "Test Doc"

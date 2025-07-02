@@ -14,7 +14,7 @@ from .global_context import (
     get_global_context,
     set_global_context,
 )
-from .page_cache import PageCache, ProvenanceError
+from .page_cache import PageCache
 from .retriever import RetrieverAgentBase
 from .service import Service
 from .types import Page, PageReference, PageURI, TextPage

@@ -58,7 +58,7 @@ class PeopleService(ToolkitService):
     def handle_person_request(self, person_id: str) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""
         person_uri = PageURI(root=self.context.root, type="person", id=person_id)
-        cached_person = self.page_cache.get_page(PersonPage, person_uri)
+        cached_person = self.page_cache.get(PersonPage, person_uri)
 
         if cached_person:
             logger.debug(f"Found existing person in cache: {person_id}")
@@ -97,21 +97,27 @@ class PeopleService(ToolkitService):
 
         # Try exact email match first
         if self._is_email_address(identifier):
-            email_matches = self.page_cache.find_pages_by_attribute(
-                PersonPage, lambda t: t.email == identifier_lower
+            email_matches: List[PersonPage] = (
+                self.page_cache.find(PersonPage)
+                .where(lambda t: t.email == identifier_lower)
+                .all()
             )
             return email_matches
 
         # Try full name matches (partial/case-insensitive)
-        full_name_matches = self.page_cache.find_pages_by_attribute(
-            PersonPage, lambda t: t.full_name.ilike(f"%{identifier_lower}%")
+        full_name_matches: List[PersonPage] = (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.full_name.ilike(f"%{identifier_lower}%"))
+            .all()
         )
         if full_name_matches:
             return full_name_matches
 
         # Try first name matches (if not already found)
-        first_name_matches = self.page_cache.find_pages_by_attribute(
-            PersonPage, lambda t: t.first_name.ilike(f"%{identifier_lower}%")
+        first_name_matches: List[PersonPage] = (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.first_name.ilike(f"%{identifier_lower}%"))
+            .all()
         )
         return first_name_matches
 
@@ -242,9 +248,10 @@ class PeopleService(ToolkitService):
 
     def _find_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
         """Find existing person in page cache by email address."""
-        page_cache = self.context.page_cache
-        matches = page_cache.find_pages_by_attribute(
-            PersonPage, lambda t: t.email == email.lower()
+        matches: List[PersonPage] = (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.email == email.lower())
+            .all()
         )
         return matches[0] if matches else None
 
@@ -611,7 +618,7 @@ class PeopleService(ToolkitService):
         person_page = PersonPage(uri=uri, **person_info.__dict__)
 
         # Store in page cache
-        self.page_cache.store_page(person_page)
+        self.page_cache.store(person_page)
 
         logger.debug(f"Created and stored person page: {person_id}")
         return person_page

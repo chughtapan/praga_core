@@ -1,7 +1,6 @@
 """Tests for GoogleDocsService."""
 
-from datetime import datetime
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -66,18 +65,18 @@ class TestGoogleDocsService:
     def test_handle_header_request_cached(self):
         """Test handle_header_request returns cached header."""
         mock_header = Mock(spec=GDocHeader)
-        self.mock_page_cache.get_page.return_value = mock_header
+        self.mock_page_cache.get.return_value = mock_header
 
         result = self.service.handle_header_request("doc123")
 
         # Verify cache lookup
         expected_uri = PageURI(root="test-root", type="gdoc_header", id="doc123")
-        self.mock_page_cache.get_page.assert_called_once_with(GDocHeader, expected_uri)
+        self.mock_page_cache.get.assert_called_once_with(GDocHeader, expected_uri)
         assert result is mock_header
 
     def test_handle_header_request_not_cached(self):
         """Test handle_header_request ingests document when not cached."""
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
         mock_header = Mock(spec=GDocHeader)
 
         with patch.object(self.service, "_ingest_document", return_value=mock_header):
@@ -88,18 +87,18 @@ class TestGoogleDocsService:
     def test_handle_chunk_request_cached(self):
         """Test handle_chunk_request returns cached chunk."""
         mock_chunk = Mock(spec=GDocChunk)
-        self.mock_page_cache.get_page.return_value = mock_chunk
+        self.mock_page_cache.get.return_value = mock_chunk
 
         result = self.service.handle_chunk_request("chunk123")
 
         expected_uri = PageURI(root="test-root", type="gdoc_chunk", id="chunk123")
-        self.mock_page_cache.get_page.assert_called_once_with(GDocChunk, expected_uri)
+        self.mock_page_cache.get.assert_called_once_with(GDocChunk, expected_uri)
         assert result is mock_chunk
 
     def test_handle_chunk_request_not_found(self):
         """Test handle_chunk_request raises error when chunk not found."""
         # Use valid chunk ID format: document_id(chunk_index)
-        self.mock_page_cache.get_page.return_value = None
+        self.mock_page_cache.get.return_value = None
 
         # Mock that document ingestion doesn't create the chunk
         with patch.object(self.service, "_ingest_document"):
@@ -152,8 +151,8 @@ class TestGoogleDocsService:
         self.mock_context.create_page_uri = Mock()
         self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
 
-        # Mock page cache store_page method
-        self.mock_page_cache.store_page = Mock()
+        # Mock page cache store method
+        self.mock_page_cache.store = Mock()
 
         result = self.service._ingest_document(test_doc_id)
 
@@ -165,7 +164,7 @@ class TestGoogleDocsService:
         self.service.chunker.chunk.assert_called_once_with("Hello world!")
 
         # Verify pages were stored (header + 1 chunk)
-        assert self.mock_page_cache.store_page.call_count == 2
+        assert self.mock_page_cache.store.call_count == 2
 
         # Verify return type
         assert isinstance(result, GDocHeader)
@@ -335,11 +334,11 @@ class TestGoogleDocsService:
         mock_chunk3.document_id = "doc123"
         mock_chunk3.content = "Another chunk with search and term words"
 
-        self.mock_page_cache.find_pages_by_attribute.return_value = [
-            mock_chunk1,
-            mock_chunk2,
-            mock_chunk3,
-        ]
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = [mock_chunk1, mock_chunk2, mock_chunk3]
+        self.mock_page_cache.find.return_value = mock_query
 
         # Mock handle_header_request to ensure document is ingested
         with patch.object(self.service, "handle_header_request"):
@@ -357,7 +356,11 @@ class TestGoogleDocsService:
 
     def test_search_chunks_in_document_no_chunks(self):
         """Test searching chunks when document has no chunks."""
-        self.mock_page_cache.find_pages_by_attribute.return_value = []
+        # Mock the new fluent interface: find().where().all()
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all.return_value = []
+        self.mock_page_cache.find.return_value = mock_query
 
         with patch.object(self.service, "handle_header_request"):
             doc_header_uri = "test-root/gdoc_header:doc123@1"
@@ -396,6 +399,7 @@ class TestGoogleDocsToolkit:
         """Set up test environment."""
         self.mock_context = Mock()
         self.mock_context.root = "test-root"
+        self.mock_context.get = Mock()
         self.mock_context.get_page = Mock()
 
         set_global_context(self.mock_context)
@@ -420,12 +424,47 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_title(self):
         """Test search_documents_by_title tool."""
+        # Create real GDocHeader instances for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header1 = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document 1",
+            summary="Test summary 1",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+        header2 = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc2", version=1),
+            document_id="doc2",
+            title="Test Document 2",
+            summary="Test summary 2",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=200,
+            chunk_count=10,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc2/edit",
+            revision_id="rev2",
+        )
+
         # Mock search results
-        mock_headers = [Mock(spec=GDocHeader), Mock(spec=GDocHeader)]
+        mock_headers = [header1, header2]
         self.mock_context.get_page.side_effect = mock_headers
 
         # Mock service search method
-        mock_uris = [Mock(spec=PageURI), Mock(spec=PageURI)]
+        mock_uris = [header1.uri, header2.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             "next_token",
@@ -444,10 +483,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_topic(self):
         """Test search_documents_by_topic tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
         self.mock_context.get_page.return_value = mock_headers[0]
 
-        mock_uris = [Mock(spec=PageURI)]
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_documents_by_topic("test topic")
@@ -460,10 +520,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_owner(self):
         """Test search_documents_by_owner tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="owner@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
         self.mock_context.get_page.return_value = mock_headers[0]
 
-        mock_uris = [Mock(spec=PageURI)]
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -485,10 +566,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_documents_by_owner_with_name(self):
         """Test search_documents_by_owner tool with person name."""
-        mock_headers = [Mock(spec=GDocHeader)]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="john.doe@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
         self.mock_context.get_page.return_value = mock_headers[0]
 
-        mock_uris = [Mock(spec=PageURI)]
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -510,10 +612,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_recently_modified_documents(self):
         """Test search_recently_modified_documents tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
         self.mock_context.get_page.return_value = mock_headers[0]
 
-        mock_uris = [Mock(spec=PageURI)]
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (
             mock_uris,
             None,
@@ -528,10 +651,31 @@ class TestGoogleDocsToolkit:
 
     def test_search_all_documents(self):
         """Test search_all_documents tool."""
-        mock_headers = [Mock(spec=GDocHeader)]
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
+        mock_headers = [header]
         self.mock_context.get_page.return_value = mock_headers[0]
 
-        mock_uris = [Mock(spec=PageURI)]
+        mock_uris = [header.uri]
         self.mock_service.search_documents.return_value = (mock_uris, None)
 
         result = self.toolkit.search_all_documents()
@@ -567,12 +711,33 @@ class TestGoogleDocsToolkit:
 
     def test_pagination_with_cursor(self):
         """Test pagination using cursor."""
+        # Create real GDocHeader instance for testing
+        from datetime import datetime
+
+        from praga_core.types import PageURI
+        from pragweb.google_api.docs.page import GDocHeader
+
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id="doc1", version=1),
+            document_id="doc1",
+            title="Test Document",
+            summary="Test summary",
+            created_time=datetime.now(),
+            modified_time=datetime.now(),
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=5,
+            chunk_uris=[],
+            permalink="https://docs.google.com/document/d/doc1/edit",
+            revision_id="rev1",
+        )
+
         # Mock service returns results with next cursor
         self.mock_service.search_documents.return_value = (
-            [Mock(spec=PageURI)],
+            [header.uri],
             "next_cursor_token",
         )
-        self.mock_context.get_page.return_value = Mock(spec=GDocHeader)
+        self.mock_context.get_page.return_value = header
 
         result = self.toolkit.search_documents_by_title("test", cursor="current_cursor")
 
@@ -694,7 +859,7 @@ class TestGoogleDocsCacheInvalidation:
         self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
 
         # Mock page cache
-        self.mock_page_cache.store_page = Mock()
+        self.mock_page_cache.store = Mock()
 
         result = self.service._ingest_document("doc123")
 
@@ -703,159 +868,3 @@ class TestGoogleDocsCacheInvalidation:
 
         # Verify API calls
         self.mock_api_client.get_latest_revision_id.assert_called_once_with("doc123")
-
-    def test_invalidator_functions_registered(self):
-        """Test that invalidator functions are registered with handlers."""
-        # The invalidators should be registered in _register_handlers
-        # We can't easily test the decorator registration, but we can test
-        # that the validation functions exist and work
-
-        # Create a mock header page
-        _ = GDocHeader(
-            uri=PageURI(root="test", type="gdoc_header", id="doc1"),
-            document_id="doc1",
-            title="Test Doc",
-            summary="Test summary",
-            created_time=datetime(2023, 1, 1),
-            modified_time=datetime(2023, 1, 2),
-            word_count=10,
-            chunk_count=1,
-            chunk_uris=[],
-            permalink="https://docs.google.com/document/d/doc1/edit",
-            revision_id="rev123",
-        )
-
-        # Test header validation
-        self.mock_api_client.check_file_revision.return_value = True
-        # We can't directly test the decorator, but we can verify the logic
-        assert self.mock_api_client.check_file_revision
-
-    def test_invalidate_document(self):
-        """Test manual document invalidation."""
-        self.mock_context.invalidate_pages_by_prefix.side_effect = [
-            2,
-            5,
-        ]  # header + chunks
-
-        result = self.service.invalidate_document("doc123")
-
-        assert result == 7  # 2 + 5
-
-        # Verify correct prefixes were used
-        expected_calls = [
-            call("test-root/gdoc_header:doc123"),
-            call("test-root/gdoc_chunk:doc123"),
-        ]
-        self.mock_context.invalidate_pages_by_prefix.assert_has_calls(expected_calls)
-
-    def test_check_document_freshness_not_cached(self):
-        """Test freshness check when document is not cached."""
-        self.mock_page_cache.get_page.return_value = None
-
-        result = self.service.check_document_freshness("doc123")
-
-        assert result["cached"] is False
-        assert result["fresh"] is False
-        assert "not in cache" in result["message"]
-
-    def test_check_document_freshness_fresh(self):
-        """Test freshness check when document is fresh."""
-        mock_header = Mock(spec=GDocHeader)
-        mock_header.revision_id = "rev123"
-        mock_header.modified_time = datetime(2023, 1, 2)
-
-        self.mock_page_cache.get_page.return_value = mock_header
-        self.mock_api_client.get_latest_revision_id.return_value = "rev123"
-
-        result = self.service.check_document_freshness("doc123")
-
-        assert result["cached"] is True
-        assert result["fresh"] is True
-        assert result["cached_revision"] == "rev123"
-        assert result["current_revision"] == "rev123"
-        assert "fresh" in result["message"]
-
-    def test_check_document_freshness_stale(self):
-        """Test freshness check when document is stale."""
-        mock_header = Mock(spec=GDocHeader)
-        mock_header.revision_id = "rev123"
-        mock_header.modified_time = datetime(2023, 1, 2)
-
-        self.mock_page_cache.get_page.return_value = mock_header
-        self.mock_api_client.get_latest_revision_id.return_value = (
-            "rev456"  # Different revision
-        )
-
-        result = self.service.check_document_freshness("doc123")
-
-        assert result["cached"] is True
-        assert result["fresh"] is False
-        assert result["cached_revision"] == "rev123"
-        assert result["current_revision"] == "rev456"
-        assert "modified online" in result["message"]
-
-    def test_check_document_freshness_error(self):
-        """Test freshness check when API call fails."""
-        mock_header = Mock(spec=GDocHeader)
-        self.mock_page_cache.get_page.return_value = mock_header
-        self.mock_api_client.get_latest_revision_id.side_effect = Exception("API Error")
-
-        result = self.service.check_document_freshness("doc123")
-
-        assert result["fresh"] is False
-        assert "error" in result
-        assert "API Error" in result["message"]
-
-    def test_refresh_document(self):
-        """Test force refresh of a document."""
-        mock_header = Mock(spec=GDocHeader)
-
-        with patch.object(self.service, "invalidate_document") as mock_invalidate:
-            with patch.object(
-                self.service, "_ingest_document", return_value=mock_header
-            ) as mock_ingest:
-                result = self.service.refresh_document("doc123")
-
-                mock_invalidate.assert_called_once_with("doc123")
-                mock_ingest.assert_called_once_with("doc123")
-                assert result is mock_header
-
-    def test_toolkit_cache_methods(self):
-        """Test toolkit methods for cache management."""
-        from pragweb.google_api.docs.service import GoogleDocsToolkit
-
-        toolkit = GoogleDocsToolkit(self.service)
-
-        # Test check_document_freshness
-        with patch.object(self.service, "check_document_freshness") as mock_check:
-            mock_check.return_value = {"fresh": True}
-            result = toolkit.check_document_freshness("doc123")
-            assert result == {"fresh": True}
-
-        # Test invalidate_document_cache
-        with patch.object(self.service, "invalidate_document") as mock_invalidate:
-            mock_invalidate.return_value = 5
-            result = toolkit.invalidate_document_cache("doc123")
-            assert result["success"] is True
-            assert result["invalidated_pages"] == 5
-
-        # Test refresh_document
-        mock_header = Mock(spec=GDocHeader)
-        with patch.object(self.service, "refresh_document") as mock_refresh:
-            mock_refresh.return_value = mock_header
-            result = toolkit.refresh_document("doc123")
-            # toolkit.refresh_document returns a list
-            assert result == [mock_header]
-
-    def test_toolkit_invalidate_error_handling(self):
-        """Test toolkit error handling for invalidation."""
-        from pragweb.google_api.docs.service import GoogleDocsToolkit
-
-        toolkit = GoogleDocsToolkit(self.service)
-
-        with patch.object(self.service, "invalidate_document") as mock_invalidate:
-            mock_invalidate.side_effect = Exception("Invalidation failed")
-            result = toolkit.invalidate_document_cache("doc123")
-
-            assert result["success"] is False
-            assert "Invalidation failed" in result["error"]
