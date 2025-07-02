@@ -1,9 +1,9 @@
 """Simplified PageCache implementation with clear separation of concerns."""
 
 import logging
-from typing import Any, Callable, List, Optional, Type, TypeVar
+from typing import Any, Callable, Generic, List, Optional, Type, TypeVar, cast
 
-from sqlalchemy import create_engine
+from sqlalchemy import Table, create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -11,6 +11,7 @@ from ..types import Page, PageURI
 from .provenance_manager import ProvenanceManager
 from .query import PageQuery
 from .registry import PageRegistry
+from .schema import Base, PageRelationships
 from .storage import PageStorage
 from .validator import PageValidator
 
@@ -65,12 +66,9 @@ class PageCache:
             self._session_factory, self._storage, self._registry
         )
 
-        # Ensure relationships table exists
-        from .schema import Base, PageRelationships
-
         Base.metadata.create_all(
             self._engine,
-            tables=[PageRelationships.__table__],
+            tables=[cast(Table, PageRelationships.__table__)],
             checkfirst=True,
         )
 
@@ -94,7 +92,8 @@ class PageCache:
         # Validate provenance if needed
         if parent_uri or page.parent_uri:
             effective_parent = parent_uri or page.parent_uri
-            self._provenance.validate_relationship(page, effective_parent)
+            if effective_parent is not None:
+                self._provenance.validate_relationship(page, effective_parent)
             if parent_uri:
                 page.parent_uri = parent_uri
 
@@ -193,7 +192,7 @@ class PageCache:
         return self._session_factory()
 
 
-class QueryBuilder:
+class QueryBuilder(Generic[P]):
     """Fluent interface for building page queries."""
 
     def __init__(
@@ -207,7 +206,7 @@ class QueryBuilder:
         self._query_engine = query_engine
         self._validator = validator
         self._storage = storage
-        self._filters = []
+        self._filters: List[Callable[[Any], Any]] = []
 
     def where(self, condition: Callable[[Any], Any]) -> "QueryBuilder[P]":
         """Add a WHERE condition to the query."""
@@ -217,7 +216,7 @@ class QueryBuilder:
     def all(self) -> List[P]:
         """Execute query and return all matching valid pages."""
         pages = self._query_engine.find(self._page_type, self._filters)
-        valid_pages = []
+        valid_pages: List[P] = []
 
         for page in pages:
             if self._validator.is_valid(page):

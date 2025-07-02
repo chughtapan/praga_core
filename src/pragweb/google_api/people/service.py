@@ -97,7 +97,7 @@ class PeopleService(ToolkitService):
 
         # Try exact email match first
         if self._is_email_address(identifier):
-            email_matches = (
+            email_matches: List[PersonPage] = (
                 self.page_cache.find(PersonPage)
                 .where(lambda t: t.email == identifier_lower)
                 .all()
@@ -105,7 +105,7 @@ class PeopleService(ToolkitService):
             return email_matches
 
         # Try full name matches (partial/case-insensitive)
-        full_name_matches = (
+        full_name_matches: List[PersonPage] = (
             self.page_cache.find(PersonPage)
             .where(lambda t: t.full_name.ilike(f"%{identifier_lower}%"))
             .all()
@@ -114,7 +114,7 @@ class PeopleService(ToolkitService):
             return full_name_matches
 
         # Try first name matches (if not already found)
-        first_name_matches = (
+        first_name_matches: List[PersonPage] = (
             self.page_cache.find(PersonPage)
             .where(lambda t: t.first_name.ilike(f"%{identifier_lower}%"))
             .all()
@@ -248,9 +248,10 @@ class PeopleService(ToolkitService):
 
     def _find_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
         """Find existing person in page cache by email address."""
-        page_cache = self.context.page_cache
-        matches = (
-            page_cache.find(PersonPage).where(lambda t: t.email == email.lower()).all()
+        matches: List[PersonPage] = (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.email == email.lower())
+            .all()
         )
         return matches[0] if matches else None
 

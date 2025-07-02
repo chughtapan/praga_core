@@ -13,7 +13,7 @@ P = TypeVar("P", bound=Page)
 class PageValidator:
     """Handles page validation using registered validator functions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._validators: Dict[str, Callable[[Page], bool]] = {}
 
     def register(self, page_type: Type[P], validator: Callable[[P], bool]) -> None:
