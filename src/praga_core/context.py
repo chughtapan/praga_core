@@ -91,7 +91,13 @@ class ServerContext:
         """Get all registered actions."""
         return self._action_executor.actions
 
+    @property  
+    def _page_handlers(self) -> Dict[str, HandlerFn]:
+        """Get all registered page handlers (for MCP compatibility)."""
+        return self._router._handlers
+
     def validator(self, func: Callable[[Page], bool]) -> Callable[[Page], bool]:
+        """Register a validator function for a specific page type.
 
         Example:
             @context.validator
