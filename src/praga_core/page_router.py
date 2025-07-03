@@ -86,7 +86,7 @@ class PageRouter:
     def is_cache_enabled(self, path: str) -> bool:
         return self._cache_enabled.get(path, True)
 
-    def get_page(self, page_uri: PageURI) -> Page:
+    async def get_page(self, page_uri: PageURI) -> Page:
         """Retrieve a page by routing to the appropriate handler.
 
         First checks cache if caching is enabled for the page type.
@@ -101,31 +101,7 @@ class PageRouter:
 
         # Try cache first if enabled
         if cache_enabled:
-            cached_page = self._get_from_cache(page_type, page_uri)
-            if cached_page:
-                return cached_page
-
-        # Not in cache or caching disabled - call handler
-        page = self._call_handler(handler, page_uri)
-
-        # Store in cache if enabled and not already cached
-        if cache_enabled:
-            self._store_in_cache(page, page_uri)
-
-        return page
-
-    async def get_page_async(self, page_uri: PageURI) -> Page:
-        """Async version of get_page that can handle both sync and async handlers."""
-        if page_uri.type not in self._handlers:
-            raise RuntimeError(f"No handler registered for type: {page_uri.type}")
-
-        cache_enabled = self.is_cache_enabled(page_uri.type)
-        handler = self._handlers[page_uri.type]
-        page_type = self._get_handler_return_type(handler, page_uri.type)
-
-        # Try cache first if enabled
-        if cache_enabled:
-            cached_page = self._get_from_cache(page_type, page_uri)
+            cached_page = await self._get_from_cache(page_type, page_uri)
             if cached_page:
                 return cached_page
 
@@ -134,23 +110,19 @@ class PageRouter:
 
         # Store in cache if enabled and not already cached
         if cache_enabled:
-            self._store_in_cache(page, page_uri)
+            await self._store_in_cache(page, page_uri)
 
         return page
 
-    def get_pages(self, page_uris: List[PageURI]) -> List[Page]:
-        """Bulk synchronous page retrieval."""
-        return [self.get_page(uri) for uri in page_uris]
-
-    async def get_pages_async(self, page_uris: List[PageURI]) -> List[Page]:
+    async def get_pages(self, page_uris: List[PageURI]) -> List[Page]:
         """Bulk asynchronous page retrieval with parallel execution."""
-        tasks = [self.get_page_async(uri) for uri in page_uris]
+        tasks = [self.get_page(uri) for uri in page_uris]
         return await asyncio.gather(*tasks)
 
-    def _get_from_cache(self, page_type: Type[Page], page_uri: PageURI) -> Page | None:
+    async def _get_from_cache(self, page_type: Type[Page], page_uri: PageURI) -> Page | None:
         """Attempt to retrieve page from cache."""
         try:
-            cached_page = self._page_cache.get(page_type, page_uri)
+            cached_page = await self._page_cache.get(page_type, page_uri)
             if cached_page:
                 logger.debug(f"Found cached page for {page_uri}")
                 return cached_page
@@ -160,19 +132,8 @@ class PageRouter:
             )
         return None
 
-    def _call_handler(self, handler: AnyHandlerFn, page_uri: PageURI) -> Page:
-        """Call the handler to generate a page, ensuring proper URI versioning."""
-        if page_uri.version is None:
-            page_uri = self._create_page_uri(
-                self._get_handler_return_type(handler, page_uri.type),
-                page_uri.root,
-                page_uri.type,
-                page_uri.id,
-            )
-        return handler(page_uri)
-
     async def _call_handler_async(self, handler: AnyHandlerFn, page_uri: PageURI) -> Page:
-        """Async version of _call_handler that works with both sync and async handlers."""
+        """Call the handler to generate a page, ensuring proper URI versioning."""
         if page_uri.version is None:
             page_uri = self._create_page_uri(
                 self._get_handler_return_type(handler, page_uri.type),
@@ -189,11 +150,11 @@ class PageRouter:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, handler, page_uri)
 
-    def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
+    async def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
         """Attempt to store page in cache if not already present."""
         try:
             # Check if page is already in cache
-            if not self._page_cache.get(page.__class__, page_uri):
+            if not await self._page_cache.get(page.__class__, page_uri):
                 self._page_cache.store(page)
                 logger.debug(f"Stored page in cache: {page_uri}")
         except Exception as e:

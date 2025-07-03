@@ -103,17 +103,17 @@ class PageCache:
         # Store page
         return self._storage.store(page, parent_uri)
 
-    def get(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
+    async def get(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
         """Get a page by type and URI, with validation."""
         page = self._storage.get(page_type, uri)
-        if page and not self._validate_page_and_ancestors(page):
+        if page and not await self._validate_page_and_ancestors(page):
             return None
         return page
 
-    def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
+    async def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
         """Get the latest version of a page."""
         page = self._storage.get_latest(page_type, uri_prefix)
-        if page and not self._validator.is_valid(page):
+        if page and not await self._validator.is_valid(page):
             self._storage.mark_invalid(page.uri)
             return None
         return page
@@ -149,10 +149,10 @@ class PageCache:
         """Get the full lineage from root to this page."""
         return self._provenance.get_lineage(page_uri)
 
-    def _validate_page_and_ancestors(self, page: Page) -> bool:
+    async def _validate_page_and_ancestors(self, page: Page) -> bool:
         """Validate a page and its ancestors using registered validators."""
         # First, validate the page itself
-        if not self._validator.is_valid(page):
+        if not await self._validator.is_valid(page):
             self.invalidate(page.uri)
             return False
 
@@ -164,7 +164,7 @@ class PageCache:
                 ancestor_pages = provenance_chain[:-1] if provenance_chain else []
 
                 for ancestor in ancestor_pages:
-                    if not self._validator.is_valid(ancestor):
+                    if not await self._validator.is_valid(ancestor):
                         logger.debug(f"Ancestor page failed validation: {ancestor.uri}")
                         # Mark ancestor as invalid in cache
                         self.invalidate(ancestor.uri)

@@ -129,7 +129,7 @@ class ServerContext:
             return self._router._create_page_uri(page_type, self.root, type_path, id)
         return PageURI(root=self.root, type=type_path, id=id, version=version)
 
-    def get_page(self, page_uri: str | PageURI) -> Page:
+    async def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
 
         First checks cache if caching is enabled for the page type.
@@ -137,25 +137,14 @@ class ServerContext:
         """
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
-        return self._router.get_page(page_uri)
+        return await self._router.get_page(page_uri)
 
-    async def get_page_async(self, page_uri: str | PageURI) -> Page:
-        """Async version of get_page that can handle both sync and async handlers."""
-        if isinstance(page_uri, str):
-            page_uri = PageURI.parse(page_uri)
-        return await self._router.get_page_async(page_uri)
-
-    def get_pages(self, page_uris: List[str | PageURI]) -> List[Page]:
-        """Bulk synchronous page retrieval."""
-        parsed_uris = [PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris]
-        return self._router.get_pages(parsed_uris)
-
-    async def get_pages_async(self, page_uris: List[str | PageURI]) -> List[Page]:
+    async def get_pages(self, page_uris: List[str | PageURI]) -> List[Page]:
         """Bulk asynchronous page retrieval with parallel execution."""
         parsed_uris = [PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris]
-        return await self._router.get_pages_async(parsed_uris)
+        return await self._router.get_pages(parsed_uris)
 
-    def search(
+    async def search(
         self,
         instruction: str,
         retriever: Optional[RetrieverAgentBase] = None,
@@ -171,7 +160,7 @@ class ServerContext:
 
         results = self._search(instruction, active_retriever)
         if resolve_references:
-            results = self._resolve_references(results)
+            results = await self._resolve_references(results)
         return SearchResponse(results=results)
 
     def _search(
@@ -188,10 +177,10 @@ class ServerContext:
         """
         return retriever.search(instruction)
 
-    def _resolve_references(self, results: List[PageReference]) -> List[PageReference]:
+    async def _resolve_references(self, results: List[PageReference]) -> List[PageReference]:
         """Resolve references to pages by calling get_page."""
         for ref in results:
-            ref.page = self.get_page(ref.uri)
+            ref.page = await self.get_page(ref.uri)
             assert ref.page is not None
         return results
 
