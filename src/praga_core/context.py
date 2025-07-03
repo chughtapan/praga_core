@@ -111,8 +111,8 @@ def _convert_pages_to_uris(args: Dict[str, Any], func: ActionFunction) -> Dict[s
     return converted_args
 
 
-def _convert_uris_to_pages(args: Dict[str, Any], func: ActionFunction, page_cache: PageCache) -> Dict[str, Any]:
-    """Convert PageURIs back to Pages using the page cache."""
+def _convert_uris_to_pages(args: Dict[str, Any], func: ActionFunction, context: 'ServerContext') -> Dict[str, Any]:
+    """Convert PageURIs back to Pages using the server context."""
     type_hints = get_type_hints(func)
     converted_args = {}
     
@@ -124,11 +124,9 @@ def _convert_uris_to_pages(args: Dict[str, Any], func: ActionFunction, page_cach
             # Check if this parameter should be a Page
             if param_type is Page or (isinstance(param_type, type) and issubclass(param_type, Page)):
                 page_uri = value if isinstance(value, PageURI) else PageURI.parse(value)
-                # Check that the page exists in cache
-                from .page_router import PageRouter
-                router = PageRouter(page_cache)
+                # Use the context's get_page method which handles routing
                 try:
-                    page = router.get_page(page_uri)
+                    page = context.get_page(page_uri)
                     converted_args[param_name] = page
                 except Exception as e:
                     raise ValueError(f"Failed to retrieve page for URI '{page_uri}': {e}")
@@ -144,10 +142,8 @@ def _convert_uris_to_pages(args: Dict[str, Any], func: ActionFunction, page_cach
                 for item in value:
                     if isinstance(item, (PageURI, str)):
                         page_uri = item if isinstance(item, PageURI) else PageURI.parse(item)
-                        from .page_router import PageRouter
-                        router = PageRouter(page_cache)
                         try:
-                            page = router.get_page(page_uri)
+                            page = context.get_page(page_uri)
                             converted_list.append(page)
                         except Exception as e:
                             raise ValueError(f"Failed to retrieve page for URI '{page_uri}': {e}")
@@ -168,9 +164,9 @@ def _convert_uris_to_pages(args: Dict[str, Any], func: ActionFunction, page_cach
 class ActionExecutor:
     """Manages action functions that can be invoked on pages."""
     
-    def __init__(self, page_cache: PageCache):
-        """Initialize the ActionExecutor with a reference to the page cache."""
-        self._page_cache = page_cache
+    def __init__(self, context: 'ServerContext'):
+        """Initialize the ActionExecutor with a reference to the server context."""
+        self._context = context
         self._actions: Dict[str, ActionFunction] = {}
         
     def register_action(self, name: str, func: ActionFunction) -> None:
@@ -220,8 +216,8 @@ class ActionExecutor:
             args = raw_input or {}
             
         try:
-            # Convert PageURIs back to Pages from cache
-            resolved_args = _convert_uris_to_pages(args, action_func, self._page_cache)
+            # Convert PageURIs back to Pages using the context
+            resolved_args = _convert_uris_to_pages(args, action_func, self._context)
             
             # Invoke the action
             result = action_func(**resolved_args)
@@ -254,7 +250,7 @@ class ServerContext:
             cache_url = "sqlite:///:memory:"
         self._page_cache = PageCache(cache_url)
         self._router = PageRouter(self._page_cache)
-        self._action_executor = ActionExecutor(self._page_cache)
+        self._action_executor = ActionExecutor(self)
 
     def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
         """Decorator to register a page handler.
