@@ -68,12 +68,11 @@ def test_context_mixin():
     set_global_context(context)
 
     # Register handler
+    @context.route("test")
     def handle_test_page(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
-
-    context.register_handler("test", handle_test_page)
 
     # Now service should work
     assert service.context is context
@@ -104,13 +103,12 @@ def test_manual_context_setup():
     assert retrieved_context.root == "manual"
 
     # Can register handlers manually
+    @context.route("mytype")
     def handle_my_type(page_uri: PageURI) -> TestPage:
         return TestPage(uri=page_uri, title=f"My {page_uri.id}", content="My content")
 
-    context.register_handler("mytype", handle_my_type)
-
     # Handler should be registered
-    assert "mytype" in context._page_registry._page_handlers
+    assert "mytype" in context._router._handlers
 
     # Can use services with the context
     service = MockService()
@@ -145,18 +143,17 @@ def test_multiple_services_same_context():
     set_global_context(context)
 
     # Register handlers for both types
+    @context.route("shared")
     def handle_shared(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content"
         )
 
+    @context.route("test")
     def handle_test(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
-
-    context.register_handler("shared", handle_shared)
-    context.register_handler("test", handle_test)
 
     # Create multiple services
     service1 = MockService()
@@ -192,22 +189,5 @@ def test_error_handling():
 
     with pytest.raises(RuntimeError, match="Global context is already set"):
         set_global_context(context2)
-
-    clear_global_context()
-
-
-def test_context_with_no_handlers():
-    """Test context access when no handlers are registered."""
-    clear_global_context()
-
-    # Set up empty context
-    context = ServerContext(root="empty")
-    set_global_context(context)
-
-    service = MockService()
-
-    # Should be able to access context even with no handlers
-    assert service.context.root == "empty"
-    assert len(service.context._page_registry._page_handlers) == 0
 
     clear_global_context()

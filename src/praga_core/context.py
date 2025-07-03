@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, Type
+from typing import Callable, Dict, List, Optional, Type, TypeVar, get_type_hints
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 from .page_cache import PageCache
-from .page_registry import PageInvalidator, PageRegistry, T
+from .page_router import HandlerFn, PageRouter
 from .service import Service
 
 logger = logging.getLogger(__name__)
+
+P = TypeVar("P", bound=Page)
 
 
 class ServerContext:
@@ -29,7 +31,47 @@ class ServerContext:
         if cache_url is None:
             cache_url = "sqlite:///:memory:"
         self._page_cache = PageCache(cache_url)
-        self._page_registry = PageRegistry(self._page_cache)
+        self._router = PageRouter(self._page_cache)
+
+    def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
+        """Decorator to register a page handler.
+
+        Args:
+            path: The route path for this handler
+            cache: Whether to enable caching for this handler (default: True)
+
+        Example:
+            @context.route("emails")
+            def handle_emails(uri: PageURI) -> EmailPage:
+                ...
+        """
+        return self._router.route(path, cache)
+
+    def validator(self, func: Callable[[P], bool]) -> Callable[[P], bool]:
+        """Decorator to register a page validator.
+
+        Example:
+            @context.validator
+            def validate_email(page: EmailPage) -> bool:
+                ...
+        """
+        hints = {
+            name: typ for name, typ in get_type_hints(func).items() if name != "return"
+        }
+        if len(hints) != 1:
+            raise RuntimeError("Validator function must have exactly one argument.")
+        page_type = next(iter(hints.values()))
+        if not isinstance(page_type, type) or not issubclass(page_type, Page):
+            raise RuntimeError("Validator function's argument must be a Page subclass.")
+
+        # Create a wrapper that handles the type cast safely
+        def validator_wrapper(page: Page) -> bool:
+            if not isinstance(page, page_type):
+                return False
+            return func(page)  # type: ignore
+
+        self._page_cache.register_validator(page_type, validator_wrapper)
+        return func
 
     def register_service(self, name: str, service: Service) -> None:
         """Register a service with the context."""
@@ -71,108 +113,8 @@ class ServerContext:
             PageURI object with resolved version number
         """
         if version is None:
-            # If caching is disabled for this type, just use version 1
-            if not self._page_registry.is_cache_enabled(type_path):
-                version = 1
-            else:
-                try:
-                    # Ensure page type is registered with cache
-                    self._page_cache._storage._registry.ensure_registered(page_type)
-
-                    # Create prefix to check for existing versions
-                    prefix = f"{self.root}/{type_path}:{id}"
-
-                    # Get the latest version for this page type and prefix
-                    latest_version = self._page_cache.get_latest_version(
-                        page_type, prefix
-                    )
-
-                    # If no existing versions found, start with 1. Otherwise increment the latest.
-                    version = 1 if latest_version is None else (latest_version + 1)
-                except Exception as e:
-                    logger.debug(
-                        f"Error accessing cache for {type_path}: {e}, using version 1"
-                    )
-                    version = 1
-
+            return self._router._create_page_uri(page_type, self.root, type_path, id)
         return PageURI(root=self.root, type=type_path, id=id, version=version)
-
-    def handler(
-        self,
-        page_type: str,
-        invalidator: Optional[PageInvalidator] = None,
-        cache: bool = True,
-    ) -> Callable[[Callable[..., T]], Callable[..., T]]:
-        """Decorator to register a page handler function for a specific page type.
-
-        Args:
-            page_type: String identifier for the page type
-            invalidator: Optional function that validates cached pages
-            cache: Whether to enable caching for this page type (default: True)
-
-        Returns:
-            Callable: A decorator function that registers the handler
-
-        Usage:
-            @ctx.handler("email")
-            def handle_email(email_uri: PageURI) -> EmailDocument:
-                # Make API calls, parse, return document
-                return EmailDocument(...)
-
-            # With invalidator and caching disabled:
-            def validate_email(page: EmailPage) -> bool:
-                return check_email_still_exists(page)
-
-            @ctx.handler("email", invalidator=validate_email, cache=False)
-            def handle_email(email_uri: PageURI) -> EmailPage:
-                return EmailPage(...)
-        """
-        return self._page_registry.handler(page_type, invalidator, cache)
-
-    def _try_get_from_cache(self, page_uri: PageURI) -> Optional[Page]:
-        """Try to get a page from cache if caching is enabled for this page type.
-
-        Args:
-            page_uri: The PageURI to retrieve from cache.
-
-        Returns:
-            Optional[Page]: The cached page if found and caching is enabled, None otherwise.
-        """
-        # Check if caching is enabled for this page type
-        cache_enabled = self._page_registry.is_cache_enabled(page_uri.type)
-        if not cache_enabled:
-            return None
-
-        # Get handler and extract page type from return annotation
-        handler = self._page_registry.get_handler(page_uri.type)
-        page_type = PageRegistry._get_handler_return_type(handler, page_uri.type)
-
-        # Try to get from cache
-        try:
-            cached_page = self._page_cache.get(page_type, page_uri)
-            if cached_page:
-                logger.debug(f"Found cached page for {page_uri}")
-                self._register_invalidator_if_exists(page_uri.type, page_type)
-                return cached_page
-        except Exception as e:
-            logger.debug(
-                f"Error checking cache for {page_uri}: {e}, falling back to handler"
-            )
-
-        return None
-
-    def _register_invalidator_if_exists(
-        self, page_type_name: str, page_type: Type[Page]
-    ) -> None:
-        """Register invalidator with cache if one exists for this page type.
-
-        Args:
-            page_type_name: The name/identifier of the page type
-            page_type: The actual Page subclass type
-        """
-        invalidator = self._page_registry.get_invalidator(page_type_name)
-        if invalidator:
-            self._page_registry._register_invalidator_with_cache(page_type, invalidator)
 
     def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
@@ -180,47 +122,9 @@ class ServerContext:
         First checks cache if caching is enabled for the page type.
         If not cached or caching disabled, calls the handler to generate the page.
         """
-        # Parse URI if it's a string
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
-
-        if page_uri.type not in self._page_registry._page_handlers:
-            raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
-
-        # Try to get from cache first if caching is enabled
-        cached_page = self._try_get_from_cache(page_uri)
-        if cached_page:
-            return cached_page
-
-        # Not in cache or caching disabled - call handler with full URI
-        # Before calling the handler, ensure we have a full URI with version number
-        if page_uri.version is None:
-            # Need to create a full URI with version number
-            # We need to determine the page type from the handler to call create_page_uri
-            handler = self._page_registry.get_handler(page_uri.type)
-            page_type = PageRegistry._get_handler_return_type(handler, page_uri.type)
-            page_uri = self.create_page_uri(page_type, page_uri.type, page_uri.id)
-
-        handler = self._page_registry.get_handler(page_uri.type)
-        page = handler(page_uri)
-
-        # Store the page in cache if caching is enabled for this page type
-        cache_enabled = self._page_registry.is_cache_enabled(page_uri.type)
-        if cache_enabled:
-            try:
-                self._page_cache.store(page)
-                logger.debug(f"Stored page in cache: {page_uri}")
-            except Exception as e:
-                logger.debug(f"Error storing page in cache for {page_uri}: {e}")
-
-        # Register invalidator with cache if we have one for this page type
-        invalidator = self._page_registry.get_invalidator(page_uri.type)
-        if invalidator:
-            self._page_registry._register_invalidator_with_cache(
-                page.__class__, invalidator
-            )
-
-        return page
+        return self._router.get_page(page_uri)
 
     def search(
         self,
@@ -261,37 +165,6 @@ class ServerContext:
             ref.page = self.get_page(ref.uri)
             assert ref.page is not None
         return results
-
-    def register_handler(
-        self,
-        type_name: str,
-        handler_func: Callable[..., Page],
-        invalidator_func: Optional[PageInvalidator] = None,
-        cache: bool = True,
-    ) -> None:
-        """
-        Register a page handler function for a specific type name.
-
-        Args:
-            type_name: String identifier for the page type
-            handler_func: Function that takes a PageURI and returns a complete Page
-            invalidator_func: Optional function that takes a Page and returns True if valid, False if invalid
-            cache: Whether to enable caching for this page type (default: True)
-
-        Usage:
-            def handle_email(email_uri: PageURI) -> EmailPage:
-                # Make API calls, parse, return document
-                return EmailPage(...)
-
-            def validate_email(page: EmailPage) -> bool:
-                # Check if email still exists, compare revision, etc.
-                return True  # or False if invalid
-
-            ctx.register_handler("email", handle_email, validate_email, cache=True)
-        """
-        self._page_registry.register_handler(
-            type_name, handler_func, invalidator_func, cache
-        )
 
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:

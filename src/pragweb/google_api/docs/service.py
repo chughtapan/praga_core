@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from chonkie import RecursiveChunker
 
 from praga_core.agents import PaginatedResponse, tool
-from praga_core.types import Page, PageURI
+from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
@@ -38,24 +38,17 @@ class GoogleDocsService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        def validate_gdoc_header(page: Page) -> bool:
-            """Validate a Google Docs header page by checking if revision is current."""
-            try:
-                if not isinstance(page, GDocHeader):
-                    return False
-                result = self.api_client.check_file_revision(
-                    page.document_id, page.revision_id
-                )
-                return bool(result)
-            except Exception as e:
-                logger.warning(f"Failed to validate header {page.uri}: {e}")
-                return False
+        ctx = self.context
 
-        @self.context.handler("gdoc_header", invalidator=validate_gdoc_header, cache=True)
+        @ctx.route("gdoc_header", cache=True)
         def handle_gdoc_header(page_uri: PageURI) -> GDocHeader:
             return self.handle_header_request(page_uri)
 
-        @self.context.handler("gdoc_chunk", cache=True)
+        @ctx.validator
+        def validate_gdoc_header(page: GDocHeader) -> bool:
+            return self._validate_gdoc_header(page)
+
+        @ctx.route("gdoc_chunk", cache=True)
         def handle_gdoc_chunk(page_uri: PageURI) -> GDocChunk:
             return self.handle_chunk_request(page_uri)
 
@@ -63,7 +56,7 @@ class GoogleDocsService(ToolkitService):
         """Handle a Google Docs header page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
-        
+
         # Not in cache, ingest the document (ingest on touch)
         logger.info(f"Document {page_uri.id} not in cache, ingesting...")
         header_page = self._ingest_document(page_uri)
@@ -73,7 +66,7 @@ class GoogleDocsService(ToolkitService):
         """Handle a Google Docs chunk page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
-        
+
         page_cache = self.context.page_cache
 
         # Parse chunk_id to get document_id
@@ -97,6 +90,24 @@ class GoogleDocsService(ToolkitService):
             raise ValueError(f"Chunk {chunk_id} not found after ingestion")
 
         return cached_chunk
+
+    def _validate_gdoc_header(self, page: GDocHeader) -> bool:
+        """Validate that a GDocHeader page is still current by checking revision ID."""
+        try:
+            # Get latest revision ID from API
+            latest_revision_id = self.api_client.get_latest_revision_id(
+                page.document_id
+            )
+            if not latest_revision_id:
+                logger.warning(
+                    f"Could not get revision ID for document {page.document_id}"
+                )
+                return False
+            # Compare with stored revision ID
+            return bool(latest_revision_id == page.revision_id)
+        except Exception as e:
+            logger.warning(f"Failed to validate header {page.uri}: {e}")
+            return False
 
     def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
         """Ingest a document by fetching content, chunking, and storing in page cache."""
@@ -182,9 +193,9 @@ class GoogleDocsService(ToolkitService):
             # Create chunk page using same pattern as provided header URI
             chunk_uri = PageURI(
                 root=header_page_uri.root,
-                type="gdoc_chunk", 
+                type="gdoc_chunk",
                 id=chunk_id,
-                version=None  # Let the chunk handler create the version when needed
+                version=None,  # Let the chunk handler create the version when needed
             )
             chunk_page = GDocChunk(
                 uri=chunk_uri,

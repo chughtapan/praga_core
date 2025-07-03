@@ -30,12 +30,13 @@ class GmailService(ToolkitService):
 
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
+        ctx = self.context
 
-        @self.context.handler("email", cache=True)
+        @ctx.route("email", cache=True)
         def handle_email(page_uri: PageURI) -> EmailPage:
             return self.create_email_page(page_uri)
 
-        @self.context.handler("email_thread", cache=False)
+        @self.context.route("email_thread", cache=False)
         def handle_thread(page_uri: PageURI) -> EmailThreadPage:
             return self.create_thread_page(page_uri)
 

@@ -28,16 +28,16 @@ class CalendarService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler(self.name, cache=True)
+        @self.context.route(self.name, cache=True)
         def handle_event(page_uri: PageURI) -> CalendarEventPage:
             # Parse calendar_id from URI id if present, otherwise use default
             event_id = page_uri.id
             calendar_id = "primary"  # Default calendar
-            
+
             # If the id contains calendar info (e.g., "event_id@calendar_id"), parse it
             if "@" in event_id:
                 event_id, calendar_id = event_id.split("@", 1)
-            
+
             return self.create_page(page_uri, event_id, calendar_id)
 
     def create_page(
