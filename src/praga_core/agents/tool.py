@@ -71,9 +71,6 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
 # Now PaginatedResponse is defined, so we can reference it
 ToolFunction = Callable[..., Union[Sequence[Page], PaginatedResponse[Page]]]
 
-# Action tool function type - returns boolean for success/failure
-ActionToolFunction = Callable[..., bool]
-
 
 @dataclass
 class ToolMetadata:
@@ -340,76 +337,3 @@ class Tool:
             description += ")"
 
         return f"- {self.name}({params_str}): {description}"
-
-
-class ActionTool:
-    """Tool wrapper for ActionToolkit that returns boolean results."""
-
-    def __init__(
-        self,
-        func: ActionToolFunction,
-        name: str,
-        description: str = "",
-    ):
-        """Initialize the action tool wrapper.
-
-        Args:
-            func: The action function to wrap
-            name: Name of the tool
-            description: Description of the tool
-        """
-        self.func = func
-        self.name = name
-        self.description = description or func.__doc__ or ""
-        self.metadata = self._extract_metadata()
-
-    def _prepare_arguments(
-        self, raw_input: Union[str, Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Prepare the input arguments for tool execution."""
-        if isinstance(raw_input, str):
-            # If it's a string, assume it's for the first parameter
-            sig = inspect.signature(self.func)
-            param_names = list(sig.parameters.keys())
-            if param_names:
-                return {param_names[0]: raw_input}
-            return {}
-        return raw_input or {}
-
-    def _serialize_result(self, result: bool) -> Dict[str, Any]:
-        """Serialize the action result into a JSON-serializable format."""
-        return {"success": result}
-
-    def _extract_metadata(self) -> ToolMetadata:
-        """Extract metadata from the function signature."""
-        sig = inspect.signature(self.func)
-        return ToolMetadata(
-            name=self.name,
-            description=self.description,
-            parameters=dict(sig.parameters),
-            return_type=sig.return_annotation,
-        )
-
-    def invoke(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Invoke the action tool with the given input."""
-        kwargs = self._prepare_arguments(raw_input)
-        
-        try:
-            result = self.func(**kwargs)
-            return self._serialize_result(result)
-        except Exception as e:
-            # Return False if the action fails
-            return {"success": False, "error": str(e)}
-
-    def __str__(self) -> str:
-        """Return a string representation of the tool for debugging."""
-        sig = inspect.signature(self.func)
-        params = []
-        for name, param in sig.parameters.items():
-            if param.annotation != inspect.Parameter.empty:
-                params.append(f"{name}: {param.annotation.__name__}")
-            else:
-                params.append(name)
-
-        params_str = ", ".join(params)
-        return f"- {self.name}({params_str}): {self.description}"
