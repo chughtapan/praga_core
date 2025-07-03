@@ -39,59 +39,12 @@ class CalendarService(ToolkitService):
             if "@" in event_id:
                 event_id, calendar_id = event_id.split("@", 1)
 
-            return await self.create_page_async(page_uri, event_id, calendar_id)
+            return await self.create_page(page_uri, event_id, calendar_id)
 
-    def create_page(
+    async def create_page(
         self, page_uri: PageURI, event_id: str, calendar_id: str = "primary"
     ) -> CalendarEventPage:
-        """Create a CalendarEventPage from a Calendar event ID - matches old CalendarEventHandler.handle_event logic exactly."""
-        # 1. Fetch event from Calendar API using shared client
-        try:
-            event = self.api_client.get_event(event_id, calendar_id)
-        except Exception as e:
-            raise ValueError(f"Failed to fetch event {event_id}: {e}")
-
-        # 2. Extract basic fields
-        summary = event.get("summary", "")
-        description = event.get("description")
-        location = event.get("location")
-
-        # 3. Parse times (exact same as old handler)
-        start = event.get("start", {})
-        end = event.get("end", {})
-        start_time = datetime.fromisoformat(start.get("dateTime", start.get("date")))
-        end_time = datetime.fromisoformat(end.get("dateTime", end.get("date")))
-
-        # 4. Extract attendees (exact same as old handler)
-        attendees = [
-            a.get("email", "") for a in event.get("attendees", []) if a.get("email")
-        ]
-
-        # 5. Get organizer (exact same as old handler)
-        organizer = event.get("organizer", {}).get("email", "")
-
-        # 6. Create permalink (exact same as old handler)
-        permalink = f"https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
-
-        # 7. Use provided URI instead of creating a new one
-        return CalendarEventPage(
-            uri=page_uri,
-            event_id=event_id,
-            calendar_id=calendar_id,
-            summary=summary,
-            description=description,
-            location=location,
-            start_time=start_time,
-            end_time=end_time,
-            attendees=attendees,
-            organizer=organizer,
-            permalink=permalink,
-        )
-
-    async def create_page_async(
-        self, page_uri: PageURI, event_id: str, calendar_id: str = "primary"
-    ) -> CalendarEventPage:
-        """Create a CalendarEventPage from a Calendar event ID (async)."""
+        """Create a CalendarEventPage from a Calendar event ID."""
         # 1. Fetch event from Calendar API using shared client
         try:
             event = await self.api_client.get_event_async(event_id, calendar_id)
@@ -135,44 +88,13 @@ class CalendarService(ToolkitService):
             permalink=permalink,
         )
 
-    def search_events(
+    async def search_events(
         self,
         query_params: Dict[str, Any],
         page_token: Optional[str] = None,
         page_size: int = 20,
     ) -> Tuple[List[PageURI], Optional[str]]:
         """Search events and return list of PageURIs and next page token."""
-        try:
-            logger.debug(f"Searching events with query params: {query_params}")
-            events, next_page_token = self.api_client.search_events(
-                query_params, page_token=page_token, page_size=page_size
-            )
-
-            logger.debug(
-                f"Calendar API returned {len(events)} events, next_token: {bool(next_page_token)}"
-            )
-
-            # Convert to PageURIs
-            uris = [
-                self.context.create_page_uri(
-                    CalendarEventPage, "calendar_event", event["id"]
-                )
-                for event in events
-            ]
-
-            return uris, next_page_token
-
-        except Exception as e:
-            logger.error(f"Error searching events: {e}")
-            raise
-
-    async def search_events_async(
-        self,
-        query_params: Dict[str, Any],
-        page_token: Optional[str] = None,
-        page_size: int = 20,
-    ) -> Tuple[List[PageURI], Optional[str]]:
-        """Search events and return list of PageURIs and next page token (async)."""
         try:
             logger.debug(f"Searching events with query params: {query_params}")
             events, next_page_token = await self.api_client.search_events_async(
@@ -197,7 +119,7 @@ class CalendarService(ToolkitService):
             logger.error(f"Error searching events: {e}")
             raise
 
-    def _search_events_paginated_response(
+    async def _search_events_paginated_response(
         self,
         query_params: Dict[str, Any],
         cursor: Optional[str] = None,
@@ -205,34 +127,10 @@ class CalendarService(ToolkitService):
     ) -> PaginatedResponse[CalendarEventPage]:
         """Search events and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.search_events(query_params, cursor, page_size)
-
-        # Resolve URIs to pages using context - throw errors, don't fail silently
-        pages: List[CalendarEventPage] = []
-        for uri in uris:
-            page_obj = self.context.get_page(uri)
-            if not isinstance(page_obj, CalendarEventPage):
-                raise TypeError(f"Expected CalendarEventPage but got {type(page_obj)}")
-            pages.append(page_obj)
-        logger.debug(f"Successfully resolved {len(pages)} calendar pages")
-
-        return PaginatedResponse(
-            results=pages,
-            next_cursor=next_page_token,
-        )
-
-    async def _search_events_paginated_response_async(
-        self,
-        query_params: Dict[str, Any],
-        cursor: Optional[str] = None,
-        page_size: int = 10,
-    ) -> PaginatedResponse[CalendarEventPage]:
-        """Search events and return a paginated response (async)."""
-        # Get the page data using the cursor directly
-        uris, next_page_token = await self.search_events_async(query_params, cursor, page_size)
+        uris, next_page_token = await self.search_events(query_params, cursor, page_size)
 
         # Resolve URIs to pages using context async - throw errors, don't fail silently
-        pages = await self.context.get_pages_async(uris)
+        pages = await self.context.get_pages(uris)
         
         # Type check the results
         for page_obj in pages:

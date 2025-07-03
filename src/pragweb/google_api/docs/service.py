@@ -43,15 +43,15 @@ class GoogleDocsService(ToolkitService):
 
         @ctx.route("gdoc_header", cache=True)
         async def handle_gdoc_header(page_uri: PageURI) -> GDocHeader:
-            return await self.handle_header_request_async(page_uri)
+            return await self.handle_header_request(page_uri)
 
         @ctx.validator
         async def validate_gdoc_header(page: GDocHeader) -> bool:
-            return await self._validate_gdoc_header_async(page)
+            return await self._validate_gdoc_header(page)
 
         @ctx.route("gdoc_chunk", cache=True)
         async def handle_gdoc_chunk(page_uri: PageURI) -> GDocChunk:
-            return await self.handle_chunk_request_async(page_uri)
+            return await self.handle_chunk_request(page_uri)
 
     def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
         """Handle a Google Docs header page request - ingest if not exists."""
@@ -63,14 +63,14 @@ class GoogleDocsService(ToolkitService):
         header_page = self._ingest_document(page_uri)
         return header_page
 
-    async def handle_header_request_async(self, page_uri: PageURI) -> GDocHeader:
+    async def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
         """Handle a Google Docs header page request - ingest if not exists (async)."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
 
         # Not in cache, ingest the document (ingest on touch)
         logger.info(f"Document {page_uri.id} not in cache, ingesting...")
-        header_page = await self._ingest_document_async(page_uri)
+        header_page = await self._ingest_document(page_uri)
         return header_page
 
     def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
@@ -102,7 +102,7 @@ class GoogleDocsService(ToolkitService):
 
         return cached_chunk
 
-    async def handle_chunk_request_async(self, page_uri: PageURI) -> GDocChunk:
+    async def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
         """Handle a Google Docs chunk page request - ingest if not exists (async)."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
@@ -122,7 +122,7 @@ class GoogleDocsService(ToolkitService):
         )
         # Create a temporary header URI for ingestion
         header_uri = PageURI(root=page_uri.root, type="gdoc_header", id=document_id)
-        await self._ingest_document_async(header_uri)
+        await self._ingest_document(header_uri)
 
         # Now try to get the chunk again
         cached_chunk = page_cache.get(GDocChunk, page_uri)
@@ -149,7 +149,7 @@ class GoogleDocsService(ToolkitService):
             logger.warning(f"Failed to validate header {page.uri}: {e}")
             return False
 
-    async def _validate_gdoc_header_async(self, page: GDocHeader) -> bool:
+    async def _validate_gdoc_header(self, page: GDocHeader) -> bool:
         """Validate that a GDocHeader page is still current by checking revision ID (async)."""
         try:
             # Get latest revision ID from API
@@ -308,7 +308,7 @@ class GoogleDocsService(ToolkitService):
         )
         return header_page
 
-    async def _ingest_document_async(self, header_page_uri: PageURI) -> GDocHeader:
+    async def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
         """Ingest a document by fetching content, chunking, and storing in page cache (async)."""
         document_id = header_page_uri.id
         logger.info(f"Starting async ingestion for document: {document_id}")
@@ -519,7 +519,7 @@ class GoogleDocsService(ToolkitService):
             logger.error(f"Error searching documents: {e}")
             raise
 
-    async def search_documents_async(
+    async def search_documents(
         self,
         search_params: Dict[str, Any],
         page_token: Optional[str] = None,
@@ -528,7 +528,7 @@ class GoogleDocsService(ToolkitService):
         """Generic document search method that delegates to API client (async)."""
         try:
             # Delegate directly to API client
-            files, next_page_token = await self.api_client.search_documents_async(
+            files, next_page_token = await self.api_client.search_documents(
                 search_params=search_params,
                 page_token=page_token,
                 page_size=page_size,
@@ -605,7 +605,7 @@ class GoogleDocsService(ToolkitService):
 
         return result_chunks
 
-    async def search_chunks_in_document_async(
+    async def search_chunks_in_document(
         self, doc_header_uri: str, query: str
     ) -> List[GDocChunk]:
         """Search for chunks within a specific document using simple text matching (async)."""
@@ -620,7 +620,7 @@ class GoogleDocsService(ToolkitService):
 
         # Ensure document is ingested (ingest on touch)
         header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
-        await self.handle_header_request_async(header_uri)
+        await self.handle_header_request(header_uri)
 
         # Get all chunks for this document from page cache
         page_cache = self.context.page_cache
@@ -684,7 +684,7 @@ class GoogleDocsService(ToolkitService):
             next_cursor=next_page_token,
         )
 
-    async def _search_documents_paginated_response_async(
+    async def _search_documents_paginated_response(
         self,
         search_params: Dict[str, Any],
         cursor: Optional[str] = None,
@@ -692,10 +692,10 @@ class GoogleDocsService(ToolkitService):
     ) -> PaginatedResponse[GDocHeader]:
         """Search documents and return a paginated response (async)."""
         # Get the page data using the cursor directly
-        uris, next_page_token = await self.search_documents_async(search_params, cursor, page_size)
+        uris, next_page_token = await self.search_documents(search_params, cursor, page_size)
 
         # Resolve URIs to pages using context async (this will trigger ingestion if needed)
-        pages = await self.context.get_pages_async(uris)
+        pages = await self.context.get_pages(uris)
         
         # Type check the results
         for page_obj in pages:
@@ -719,7 +719,7 @@ class GoogleDocsService(ToolkitService):
             title_query: Search query for document titles
             cursor: Cursor token for pagination (optional)
         """
-        return await self._search_documents_paginated_response_async(
+        return await self._search_documents_paginated_response(
             {"title_query": title_query}, cursor=cursor
         )
 
@@ -733,7 +733,7 @@ class GoogleDocsService(ToolkitService):
             topic_query: Search query for document content/topics
             cursor: Cursor token for pagination (optional)
         """
-        return await self._search_documents_paginated_response_async(
+        return await self._search_documents_paginated_response(
             {"query": topic_query}, cursor=cursor
         )
 
@@ -749,7 +749,7 @@ class GoogleDocsService(ToolkitService):
         """
         # Resolve person identifier to email address if needed
         resolved_owner = resolve_person_identifier(owner_identifier)
-        return await self._search_documents_paginated_response_async(
+        return await self._search_documents_paginated_response(
             {"owner_email": resolved_owner}, cursor=cursor
         )
 
@@ -763,7 +763,7 @@ class GoogleDocsService(ToolkitService):
             days: Number of days to look back for recent modifications (default: 7)
             cursor: Cursor token for pagination (optional)
         """
-        return await self._search_documents_paginated_response_async({"days": days}, cursor=cursor)
+        return await self._search_documents_paginated_response({"days": days}, cursor=cursor)
 
     @tool()
     async def search_all_documents(
@@ -774,7 +774,7 @@ class GoogleDocsService(ToolkitService):
         Args:
             cursor: Cursor token for pagination (optional)
         """
-        return await self._search_documents_paginated_response_async({"query": ""}, cursor=cursor)
+        return await self._search_documents_paginated_response({"query": ""}, cursor=cursor)
 
     @tool()
     async def find_chunks_in_document(
@@ -787,7 +787,7 @@ class GoogleDocsService(ToolkitService):
             query: Search query to find within the document chunks
         """
         # Use the service's text matching search for chunks
-        matching_chunks = await self.search_chunks_in_document_async(doc_header_uri, query)
+        matching_chunks = await self.search_chunks_in_document(doc_header_uri, query)
 
         return PaginatedResponse(
             results=matching_chunks,
