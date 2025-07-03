@@ -12,6 +12,8 @@ HandlerFn = Callable[..., Page]
 AsyncHandlerFn = Callable[..., Awaitable[Page]]
 AnyHandlerFn = Union[HandlerFn, AsyncHandlerFn]
 
+__all__ = ["PageRouter", "HandlerFn", "AsyncHandlerFn", "AnyHandlerFn"]
+
 
 class PageRouter:
     def __init__(self, page_cache: PageCache) -> None:
