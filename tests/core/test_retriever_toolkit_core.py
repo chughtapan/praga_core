@@ -27,11 +27,11 @@ class TestRetrieverToolkitCore:
         assert hasattr(toolkit, "_tools")
         assert len(toolkit.tools) == 0
 
-    def test_tool_registration_with_method(self) -> None:
+    async def test_tool_registration_with_method(self) -> None:
         """Test registering a method as a tool."""
         toolkit = MockRetrieverToolkit()
 
-        def test_method(query: str) -> List[SimpleTestPage]:
+        async def test_method(query: str) -> List[SimpleTestPage]:
             return create_test_pages(3, query)
 
         toolkit.register_tool(test_method, "test_tool")
@@ -39,10 +39,12 @@ class TestRetrieverToolkitCore:
         assert "test_tool" in toolkit.tools
         assert isinstance(toolkit.get_tool("test_tool"), Tool)
 
-    def test_tool_registration_with_function(self) -> None:
+    async def test_tool_registration_with_function(self) -> None:
         """Test registering a standalone function as a tool."""
 
-        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestPage]:
+        async def standalone_function(
+            query: str, limit: int = 5
+        ) -> List[SimpleTestPage]:
             return create_test_pages(limit, query)
 
         toolkit = MockRetrieverToolkit()
@@ -114,29 +116,31 @@ class TestRetrieverToolkitCore:
         assert isinstance(tools["tool1"], Tool)
         assert isinstance(tools["tool2"], Tool)
 
-    def test_invoke_tool_basic(self) -> None:
+    async def test_invoke_tool_basic(self) -> None:
         """Test basic tool invocation through invoke_tool method."""
         toolkit = MockRetrieverToolkit()
 
-        def simple_tool(query: str) -> List[SimpleTestPage]:
+        async def simple_tool(query: str) -> List[SimpleTestPage]:
             return create_test_pages(2, query)
 
         toolkit.register_tool(simple_tool, "simple_tool")
-        result = toolkit.invoke_tool("simple_tool", "test_query")
+        result = await toolkit.invoke_tool("simple_tool", "test_query")
 
         assert "results" in result
         assert len(result["results"]) == 2
         assert "test_query" in result["results"][0]["title"]
 
-    def test_invoke_tool_with_dict_args(self) -> None:
+    async def test_invoke_tool_with_dict_args(self) -> None:
         """Test tool invocation with dictionary arguments."""
         toolkit = MockRetrieverToolkit()
 
-        def parameterized_tool(query: str, limit: int = 5) -> List[SimpleTestPage]:
+        async def parameterized_tool(
+            query: str, limit: int = 5
+        ) -> List[SimpleTestPage]:
             return create_test_pages(limit, query)
 
         toolkit.register_tool(parameterized_tool, "param_tool")
-        result = toolkit.invoke_tool("param_tool", {"query": "test", "limit": 3})
+        result = await toolkit.invoke_tool("param_tool", {"query": "test", "limit": 3})
 
         assert len(result["results"]) == 3
 
@@ -245,9 +249,9 @@ class TestRetrieverToolkitDecorator:
             def name(self) -> str:
                 return "DerivedToolkit"
 
-        @DerivedToolkit.tool()
-        def derived_tool() -> List[SimpleTestPage]:
-            return create_test_pages(1, "derived")
+            @tool()
+            def derived_tool() -> List[SimpleTestPage]:
+                return create_test_pages(1, "derived")
 
         # Note: Current implementation shares decorated tools across classes
         # This test verifies the actual behavior

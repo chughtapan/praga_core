@@ -1,6 +1,5 @@
 """Gmail service for handling Gmail API interactions and page creation."""
 
-import asyncio
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -82,7 +81,7 @@ class GmailService(ToolkitService):
         email_id = page_uri.id
         # Fetch message from Gmail API
         try:
-            message = await self.api_client.get_message_async(email_id)
+            message = await self.api_client.get_message(email_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch email {email_id}: {e}")
 
@@ -111,7 +110,7 @@ class GmailService(ToolkitService):
         """Create an EmailThreadPage from a Gmail thread ID."""
         thread_id = page_uri.id
         try:
-            thread_data = await self.api_client.get_thread_async(thread_id)
+            thread_data = await self.api_client.get_thread(thread_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch thread {thread_id}: {e}")
 
@@ -168,7 +167,7 @@ class GmailService(ToolkitService):
     ) -> Tuple[List[PageURI], Optional[str]]:
         """Search emails and return list of PageURIs and next page token."""
         try:
-            messages, next_page_token = await self.api_client.search_messages_async(
+            messages, next_page_token = await self.api_client.search_messages(
                 query, page_token=page_token, page_size=page_size
             )
 
@@ -200,12 +199,12 @@ class GmailService(ToolkitService):
 
         # Resolve URIs to pages using context async - throw errors, don't fail silently
         pages = await self.context.get_pages(uris)
-        
+
         # Type check the results
         for page_obj in pages:
             if not isinstance(page_obj, EmailPage):
                 raise TypeError(f"Expected EmailPage but got {type(page_obj)}")
-        
+
         logger.debug(f"Successfully resolved {len(pages)} email pages")
 
         return PaginatedResponse(

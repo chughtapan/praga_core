@@ -1,8 +1,17 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Awaitable, Callable, Dict, List, Optional, Type, TypeVar, Union, get_type_hints
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Type,
+    TypeVar,
+    get_type_hints,
+)
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
@@ -48,7 +57,9 @@ class ServerContext:
         """
         return self._router.route(path, cache)
 
-    def validator(self, func: Callable[[P], Awaitable[bool]]) -> Callable[[P], Awaitable[bool]]:
+    def validator(
+        self, func: Callable[[P], Awaitable[bool]]
+    ) -> Callable[[P], Awaitable[bool]]:
         """Decorator to register an async page validator.
 
         All validators must be async:
@@ -130,9 +141,11 @@ class ServerContext:
             page_uri = PageURI.parse(page_uri)
         return await self._router.get_page(page_uri)
 
-    async def get_pages(self, page_uris: List[str | PageURI]) -> List[Page]:
+    async def get_pages(self, page_uris: Sequence[str | PageURI]) -> List[Page]:
         """Bulk asynchronous page retrieval with parallel execution."""
-        parsed_uris = [PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris]
+        parsed_uris = [
+            PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris
+        ]
         return await self._router.get_pages(parsed_uris)
 
     async def search(
@@ -149,12 +162,12 @@ class ServerContext:
                 "No RetrieverAgent available. Either set context.retriever or pass retriever parameter."
             )
 
-        results = self._search(instruction, active_retriever)
+        results = await self._search(instruction, active_retriever)
         if resolve_references:
             results = await self._resolve_references(results)
         return SearchResponse(results=results)
 
-    def _search(
+    async def _search(
         self, instruction: str, retriever: RetrieverAgentBase
     ) -> List[PageReference]:
         """Search for pages using the provided retriever.
@@ -166,9 +179,12 @@ class ServerContext:
         Returns:
             List[PageReference]: List of page references matching the search
         """
-        return retriever.search(instruction)
+        results = await retriever.search(instruction)
+        return results
 
-    async def _resolve_references(self, results: List[PageReference]) -> List[PageReference]:
+    async def _resolve_references(
+        self, results: List[PageReference]
+    ) -> List[PageReference]:
         """Resolve references to pages by calling get_page."""
         for ref in results:
             ref.page = await self.get_page(ref.uri)

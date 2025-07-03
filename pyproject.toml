@@ -21,6 +21,7 @@ dependencies = [
     "openai>=1.0.0",
     "fastmcp>=2.8.1",
     "sqlalchemy[mypy]>=2.0.41",
+    "pytest-asyncio>=1.0.0",
 ]
 
 [build-system]

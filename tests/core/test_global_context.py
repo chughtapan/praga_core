@@ -27,9 +27,9 @@ class MockService(ContextMixin):
         uri = self.context.create_page_uri(TestPage, "test", page_id)
         return TestPage(uri=uri, title=f"Test {page_id}", content="Test content")
 
-    def get_page_from_context(self, uri: str) -> Page:
+    async def get_page_from_context(self, uri: str) -> Page:
         """Get a page using global context."""
-        return self.context.get_page(uri)
+        return await self.context.get_page(uri)
 
 
 def test_global_context_basic():
@@ -54,7 +54,8 @@ def test_global_context_basic():
     clear_global_context()
 
 
-def test_context_mixin():
+@pytest.mark.asyncio
+async def test_context_mixin():
     """Test ContextMixin functionality."""
     clear_global_context()
 
@@ -69,7 +70,7 @@ def test_context_mixin():
 
     # Register handler
     @context.route("test")
-    def handle_test_page(page_uri: PageURI) -> TestPage:
+    async def handle_test_page(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
@@ -83,7 +84,7 @@ def test_context_mixin():
     assert page.uri.id == "123"
 
     # Service can get pages
-    retrieved_page = service.get_page_from_context(str(page.uri))
+    retrieved_page = await service.get_page_from_context(str(page.uri))
     assert retrieved_page.title == "Test 123"
 
     clear_global_context()
@@ -134,7 +135,8 @@ def test_context_set_twice_error():
     clear_global_context()
 
 
-def test_multiple_services_same_context():
+@pytest.mark.asyncio
+async def test_multiple_services_same_context():
     """Test multiple services using the same global context."""
     clear_global_context()
 
@@ -144,13 +146,13 @@ def test_multiple_services_same_context():
 
     # Register handlers for both types
     @context.route("shared")
-    def handle_shared(page_uri: PageURI) -> TestPage:
+    async def handle_shared(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content"
         )
 
     @context.route("test")
-    def handle_test(page_uri: PageURI) -> TestPage:
+    async def handle_test(page_uri: PageURI) -> TestPage:
         return TestPage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
@@ -168,9 +170,8 @@ def test_multiple_services_same_context():
     page2 = service2.create_test_page("from_service2")
 
     # Both should be accessible from either service
-    retrieved1 = service2.get_page_from_context(str(page1.uri))
-    retrieved2 = service1.get_page_from_context(str(page2.uri))
-
+    retrieved1 = await service2.get_page_from_context(str(page1.uri))
+    retrieved2 = await service1.get_page_from_context(str(page2.uri))
     assert retrieved1.title == "Test from_service1"
     assert retrieved2.title == "Test from_service2"
 

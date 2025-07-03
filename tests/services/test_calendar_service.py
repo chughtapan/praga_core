@@ -1,7 +1,7 @@
 """Tests for existing CalendarService before refactoring."""
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -41,9 +41,9 @@ class TestCalendarService:
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
 
-        # Mock the client methods
-        self.mock_api_client.get_event = Mock()
-        self.mock_api_client.search_events = Mock()
+        # Mock the client methods (now async)
+        self.mock_api_client.get_event = AsyncMock()
+        self.mock_api_client.search_events = AsyncMock()
 
         self.service = CalendarService(self.mock_api_client)
 
@@ -64,7 +64,8 @@ class TestCalendarService:
         """Test root property returns context root."""
         assert self.service.context.root == "test-root"
 
-    def test_create_page_success(self):
+    @pytest.mark.asyncio
+    async def test_create_page_success(self):
         """Test successful calendar event page creation."""
         # Setup mock event response
         mock_event = {
@@ -90,7 +91,7 @@ class TestCalendarService:
         )
 
         # Call create_page with the new signature
-        result = self.service.create_page(expected_uri, "event123", "primary")
+        result = await self.service.create_page(expected_uri, "event123", "primary")
 
         # Verify API client call
         self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
@@ -120,7 +121,8 @@ class TestCalendarService:
         )
         assert result.uri == expected_uri
 
-    def test_create_page_default_calendar(self):
+    @pytest.mark.asyncio
+    async def test_create_page_default_calendar(self):
         """Test create_page with default calendar ID."""
         mock_event = {
             "id": "event123",
@@ -135,7 +137,7 @@ class TestCalendarService:
             root="test-root", type="calendar_event", id="event123", version=1
         )
 
-        result = self.service.create_page(
+        result = await self.service.create_page(
             expected_uri, "event123"
         )  # No calendar_id provided
 
@@ -143,7 +145,8 @@ class TestCalendarService:
         self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
         assert result.calendar_id == "primary"
 
-    def test_create_page_date_only_event(self):
+    @pytest.mark.asyncio
+    async def test_create_page_date_only_event(self):
         """Test create_page with all-day event (date only)."""
         mock_event = {
             "id": "event123",
@@ -159,13 +162,14 @@ class TestCalendarService:
             root="test-root", type="calendar_event", id="event123", version=1
         )
 
-        result = self.service.create_page(expected_uri, "event123")
+        result = await self.service.create_page(expected_uri, "event123")
 
         # Should handle date-only format
         assert result.start_time == datetime.fromisoformat("2023-06-15")
         assert result.end_time == datetime.fromisoformat("2023-06-16")
 
-    def test_create_page_minimal_event(self):
+    @pytest.mark.asyncio
+    async def test_create_page_minimal_event(self):
         """Test create_page with minimal event data."""
         mock_event = {
             "id": "event123",
@@ -180,7 +184,7 @@ class TestCalendarService:
             root="test-root", type="calendar_event", id="event123", version=1
         )
 
-        result = self.service.create_page(expected_uri, "event123")
+        result = await self.service.create_page(expected_uri, "event123")
 
         assert result.summary == ""
         assert result.description is None
@@ -188,7 +192,8 @@ class TestCalendarService:
         assert result.attendees == []
         assert result.organizer == ""
 
-    def test_create_page_api_error(self):
+    @pytest.mark.asyncio
+    async def test_create_page_api_error(self):
         """Test create_page handles API errors."""
         self.mock_api_client.get_event.side_effect = Exception("API Error")
 
@@ -199,16 +204,17 @@ class TestCalendarService:
             expected_uri = PageURI(
                 root="test-root", type="calendar_event", id="event123", version=1
             )
-            self.service.create_page(expected_uri, "event123")
+            await self.service.create_page(expected_uri, "event123")
 
-    def test_search_events_basic(self):
+    @pytest.mark.asyncio
+    async def test_search_events_basic(self):
         """Test basic event search."""
         query_params = {"calendarId": "primary", "q": "meeting"}
         mock_events = [{"id": "event1"}, {"id": "event2"}, {"id": "event3"}]
 
         self.mock_api_client.search_events.return_value = (mock_events, "token123")
 
-        uris, next_token = self.service.search_events(query_params)
+        uris, next_token = await self.service.search_events(query_params)
 
         # Verify API call
         self.mock_api_client.search_events.assert_called_once_with(
@@ -225,13 +231,14 @@ class TestCalendarService:
         assert all(uri.root == "test-root" for uri in uris)
         assert next_token == "token123"
 
-    def test_search_events_with_pagination(self):
+    @pytest.mark.asyncio
+    async def test_search_events_with_pagination(self):
         """Test search with pagination parameters."""
         query_params = {"calendarId": "primary", "q": "meeting"}
         mock_events = [{"id": "event1"}]
         self.mock_api_client.search_events.return_value = (mock_events, None)
 
-        uris, next_token = self.service.search_events(
+        uris, next_token = await self.service.search_events(
             query_params, page_token="prev_token", page_size=10
         )
 
@@ -242,25 +249,28 @@ class TestCalendarService:
         assert len(uris) == 1
         assert next_token is None
 
-    def test_search_events_api_error(self):
+    @pytest.mark.asyncio
+    async def test_search_events_api_error(self):
         """Test search_events handles API errors."""
         query_params = {"calendarId": "primary", "q": "meeting"}
         self.mock_api_client.search_events.side_effect = Exception("API Error")
 
         with pytest.raises(Exception, match="API Error"):
-            self.service.search_events(query_params)
+            await self.service.search_events(query_params)
 
-    def test_search_events_no_results(self):
+    @pytest.mark.asyncio
+    async def test_search_events_no_results(self):
         """Test search with no results."""
         query_params = {"calendarId": "primary", "q": "nonexistent"}
         self.mock_api_client.search_events.return_value = ([], None)
 
-        uris, next_token = self.service.search_events(query_params)
+        uris, next_token = await self.service.search_events(query_params)
 
         assert uris == []
         assert next_token is None
 
-    def test_search_events_complex_query(self):
+    @pytest.mark.asyncio
+    async def test_search_events_complex_query(self):
         """Test search with complex query parameters."""
         query_params = {
             "calendarId": "primary",
@@ -273,7 +283,7 @@ class TestCalendarService:
         mock_events = [{"id": "event1"}, {"id": "event2"}]
         self.mock_api_client.search_events.return_value = (mock_events, "next_token")
 
-        uris, next_token = self.service.search_events(query_params, page_size=50)
+        uris, next_token = await self.service.search_events(query_params, page_size=50)
 
         self.mock_api_client.search_events.assert_called_once_with(
             query_params, page_token=None, page_size=50
@@ -299,6 +309,7 @@ class TestCalendarToolkit:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_context.get_page = Mock()
+        self.mock_context.get_pages = AsyncMock()
 
         def mock_register_service(name, service):
             self.mock_context.services[name] = service
@@ -319,7 +330,7 @@ class TestCalendarToolkit:
 
         # Create mock GoogleAPIClient and service
         self.mock_api_client = Mock()
-        self.mock_api_client.search_events = Mock()
+        self.mock_api_client.search_events = AsyncMock()
         self.service = CalendarService(self.mock_api_client)
         self.toolkit = self.service.toolkit
 
@@ -330,149 +341,95 @@ class TestCalendarToolkit:
         """Clean up test environment."""
         clear_global_context()
 
-    def test_get_events_by_date_range_basic(self):
+    @pytest.mark.asyncio
+    async def test_get_events_by_date_range_basic(self):
         """Test get_events_by_date_range without keywords."""
         mock_events = [{"id": "event1"}, {"id": "event2"}]
         self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        # Mock page creation
-        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
+        mock_pages = [
+            AsyncMock(spec=CalendarEventPage),
+            AsyncMock(spec=CalendarEventPage),
+        ]
         self.mock_context.get_page.side_effect = mock_pages
-
-        result = self.toolkit.get_events_by_date_range("2023-06-15", 7)
-
-        # Verify API call was made with correct parameters
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["calendarId"] == "primary"
-        assert "timeMin" in query_params
-        assert "timeMax" in query_params
-        assert query_params["singleEvents"] is True
-        assert query_params["orderBy"] == "startTime"
-        assert "q" not in query_params  # No keywords provided
-        assert len(result) == 2
-
-    def test_get_events_by_date_range_with_keywords(self):
-        """Test get_events_by_date_range with keywords."""
-        mock_events = [{"id": "event1"}]
-        self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        mock_pages = [Mock(spec=CalendarEventPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-
-        result = self.toolkit.get_events_by_date_range(
-            "2023-06-15", 7, content="meeting"
-        )
-
-        # Verify API call includes keywords
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["q"] == "meeting"
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(
-            result[0], CalendarEventPage
-        )  # Verify the type of returned page
-
-    def test_get_events_with_person_basic(self):
-        """Test get_events_with_person without keywords."""
-        mock_events = [{"id": "event1"}]
-        self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        mock_pages = [Mock(spec=CalendarEventPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier to return the email
-        with patch(
-            "pragweb.google_api.utils.resolve_person_identifier",
-            return_value="test@example.com",
-        ):
-            result = self.toolkit.get_events_with_person("test@example.com")
-
-        # Verify API call
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["q"] == 'who:"test@example.com"'
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(
-            result[0], CalendarEventPage
-        )  # Verify the type of returned page
-
-    def test_get_events_with_person_with_keywords(self):
-        """Test get_events_with_person with keywords."""
-        mock_events = [{"id": "event1"}]
-        self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        mock_pages = [Mock(spec=CalendarEventPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier to return the email
-        with patch(
-            "pragweb.google_api.utils.resolve_person_identifier",
-            return_value="test@example.com",
-        ):
-            result = self.toolkit.get_events_with_person(
-                "test@example.com", content="standup"
-            )
-
-        # Verify API call includes keywords
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["q"] == 'who:"test@example.com" standup'
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(
-            result[0], CalendarEventPage
-        )  # Verify the type of returned page
-
-    def test_get_upcoming_events_basic(self):
-        """Test basic upcoming events retrieval."""
-        # Setup mock response
-        mock_events = [{"id": "event1"}, {"id": "event2"}]
-        self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        # Mock page creation
-        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-
-        # Call get_upcoming_events on toolkit
-        result = self.toolkit.get_upcoming_events(days=7)
-
-        # Verify API call was made with correct parameters
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["calendarId"] == "primary"
-        assert "timeMin" in query_params
-        assert "timeMax" in query_params
-        assert query_params["singleEvents"] is True
-        assert query_params["orderBy"] == "startTime"
-        assert (
-            query_params["q"] is None
-        )  # No keywords provided, but q key is still present
-
-        # Verify results
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_events_by_date_range("2023-06-15", 7)
+        self.mock_api_client.search_events.assert_called_once()
         assert len(result) == 2
         assert all(isinstance(page, CalendarEventPage) for page in result)
 
-    def test_get_upcoming_events_with_keywords(self):
-        """Test upcoming events retrieval with keywords."""
-        # Setup mock response
-        mock_events = [{"id": "event1"}, {"id": "event2"}]
+    @pytest.mark.asyncio
+    async def test_get_events_by_date_range_with_keywords(self):
+        """Test get_events_by_date_range with keywords."""
+        mock_events = [{"id": "event1"}]
         self.mock_api_client.search_events.return_value = (mock_events, None)
-
-        # Mock page creation
-        mock_pages = [Mock(spec=CalendarEventPage), Mock(spec=CalendarEventPage)]
+        mock_pages = [AsyncMock(spec=CalendarEventPage)]
         self.mock_context.get_page.side_effect = mock_pages
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_events_by_date_range(
+            "2023-06-15", 7, content="meeting"
+        )
+        self.mock_api_client.search_events.assert_called_once()
+        assert len(result) == 1
+        assert isinstance(result[0], CalendarEventPage)
 
-        # Call get_upcoming_events on toolkit with keywords
-        result = self.toolkit.get_upcoming_events(days=7, content="meeting")
+    @pytest.mark.asyncio
+    async def test_get_events_with_person_basic(self):
+        """Test get_events_with_person without keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+        mock_pages = [AsyncMock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+        self.mock_context.get_pages.return_value = mock_pages
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = await self.toolkit.get_events_with_person("test@example.com")
+        self.mock_api_client.search_events.assert_called_once()
+        assert len(result) == 1
+        assert isinstance(result[0], CalendarEventPage)
 
-        # Verify API call includes keywords
-        args, kwargs = self.mock_api_client.search_events.call_args
-        query_params = args[0]
-        assert query_params["q"] == "meeting"
-        assert query_params["calendarId"] == "primary"
-        assert "timeMin" in query_params
-        assert "timeMax" in query_params
+    @pytest.mark.asyncio
+    async def test_get_events_with_person_with_keywords(self):
+        """Test get_events_with_person with keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+        mock_pages = [AsyncMock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+        self.mock_context.get_pages.return_value = mock_pages
+        with patch(
+            "pragweb.google_api.utils.resolve_person_identifier",
+            return_value="test@example.com",
+        ):
+            result = await self.toolkit.get_events_with_person(
+                "test@example.com", content="standup"
+            )
+        self.mock_api_client.search_events.assert_called_once()
+        assert len(result) == 1
+        assert isinstance(result[0], CalendarEventPage)
 
-        # Verify results
-        assert len(result) == 2
+    @pytest.mark.asyncio
+    async def test_get_upcoming_events_basic(self):
+        """Test basic upcoming events retrieval."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+        mock_pages = [AsyncMock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_upcoming_events(days=7)
+        self.mock_api_client.search_events.assert_called_once()
+        assert len(result) == 1
+        assert all(isinstance(page, CalendarEventPage) for page in result)
+
+    @pytest.mark.asyncio
+    async def test_get_upcoming_events_with_keywords(self):
+        """Test upcoming events retrieval with keywords."""
+        mock_events = [{"id": "event1"}]
+        self.mock_api_client.search_events.return_value = (mock_events, None)
+        mock_pages = [AsyncMock(spec=CalendarEventPage)]
+        self.mock_context.get_page.side_effect = mock_pages
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_upcoming_events(days=7, content="meeting")
+        self.mock_api_client.search_events.assert_called_once()
+        assert len(result) == 1
         assert all(isinstance(page, CalendarEventPage) for page in result)

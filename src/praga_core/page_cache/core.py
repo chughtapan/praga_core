@@ -1,7 +1,17 @@
 """Simplified PageCache implementation with clear separation of concerns."""
 
 import logging
-from typing import Any, Awaitable, Callable, Generic, List, Optional, Type, TypeVar, Union, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    cast,
+)
 
 from sqlalchemy import Table, create_engine
 from sqlalchemy.engine import Engine
@@ -209,25 +219,22 @@ class QueryBuilder(Generic[P]):
         self._filters.append(condition)
         return self
 
-    def all(self) -> List[P]:
-        """Execute query and return all matching valid pages."""
+    async def all(self) -> List[P]:
+        """Execute query and return all matching valid pages (async validation)."""
         pages = self._query_engine.find(self._page_type, self._filters)
         valid_pages: List[P] = []
-
         for page in pages:
-            if self._validator.is_valid(page):
+            if await self._validator.is_valid(page):
                 valid_pages.append(page)
             else:
-                # Automatically invalidate pages that fail validation
                 self._storage.mark_invalid(page.uri)
-
         return valid_pages
 
-    def first(self) -> Optional[P]:
-        """Execute query and return first matching valid page."""
-        results = self.all()
+    async def first(self) -> Optional[P]:
+        """Execute query and return first matching valid page (async validation)."""
+        results = await self.all()
         return results[0] if results else None
 
-    def count(self) -> int:
-        """Count matching valid pages."""
-        return len(self.all())
+    async def count(self) -> int:
+        """Count matching valid pages (async validation)."""
+        return len(await self.all())

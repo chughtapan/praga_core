@@ -1,7 +1,7 @@
 """Tests for existing GmailService before refactoring."""
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -46,10 +46,10 @@ class TestGmailService:
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
 
-        # Mock the client methods
-        self.mock_api_client.get_message = Mock()
-        self.mock_api_client.search_messages = Mock()
-        self.mock_api_client.get_thread = Mock()
+        # Mock the client methods (now async)
+        self.mock_api_client.get_message = AsyncMock()
+        self.mock_api_client.search_messages = AsyncMock()
+        self.mock_api_client.get_thread = AsyncMock()
 
         self.service = GmailService(self.mock_api_client)
 
@@ -82,7 +82,8 @@ class TestGmailService:
         """Test root property returns context root."""
         assert self.service.context.root == "test-root"
 
-    def test_create_email_page_success(self):
+    @pytest.mark.asyncio
+    async def test_create_email_page_success(self):
         """Test successful email page creation."""
         # Setup mock message response
         mock_message = {
@@ -110,7 +111,7 @@ class TestGmailService:
 
         # Call create_email_page
         expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
-        result = self.service.create_email_page(expected_uri)
+        result = await self.service.create_email_page(expected_uri)
 
         # Verify API client call
         self.mock_api_client.get_message.assert_called_once_with("msg123")
@@ -130,7 +131,8 @@ class TestGmailService:
         expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
         assert result.uri == expected_uri
 
-    def test_email_page_thread_uri_property(self):
+    @pytest.mark.asyncio
+    async def test_email_page_thread_uri_property(self):
         """Test that EmailPage has thread_uri property that links to thread page."""
         # Setup mock message response with all required fields
         mock_message = {
@@ -151,7 +153,7 @@ class TestGmailService:
 
         # Create email page
         expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
-        email_page = self.service.create_email_page(expected_uri)
+        email_page = await self.service.create_email_page(expected_uri)
 
         # Test thread_uri property
         thread_uri = email_page.thread_uri
@@ -161,7 +163,8 @@ class TestGmailService:
         assert thread_uri.id == "thread456"
         assert thread_uri.version == 1
 
-    def test_create_thread_page_success(self):
+    @pytest.mark.asyncio
+    async def test_create_thread_page_success(self):
         """Test successful thread page creation."""
         # Setup mock thread response with multiple messages
         mock_thread = {
@@ -222,7 +225,7 @@ class TestGmailService:
         expected_uri = PageURI(
             root="test-root", type="email_thread", id="thread456", version=1
         )
-        result = self.service.create_thread_page(expected_uri)
+        result = await self.service.create_thread_page(expected_uri)
 
         # Verify API client call
         self.mock_api_client.get_thread.assert_called_once_with("thread456")
@@ -254,7 +257,8 @@ class TestGmailService:
         )
         assert result.uri == expected_uri
 
-    def test_create_thread_page_api_error(self):
+    @pytest.mark.asyncio
+    async def test_create_thread_page_api_error(self):
         """Test create_thread_page handles API errors."""
         self.mock_api_client.get_thread.side_effect = Exception("API Error")
 
@@ -264,9 +268,10 @@ class TestGmailService:
             expected_uri = PageURI(
                 root="test-root", type="email_thread", id="thread456", version=1
             )
-            self.service.create_thread_page(expected_uri)
+            await self.service.create_thread_page(expected_uri)
 
-    def test_create_thread_page_empty_thread(self):
+    @pytest.mark.asyncio
+    async def test_create_thread_page_empty_thread(self):
         """Test create_thread_page handles thread with no messages."""
         mock_thread = {"id": "thread456", "messages": []}
         self.mock_api_client.get_thread.return_value = mock_thread
@@ -275,9 +280,10 @@ class TestGmailService:
             expected_uri = PageURI(
                 root="test-root", type="email_thread", id="thread456", version=1
             )
-            self.service.create_thread_page(expected_uri)
+            await self.service.create_thread_page(expected_uri)
 
-    def test_create_thread_page_minimal_headers(self):
+    @pytest.mark.asyncio
+    async def test_create_thread_page_minimal_headers(self):
         """Test create_thread_page with minimal headers."""
         mock_thread = {
             "id": "thread456",
@@ -305,7 +311,7 @@ class TestGmailService:
         expected_uri = PageURI(
             root="test-root", type="email_thread", id="thread456", version=1
         )
-        result = self.service.create_thread_page(expected_uri)
+        result = await self.service.create_thread_page(expected_uri)
 
         assert isinstance(result, EmailThreadPage)
         assert result.thread_id == "thread456"
@@ -318,7 +324,8 @@ class TestGmailService:
             root="test-root", type="email", id="msg1", version=1
         )
 
-    def test_create_email_page_minimal_headers(self):
+    @pytest.mark.asyncio
+    async def test_create_email_page_minimal_headers(self):
         """Test email page creation with minimal headers."""
         # Setup mock message response with minimal headers
         mock_message = {
@@ -338,7 +345,7 @@ class TestGmailService:
         self.service.parser.extract_body = Mock(return_value="Test body")
 
         expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
-        result = self.service.create_email_page(expected_uri)
+        result = await self.service.create_email_page(expected_uri)
 
         assert isinstance(result, EmailPage)
         assert result.message_id == "msg123"
@@ -351,7 +358,8 @@ class TestGmailService:
             root="test-root", type="email", id="msg123", version=1
         )
 
-    def test_create_email_page_missing_thread_id(self):
+    @pytest.mark.asyncio
+    async def test_create_email_page_missing_thread_id(self):
         """Test email page creation with missing thread ID."""
         # Setup mock message response with missing thread ID
         mock_message = {
@@ -370,7 +378,7 @@ class TestGmailService:
         self.service.parser.extract_body = Mock(return_value="Test body")
 
         expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
-        result = self.service.create_email_page(expected_uri)
+        result = await self.service.create_email_page(expected_uri)
 
         assert isinstance(result, EmailPage)
         assert result.message_id == "msg123"
@@ -383,7 +391,8 @@ class TestGmailService:
             root="test-root", type="email", id="msg123", version=1
         )
 
-    def test_search_emails_basic(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_basic(self):
         """Test basic email search functionality."""
         # Setup mock search response
         mock_messages = [
@@ -393,7 +402,7 @@ class TestGmailService:
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
 
         # Call search_emails
-        uris, next_token = self.service.search_emails("test query")
+        uris, next_token = await self.service.search_emails("test query")
 
         # Verify API client call
         self.mock_api_client.search_messages.assert_called_once_with(
@@ -407,22 +416,24 @@ class TestGmailService:
         assert uris[1].id == "msg2"
         assert next_token is None
 
-    def test_search_emails_with_inbox_filter(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_with_inbox_filter(self):
         """Test search passes query through to API client."""
         self.mock_api_client.search_messages.return_value = ([], None)
 
-        self.service.search_emails("in:sent test query")
+        await self.service.search_emails("in:sent test query")
 
         self.mock_api_client.search_messages.assert_called_once_with(
             "in:sent test query", page_token=None, page_size=20
         )
 
-    def test_search_emails_with_pagination(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_with_pagination(self):
         """Test search with pagination parameters."""
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
 
-        uris, next_token = self.service.search_emails(
+        uris, next_token = await self.service.search_emails(
             "test", page_token="prev_token", page_size=10
         )
 
@@ -433,28 +444,31 @@ class TestGmailService:
         assert len(uris) == 1
         assert next_token is None
 
-    def test_search_emails_empty_query(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_empty_query(self):
         """Test search with empty query."""
         self.mock_api_client.search_messages.return_value = ([], None)
 
-        self.service.search_emails("")
+        await self.service.search_emails("")
 
         self.mock_api_client.search_messages.assert_called_once_with(
             "", page_token=None, page_size=20
         )
 
-    def test_search_emails_api_error(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_api_error(self):
         """Test search_emails handles API errors."""
         self.mock_api_client.search_messages.side_effect = Exception("Search API Error")
 
         with pytest.raises(Exception, match="Search API Error"):
-            self.service.search_emails("test query")
+            await self.service.search_emails("test query")
 
-    def test_search_emails_no_results(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_no_results(self):
         """Test search with no results."""
         self.mock_api_client.search_messages.return_value = ([], None)
 
-        uris, next_token = self.service.search_emails("no results query")
+        uris, next_token = await self.service.search_emails("no results query")
 
         assert uris == []
         assert next_token is None
@@ -752,15 +766,16 @@ class TestEmailThreadPageIntegration:
 
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
-        self.mock_api_client.get_thread = Mock()
-        self.mock_api_client.get_message = Mock()
+        self.mock_api_client.get_thread = AsyncMock()
+        self.mock_api_client.get_message = AsyncMock()
         self.service = GmailService(self.mock_api_client)
 
     def teardown_method(self):
         """Clean up test environment."""
         clear_global_context()
 
-    def test_email_page_thread_uri_matches_thread_page_uri(self):
+    @pytest.mark.asyncio
+    async def test_email_page_thread_uri_matches_thread_page_uri(self):
         """Test that EmailPage.thread_uri matches EmailThreadPage.uri for the same thread."""
         # Setup mock message response
         mock_message = {
@@ -791,8 +806,8 @@ class TestEmailThreadPageIntegration:
         thread_uri = PageURI(
             root="test-root", type="email_thread", id="thread456", version=1
         )
-        email_page = self.service.create_email_page(email_uri)
-        thread_page = self.service.create_thread_page(thread_uri)
+        email_page = await self.service.create_email_page(email_uri)
+        thread_page = await self.service.create_thread_page(thread_uri)
 
         # Verify that EmailPage.thread_uri matches EmailThreadPage.uri
         assert email_page.thread_uri == thread_page.uri
@@ -801,7 +816,8 @@ class TestEmailThreadPageIntegration:
         assert email_page.thread_uri.id == thread_page.uri.id
         assert email_page.thread_uri.version == thread_page.uri.version
 
-    def test_thread_page_contains_email_summaries(self):
+    @pytest.mark.asyncio
+    async def test_thread_page_contains_email_summaries(self):
         """Test that email summaries in thread page can be used to access individual emails."""
         # This test verifies that the EmailSummary objects in a thread contain
         # valid URIs that can be used to fetch the corresponding EmailPage objects
@@ -848,7 +864,7 @@ class TestEmailThreadPageIntegration:
         thread_uri = PageURI(
             root="test-root", type="email_thread", id="thread456", version=1
         )
-        thread_page = self.service.create_thread_page(thread_uri)
+        thread_page = await self.service.create_thread_page(thread_uri)
 
         # Verify email summaries have correct URIs
         assert len(thread_page.emails) == 2
@@ -876,16 +892,12 @@ class TestGmailToolkit:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_context.get_page = Mock()
-
-        def mock_register_service(name, service):
-            self.mock_context.services[name] = service
-
-        self.mock_context.register_service = mock_register_service
+        self.mock_context.get_pages = AsyncMock()
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient and service
-        self.mock_api_client = Mock()
-        self.mock_api_client.search_messages = Mock()
+        self.mock_api_client = AsyncMock()
+        self.mock_api_client.search_messages = AsyncMock()
         self.service = GmailService(self.mock_api_client)
         # Since GmailService now inherits from RetrieverToolkit, use service directly
         self.toolkit = self.service
@@ -897,151 +909,124 @@ class TestGmailToolkit:
         """Clean up test environment."""
         clear_global_context()
 
-    def test_search_emails_from_person_basic(self):
+    @pytest.mark.asyncio
+    async def test_search_emails_from_person_basic(self):
         """Test search_emails_from_person without keywords."""
         mock_messages = [{"id": "msg1"}, {"id": "msg2"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        # Mock page creation
-        mock_pages = [Mock(spec=EmailPage), Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage), AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier
+        self.mock_context.get_pages.return_value = mock_pages
         with patch(
             "pragweb.google_api.utils.resolve_person_identifier",
             return_value="test@example.com",
         ):
-            result = self.toolkit.search_emails_from_person("test@example.com")
-
-        # Verify API call was made with correct query
+            result = await self.toolkit.search_emails_from_person("test@example.com")
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == 'from:"test@example.com"'
-        assert len(result) == 2  # Verify we got two pages back
-        assert all(
-            isinstance(page, EmailPage) for page in result
-        )  # Verify the type of returned pages
+        assert len(result) == 2
+        assert all(isinstance(page, EmailPage) for page in result)
 
-    def test_search_emails_from_person_with_keywords(self):
-        """Test search_emails_from_person with keywords."""
+    @pytest.mark.asyncio
+    async def test_search_emails_from_person_with_keywords(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier
+        self.mock_context.get_pages.return_value = mock_pages
         with patch(
             "pragweb.google_api.utils.resolve_person_identifier",
             return_value="test@example.com",
         ):
-            result = self.toolkit.search_emails_from_person(
+            result = await self.toolkit.search_emails_from_person(
                 "test@example.com", content="urgent project"
             )
-
-        # Verify API call includes keywords
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == 'from:"test@example.com" urgent project'
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)
 
-    def test_search_emails_to_person_basic(self):
-        """Test search_emails_to_person without keywords."""
+    @pytest.mark.asyncio
+    async def test_search_emails_to_person_basic(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier
+        self.mock_context.get_pages.return_value = mock_pages
         with patch(
             "pragweb.google_api.utils.resolve_person_identifier",
             return_value="recipient@example.com",
         ):
-            result = self.toolkit.search_emails_to_person("recipient@example.com")
-
-        # Verify API call
+            result = await self.toolkit.search_emails_to_person("recipient@example.com")
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == 'to:"recipient@example.com" OR cc:"recipient@example.com"'
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)
 
-    def test_search_emails_to_person_with_keywords(self):
-        """Test search_emails_to_person with keywords."""
+    @pytest.mark.asyncio
+    async def test_search_emails_to_person_with_keywords(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        # Mock resolve_person_identifier
+        self.mock_context.get_pages.return_value = mock_pages
         with patch(
             "pragweb.google_api.utils.resolve_person_identifier",
             return_value="recipient@example.com",
         ):
-            result = self.toolkit.search_emails_to_person(
+            result = await self.toolkit.search_emails_to_person(
                 "recipient@example.com", content="meeting notes"
             )
-
-        # Verify API call includes keywords
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert (
             query
             == 'to:"recipient@example.com" OR cc:"recipient@example.com" meeting notes'
         )
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)
 
-    def test_search_emails_by_content(self):
-        """Test search_emails_by_content searches both subject and body."""
+    @pytest.mark.asyncio
+    async def test_search_emails_by_content(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        result = self.toolkit.search_emails_by_content("important announcement")
-
-        # Verify API call uses content directly (searches both subject and body)
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.search_emails_by_content("important announcement")
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == "important announcement"
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)
 
-    def test_get_recent_emails_basic(self):
-        """Test get_recent_emails without keywords."""
+    @pytest.mark.asyncio
+    async def test_get_recent_emails_basic(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        result = self.toolkit.get_recent_emails(days=7)
-
-        # Verify API call
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_recent_emails(days=7)
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == "newer_than:7d"
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)
 
-    def test_get_recent_emails_with_keywords(self):
-        """Test get_recent_emails - note: this method doesn't support content filtering."""
+    @pytest.mark.asyncio
+    async def test_get_recent_emails_with_keywords(self):
         mock_messages = [{"id": "msg1"}]
         self.mock_api_client.search_messages.return_value = (mock_messages, None)
-
-        mock_pages = [Mock(spec=EmailPage)]
+        mock_pages = [AsyncMock(spec=EmailPage)]
         self.mock_context.get_page.side_effect = mock_pages
-
-        result = self.toolkit.get_recent_emails(days=3)
-
-        # Verify API call
+        self.mock_context.get_pages.return_value = mock_pages
+        result = await self.toolkit.get_recent_emails(days=3)
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == "newer_than:3d"
-        assert len(result) == 1  # Verify we got one page back
-        assert isinstance(result[0], EmailPage)  # Verify the type of returned page
+        assert len(result) == 1
+        assert isinstance(result[0], EmailPage)

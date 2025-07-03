@@ -1,6 +1,5 @@
 """Calendar service for handling Calendar API interactions and page creation."""
 
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,7 +46,7 @@ class CalendarService(ToolkitService):
         """Create a CalendarEventPage from a Calendar event ID."""
         # 1. Fetch event from Calendar API using shared client
         try:
-            event = await self.api_client.get_event_async(event_id, calendar_id)
+            event = await self.api_client.get_event(event_id, calendar_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch event {event_id}: {e}")
 
@@ -97,7 +96,7 @@ class CalendarService(ToolkitService):
         """Search events and return list of PageURIs and next page token."""
         try:
             logger.debug(f"Searching events with query params: {query_params}")
-            events, next_page_token = await self.api_client.search_events_async(
+            events, next_page_token = await self.api_client.search_events(
                 query_params, page_token=page_token, page_size=page_size
             )
 
@@ -127,16 +126,18 @@ class CalendarService(ToolkitService):
     ) -> PaginatedResponse[CalendarEventPage]:
         """Search events and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = await self.search_events(query_params, cursor, page_size)
+        uris, next_page_token = await self.search_events(
+            query_params, cursor, page_size
+        )
 
         # Resolve URIs to pages using context async - throw errors, don't fail silently
         pages = await self.context.get_pages(uris)
-        
+
         # Type check the results
         for page_obj in pages:
             if not isinstance(page_obj, CalendarEventPage):
                 raise TypeError(f"Expected CalendarEventPage but got {type(page_obj)}")
-        
+
         logger.debug(f"Successfully resolved {len(pages)} calendar pages")
 
         return PaginatedResponse(
@@ -176,7 +177,7 @@ class CalendarService(ToolkitService):
         if content:
             query_params["q"] = content
 
-        return await self._search_events_paginated_response_async(query_params, cursor)
+        return await self._search_events_paginated_response(query_params, cursor)
 
     @tool()
     async def get_events_with_person(
@@ -196,7 +197,7 @@ class CalendarService(ToolkitService):
             query += f" {content}"
 
         # Search for events matching the query
-        return await self._search_events_paginated_response_async(
+        return await self._search_events_paginated_response(
             {
                 "q": query,
                 "calendarId": "primary",
@@ -232,7 +233,7 @@ class CalendarService(ToolkitService):
             "orderBy": "startTime",
         }
 
-        return await self._search_events_paginated_response_async(query_params, cursor)
+        return await self._search_events_paginated_response(query_params, cursor)
 
     @tool()
     async def get_events_by_keyword(
@@ -247,7 +248,7 @@ class CalendarService(ToolkitService):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return await self._search_events_paginated_response_async(query_params, cursor)
+        return await self._search_events_paginated_response(query_params, cursor)
 
     @property
     def name(self) -> str:

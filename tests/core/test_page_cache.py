@@ -146,19 +146,23 @@ class TestPageCacheInitialization:
 class TestPageStorage:
     """Test page storage functionality."""
 
-    def test_store_new_page(self, page_cache: PageCache, sample_user: UserPage) -> None:
+    @pytest.mark.asyncio
+    async def test_store_new_page(
+        self, page_cache: PageCache, sample_user: UserPage
+    ) -> None:
         """Test storing a new page."""
         result = page_cache.store(sample_user)
         assert result is True  # Returns True for new pages
 
         # Verify page was stored
-        stored_page = page_cache.get(UserPage, sample_user.uri)
+        stored_page = await page_cache.get(UserPage, sample_user.uri)
         assert stored_page is not None
         assert stored_page.name == sample_user.name
         assert stored_page.email == sample_user.email
         assert stored_page.age == sample_user.age
 
-    def test_store_duplicate_page(
+    @pytest.mark.asyncio
+    async def test_store_duplicate_page(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test storing the same page twice (should fail)."""
@@ -173,7 +177,8 @@ class TestPageStorage:
         ):
             page_cache.store(sample_user)
 
-    def test_update_existing_page(
+    @pytest.mark.asyncio
+    async def test_update_existing_page(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test updating an existing page (should fail)."""
@@ -193,12 +198,13 @@ class TestPageStorage:
             page_cache.store(updated_user)
 
         # Verify original page is unchanged
-        stored_page = page_cache.get(UserPage, sample_user.uri)
+        stored_page = await page_cache.get(UserPage, sample_user.uri)
         assert stored_page is not None
         assert stored_page.name == sample_user.name  # Original name
         assert stored_page.age == sample_user.age  # Original age
 
-    def test_store_pages_different_types(
+    @pytest.mark.asyncio
+    async def test_store_pages_different_types(
         self, page_cache: PageCache, sample_user: UserPage, sample_post: PostPage
     ) -> None:
         """Test storing pages of different types."""
@@ -209,8 +215,8 @@ class TestPageStorage:
         assert result2 is True
 
         # Verify both pages were stored
-        stored_user = page_cache.get(UserPage, sample_user.uri)
-        stored_post = page_cache.get(PostPage, sample_post.uri)
+        stored_user = await page_cache.get(UserPage, sample_user.uri)
+        stored_post = await page_cache.get(PostPage, sample_post.uri)
 
         assert stored_user is not None
         assert stored_post is not None
@@ -221,36 +227,40 @@ class TestPageStorage:
 class TestPageRetrieval:
     """Test page retrieval functionality."""
 
-    def test_get_existing_page(
+    @pytest.mark.asyncio
+    async def test_get_existing_page(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test retrieving an existing page."""
         page_cache.store(sample_user)
 
-        retrieved_page = page_cache.get(UserPage, sample_user.uri)
+        retrieved_page = await page_cache.get(UserPage, sample_user.uri)
         assert retrieved_page is not None
         assert retrieved_page.uri == sample_user.uri
         assert retrieved_page.name == sample_user.name
         assert retrieved_page.email == sample_user.email
         assert retrieved_page.age == sample_user.age
 
-    def test_get_nonexistent_page(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_page(self, page_cache: PageCache) -> None:
         """Test retrieving a non-existent page."""
         nonexistent_uri = PageURI(root="test", type="user", id="nonexistent")
-        result = page_cache.get(UserPage, nonexistent_uri)
+        result = await page_cache.get(UserPage, nonexistent_uri)
         assert result is None
 
-    def test_get_page_unregistered_type(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_page_unregistered_type(self, page_cache: PageCache) -> None:
         """Test retrieving a page of unregistered type."""
         uri = PageURI(root="test", type="user", id="user1")
-        result = page_cache.get(UserPage, uri)
+        result = await page_cache.get(UserPage, uri)
         assert result is None
 
 
 class TestSqlAlchemyQueries:
     """Test SqlAlchemy-style query functionality."""
 
-    def test_find_by_exact_match(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_by_exact_match(self, page_cache: PageCache) -> None:
         """Test finding pages by exact attribute match."""
         # Create and store multiple users
         users = [
@@ -278,17 +288,20 @@ class TestSqlAlchemyQueries:
             page_cache.store(user)
 
         # Test exact name match
-        results = page_cache.find(UserPage).where(lambda t: t.name == "John Doe").all()
+        results = (
+            await page_cache.find(UserPage).where(lambda t: t.name == "John Doe").all()
+        )
         assert len(results) == 1
         assert results[0].name == "John Doe"
 
         # Test exact age match
-        results = page_cache.find(UserPage).where(lambda t: t.age == 30).all()
+        results = await page_cache.find(UserPage).where(lambda t: t.age == 30).all()
         assert len(results) == 2
         names = {r.name for r in results}
         assert names == {"John Doe", "Jane Doe"}
 
-    def test_find_by_like_pattern(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_by_like_pattern(self, page_cache: PageCache) -> None:
         """Test finding pages using LIKE patterns."""
         # Create and store multiple users
         users = [
@@ -313,18 +326,23 @@ class TestSqlAlchemyQueries:
             page_cache.store(user)
 
         # Test LIKE pattern for names
-        results = page_cache.find(UserPage).where(lambda t: t.name.like("%Doe%")).all()
+        results = (
+            await page_cache.find(UserPage).where(lambda t: t.name.like("%Doe%")).all()
+        )
         assert len(results) == 2
         names = {r.name for r in results}
         assert names == {"John Doe", "Jane Doe"}
 
         # Test case-insensitive LIKE (ilike)
         results = (
-            page_cache.find(UserPage).where(lambda t: t.email.ilike("%EXAMPLE%")).all()
+            await page_cache.find(UserPage)
+            .where(lambda t: t.email.ilike("%EXAMPLE%"))
+            .all()
         )
         assert len(results) == 3
 
-    def test_find_by_complex_query(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_by_complex_query(self, page_cache: PageCache) -> None:
         """Test finding pages using complex query expressions."""
         # Create and store multiple users
         users = [
@@ -353,7 +371,7 @@ class TestSqlAlchemyQueries:
 
         # Test complex AND query
         results = (
-            page_cache.find(UserPage)
+            await page_cache.find(UserPage)
             .where(lambda t: (t.age > 25) & (t.email.like("%@company.com")))
             .all()
         )
@@ -362,7 +380,7 @@ class TestSqlAlchemyQueries:
 
         # Test OR query
         results = (
-            page_cache.find(UserPage)
+            await page_cache.find(UserPage)
             .where(lambda t: (t.name.like("%Doe")) | (t.age == 35))
             .all()
         )
@@ -370,7 +388,8 @@ class TestSqlAlchemyQueries:
         names = {r.name for r in results}
         assert names == {"John Doe", "Bob Johnson"}
 
-    def test_find_with_lambda_expression(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_with_lambda_expression(self, page_cache: PageCache) -> None:
         """Test finding pages using lambda expressions (the recommended approach)."""
         # Store a user
         user = UserPage(
@@ -382,7 +401,7 @@ class TestSqlAlchemyQueries:
 
         # Use lambda expression for queries
         results = (
-            page_cache.find(UserPage)
+            await page_cache.find(UserPage)
             .where(lambda t: t.email == "test@example.com")
             .all()
         )
@@ -390,39 +409,47 @@ class TestSqlAlchemyQueries:
         assert len(results) == 1
         assert results[0].name == "Test User"
 
-    def test_find_no_results(
+    @pytest.mark.asyncio
+    async def test_find_no_results(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test finding pages with no matching results."""
         page_cache.store(sample_user)
 
         results = (
-            page_cache.find(UserPage).where(lambda t: t.name == "Nonexistent").all()
+            await page_cache.find(UserPage)
+            .where(lambda t: t.name == "Nonexistent")
+            .all()
         )
         assert len(results) == 0
 
-    def test_find_unregistered_type(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_unregistered_type(self, page_cache: PageCache) -> None:
         """Test finding pages of unregistered type."""
-        results = page_cache.find(UserPage).where(lambda t: t.name == "Test").all()
+        results = (
+            await page_cache.find(UserPage).where(lambda t: t.name == "Test").all()
+        )
         assert len(results) == 0
 
 
 class TestDateTimeHandling:
     """Test datetime field handling."""
 
-    def test_store_and_retrieve_datetime(
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_datetime(
         self, page_cache: PageCache, sample_event: EventPage
     ) -> None:
         """Test storing and retrieving pages with datetime fields."""
         page_cache.store(sample_event)
 
-        retrieved_event = page_cache.get(EventPage, sample_event.uri)
+        retrieved_event = await page_cache.get(EventPage, sample_event.uri)
         assert retrieved_event is not None
         assert retrieved_event.start_time == sample_event.start_time
         assert retrieved_event.end_time == sample_event.end_time
         assert retrieved_event.location == sample_event.location
 
-    def test_find_by_datetime(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_by_datetime(self, page_cache: PageCache) -> None:
         """Test finding pages by datetime values."""
         # Create events with different times
         events = [
@@ -445,14 +472,15 @@ class TestDateTimeHandling:
 
         # Test exact datetime match
         results = (
-            page_cache.find(EventPage)
+            await page_cache.find(EventPage)
             .where(lambda t: t.start_time == datetime(2024, 1, 1, 10, 0))
             .all()
         )
         assert len(results) == 1
         assert results[0].title == "Morning Event"
 
-    def test_datetime_with_microseconds(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_datetime_with_microseconds(self, page_cache: PageCache) -> None:
         """Test datetime fields with microseconds."""
         event = EventPage(
             uri=PageURI(root="test", type="event", id="event_micro", version=1),
@@ -462,7 +490,7 @@ class TestDateTimeHandling:
         )
 
         page_cache.store(event)
-        retrieved_event = page_cache.get(EventPage, event.uri)
+        retrieved_event = await page_cache.get(EventPage, event.uri)
 
         # Verify microseconds are preserved
         assert retrieved_event is not None
@@ -473,7 +501,8 @@ class TestDateTimeHandling:
 class TestOptionalFields:
     """Test handling of optional fields."""
 
-    def test_store_page_with_none_values(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_store_page_with_none_values(self, page_cache: PageCache) -> None:
         """Test storing pages with None values in optional fields."""
         user = UserPage(
             uri=PageURI(root="test", type="user", id="user_no_age", version=1),
@@ -483,7 +512,7 @@ class TestOptionalFields:
         )
 
         page_cache.store(user)
-        retrieved_user = page_cache.get(UserPage, user.uri)
+        retrieved_user = await page_cache.get(UserPage, user.uri)
 
         assert retrieved_user is not None
         assert retrieved_user.name == "User Without Age"
@@ -494,7 +523,10 @@ class TestOptionalFields:
 class TestAdvancedQueries:
     """Test advanced query functionality."""
 
-    def test_complex_query_with_lambda_expressions(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_complex_query_with_lambda_expressions(
+        self, page_cache: PageCache
+    ) -> None:
         """Test complex queries using lambda expressions."""
         # Store some users
         users = [
@@ -523,11 +555,10 @@ class TestAdvancedQueries:
 
         # Find users with age between 25 and 30 using lambda
         results = (
-            page_cache.find(UserPage)
+            await page_cache.find(UserPage)
             .where(lambda t: (t.age >= 25) & (t.age <= 30))
             .all()
         )
-
         assert len(results) == 2
         names = {user.name for user in results}
         assert names == {"Alice", "Bob"}
@@ -536,7 +567,8 @@ class TestAdvancedQueries:
 class TestCacheInstancesShareData:
     """Test that multiple PageCache instances can share data."""
 
-    def test_multiple_cache_instances_share_data(self, temp_db_url: str) -> None:
+    @pytest.mark.asyncio
+    async def test_multiple_cache_instances_share_data(self, temp_db_url: str) -> None:
         """Test that multiple PageCache instances using the same DB can share data."""
         # Create first cache instance and store a page
         cache1 = PageCache(temp_db_url, drop_previous=True)
@@ -551,7 +583,7 @@ class TestCacheInstancesShareData:
         cache2 = PageCache(temp_db_url)
 
         # Should be able to retrieve the page from second instance
-        retrieved_user = cache2.get(UserPage, user.uri)
+        retrieved_user = await cache2.get(UserPage, user.uri)
         assert retrieved_user is not None
         assert retrieved_user.name == "Test User"
 
@@ -559,7 +591,8 @@ class TestCacheInstancesShareData:
 class TestURIHandling:
     """Test URI handling as primary key."""
 
-    def test_uri_as_primary_key(
+    @pytest.mark.asyncio
+    async def test_uri_as_primary_key(
         self, page_cache: PageCache, sample_user: UserPage
     ) -> None:
         """Test that URI is used as primary key."""
@@ -576,7 +609,10 @@ class TestURIHandling:
         ):
             page_cache.store(duplicate_user)
 
-    def test_different_uris_different_records(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_different_uris_different_records(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that different URIs create different records."""
         user1 = UserPage(
             uri=PageURI(root="test", type="user", id="user1", version=1),
@@ -596,8 +632,8 @@ class TestURIHandling:
         assert result2 is True  # New insert
 
         # Both should be retrievable
-        retrieved_user1 = page_cache.get(UserPage, user1.uri)
-        retrieved_user2 = page_cache.get(UserPage, user2.uri)
+        retrieved_user1 = await page_cache.get(UserPage, user1.uri)
+        retrieved_user2 = await page_cache.get(UserPage, user2.uri)
 
         assert retrieved_user1 is not None
         assert retrieved_user2 is not None
@@ -746,7 +782,8 @@ class TestPageWithPageURIFields:
             parent_doc=PageURI(root="test", type="document", id="parent1", version=1),
         )
 
-    def test_store_and_retrieve_page_with_page_uris(
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_page_with_page_uris(
         self,
         page_cache: PageCache,
         sample_document_with_uris: "TestPageWithPageURIFields.DocumentPage",
@@ -757,7 +794,9 @@ class TestPageWithPageURIFields:
         assert result is True
 
         # Retrieve the document
-        retrieved_doc = page_cache.get(self.DocumentPage, sample_document_with_uris.uri)
+        retrieved_doc = await page_cache.get(
+            self.DocumentPage, sample_document_with_uris.uri
+        )
 
         assert retrieved_doc is not None
         assert retrieved_doc.title == "Test Document"
@@ -777,7 +816,8 @@ class TestPageWithPageURIFields:
         assert isinstance(retrieved_doc.parent_doc, PageURI)
         assert retrieved_doc.parent_doc.id == "parent1"
 
-    def test_store_and_retrieve_page_with_none_page_uris(
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_page_with_none_page_uris(
         self, page_cache: PageCache
     ) -> None:
         """Test storing and retrieving a page with None PageURI fields."""
@@ -795,7 +835,7 @@ class TestPageWithPageURIFields:
         assert result is True
 
         # Retrieve the document
-        retrieved_doc = page_cache.get(self.DocumentPage, doc.uri)
+        retrieved_doc = await page_cache.get(self.DocumentPage, doc.uri)
 
         assert retrieved_doc is not None
         assert retrieved_doc.title == "Document Without URIs"
@@ -803,7 +843,8 @@ class TestPageWithPageURIFields:
         assert retrieved_doc.related_docs == []
         assert retrieved_doc.parent_doc is None
 
-    def test_find_pages_by_page_uri_fields(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_pages_by_page_uri_fields(self, page_cache: PageCache) -> None:
         """Test finding pages by PageURI field values."""
         # Create documents with specific author
         author_uri = PageURI(root="test", type="user", id="author123", version=1)
@@ -838,11 +879,10 @@ class TestPageWithPageURIFields:
 
         # Find documents by author_uri (note: stored as string in DB)
         results = (
-            page_cache.find(self.DocumentPage)
+            await page_cache.find(self.DocumentPage)
             .where(lambda t: t.author_uri == str(author_uri))
             .all()
         )
-
         assert len(results) == 2
         titles = {doc.title for doc in results}
         assert titles == {"Document 1", "Document 2"}
@@ -877,7 +917,8 @@ class TestGoogleDocsPageURIs:
             super().__init__(**data)
             self._metadata.token_count = len(self.content) // 4
 
-    def test_google_docs_end_to_end_scenario(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_google_docs_end_to_end_scenario(self, page_cache: PageCache) -> None:
         """Test a realistic Google Docs scenario with headers and chunks."""
         document_id = "1234567890"
 
@@ -923,7 +964,7 @@ class TestGoogleDocsPageURIs:
             page_cache.store(chunk)
 
         # Retrieve and verify header
-        retrieved_header = page_cache.get(self.GDocHeader, header.uri)
+        retrieved_header = await page_cache.get(self.GDocHeader, header.uri)
         assert retrieved_header is not None
         assert retrieved_header.title == "Test Google Doc"
         assert len(retrieved_header.chunk_uris) == 3
@@ -931,7 +972,7 @@ class TestGoogleDocsPageURIs:
 
         # Retrieve and verify chunks
         for i, chunk_uri in enumerate(chunk_uris):
-            retrieved_chunk = page_cache.get(self.GDocChunk, chunk_uri)
+            retrieved_chunk = await page_cache.get(self.GDocChunk, chunk_uri)
             assert retrieved_chunk is not None
             assert retrieved_chunk.chunk_index == i
             assert retrieved_chunk.content == f"Content of chunk {i}"
@@ -953,7 +994,8 @@ class TestGoogleDocsPageURIs:
             assert isinstance(retrieved_chunk.header_uri, PageURI)
             assert retrieved_chunk.header_uri.id == document_id
 
-    def test_find_chunks_by_document_id(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_chunks_by_document_id(self, page_cache: PageCache) -> None:
         """Test finding all chunks for a specific document."""
         document_id = "test_document_456"
 
@@ -979,11 +1021,10 @@ class TestGoogleDocsPageURIs:
 
         # Find all chunks for this document
         results = (
-            page_cache.find(self.GDocChunk)
+            await page_cache.find(self.GDocChunk)
             .where(lambda t: t.document_id == document_id)
             .all()
         )
-
         assert len(results) == 3
         chunk_indices = {chunk.chunk_index for chunk in results}
         assert chunk_indices == {0, 1, 2}
@@ -1033,7 +1074,10 @@ class TestProvenanceTracking:
             super().__init__(**data)
             self._metadata.token_count = len(self.content) // 4
 
-    def test_store_page_with_parent_uri_parameter(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_store_page_with_parent_uri_parameter(
+        self, page_cache: PageCache
+    ) -> None:
         """Test storing a page with parent_uri specified as parameter."""
         # Store parent first
         parent_doc = self.GoogleDocPage(
@@ -1054,11 +1098,14 @@ class TestProvenanceTracking:
         assert result is True
 
         # Verify parent_uri was set
-        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
+        stored_chunk = await page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent_doc.uri
 
-    def test_store_page_with_parent_uri_on_page(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_store_page_with_parent_uri_on_page(
+        self, page_cache: PageCache
+    ) -> None:
         """Test storing a page with parent_uri set on the page instance."""
         # Store parent first
         parent_doc = self.GoogleDocPage(
@@ -1080,11 +1127,12 @@ class TestProvenanceTracking:
         assert result is True
 
         # Verify parent_uri was preserved
-        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
+        stored_chunk = await page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent_doc.uri
 
-    def test_parent_uri_parameter_overrides_page_parent_uri(
+    @pytest.mark.asyncio
+    async def test_parent_uri_parameter_overrides_page_parent_uri(
         self, page_cache: PageCache
     ) -> None:
         """Test that parent_uri parameter overrides page's parent_uri."""
@@ -1116,11 +1164,12 @@ class TestProvenanceTracking:
         assert result is True
 
         # Verify parent_uri was overridden
-        stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
+        stored_chunk = await page_cache.get(self.ChunkPage, chunk.uri)
         assert stored_chunk is not None
         assert stored_chunk.parent_uri == parent2.uri
 
-    def test_store_page_no_parent_tracking(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_store_page_no_parent_tracking(self, page_cache: PageCache) -> None:
         """Test storing a page without any parent tracking (should work as before)."""
         # Create email and thread without parent-child relationship
         email = self.EmailPage(
@@ -1142,7 +1191,10 @@ class TestProvenanceTracking:
         assert result1 is True
         assert result2 is True
 
-    def test_provenance_precheck_parent_not_exist(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_provenance_precheck_parent_not_exist(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that storing fails when parent doesn't exist."""
         from praga_core.page_cache import ProvenanceError
 
@@ -1161,7 +1213,8 @@ class TestProvenanceTracking:
         ):
             page_cache.store(chunk, parent_uri=nonexistent_parent)
 
-    def test_provenance_precheck_child_already_exists(
+    @pytest.mark.asyncio
+    async def test_provenance_precheck_child_already_exists(
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when child already exists."""
@@ -1189,7 +1242,10 @@ class TestProvenanceTracking:
         ):
             page_cache.store(chunk, parent_uri=parent_doc.uri)
 
-    def test_provenance_precheck_same_page_type(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_provenance_precheck_same_page_type(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that storing fails when parent and child are same page type."""
 
         # Store parent doc
@@ -1212,7 +1268,8 @@ class TestProvenanceTracking:
         ):
             page_cache.store(child_doc, parent_uri=parent_doc.uri)
 
-    def test_provenance_precheck_parent_version_number(
+    @pytest.mark.asyncio
+    async def test_provenance_precheck_parent_version_number(
         self, page_cache: PageCache
     ) -> None:
         """Test that storing fails when parent has invalid version number."""
@@ -1237,7 +1294,8 @@ class TestProvenanceTracking:
         ):
             page_cache.store(chunk, parent_uri=parent_doc.uri)
 
-    def test_get_children(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_children(self, page_cache: PageCache) -> None:
         """Test getting children of a parent page."""
         # Store parent doc
         parent_doc = self.GoogleDocPage(
@@ -1267,7 +1325,8 @@ class TestProvenanceTracking:
         expected_uris = {chunk.uri for chunk in chunks}
         assert child_uris == expected_uris
 
-    def test_get_children_no_children(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_children_no_children(self, page_cache: PageCache) -> None:
         """Test getting children when page has no children."""
         # Store page without children
         page = self.GoogleDocPage(
@@ -1280,7 +1339,8 @@ class TestProvenanceTracking:
         children = page_cache.get_children(page.uri)
         assert len(children) == 0
 
-    def test_get_provenance_chain(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_provenance_chain(self, page_cache: PageCache) -> None:
         """Test getting the full provenance chain."""
         # Store grandparent document
         grandparent = self.GoogleDocPage(
@@ -1315,7 +1375,8 @@ class TestProvenanceTracking:
         assert chain[1].uri == parent.uri
         assert chain[2].uri == child.uri
 
-    def test_get_provenance_chain_no_parent(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_provenance_chain_no_parent(self, page_cache: PageCache) -> None:
         """Test getting provenance chain for page with no parent."""
         # Store page without parent
         page = self.GoogleDocPage(
@@ -1330,7 +1391,10 @@ class TestProvenanceTracking:
         assert len(chain) == 1
         assert chain[0].uri == page.uri
 
-    def test_get_provenance_chain_nonexistent_page(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_provenance_chain_nonexistent_page(
+        self, page_cache: PageCache
+    ) -> None:
         """Test getting provenance chain for non-existent page."""
         nonexistent_uri = PageURI(
             root="test", type="chunk", id="nonexistent", version=1
@@ -1339,7 +1403,8 @@ class TestProvenanceTracking:
         chain = page_cache.get_lineage(nonexistent_uri)
         assert len(chain) == 0
 
-    def test_example_google_docs_scenario(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_example_google_docs_scenario(self, page_cache: PageCache) -> None:
         """Test the Google Docs example scenario from the requirements."""
         # Store the Google Doc
         gdoc = self.GoogleDocPage(
@@ -1369,12 +1434,13 @@ class TestProvenanceTracking:
 
         # Verify each chunk has the correct parent
         for i, chunk in enumerate(chunks):
-            stored_chunk = page_cache.get(self.ChunkPage, chunk.uri)
+            stored_chunk = await page_cache.get(self.ChunkPage, chunk.uri)
             assert stored_chunk is not None
             assert stored_chunk.parent_uri == gdoc.uri
             assert stored_chunk.chunk_index == i
 
-    def test_example_email_thread_scenario(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_example_email_thread_scenario(self, page_cache: PageCache) -> None:
         """Test the email thread example scenario from the requirements."""
         # Store emails and threads separately (no parent-child relationship)
         emails = []
@@ -1397,11 +1463,11 @@ class TestProvenanceTracking:
 
         # Verify no parent-child relationships exist
         for email in emails:
-            stored_email = page_cache.get(self.EmailPage, email.uri)
+            stored_email = await page_cache.get(self.EmailPage, email.uri)
             assert stored_email is not None
             assert stored_email.parent_uri is None
 
-        stored_thread = page_cache.get(self.ThreadPage, thread.uri)
+        stored_thread = await page_cache.get(self.ThreadPage, thread.uri)
         assert stored_thread is not None
         assert stored_thread.parent_uri is None
 
@@ -1568,7 +1634,10 @@ class TestPageRelationshipsTable:
             )
             assert orphan_relationships == 0
 
-    def test_get_children_uses_relationships_table(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_children_uses_relationships_table(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that get_children uses the relationships table efficiently."""
         # Store parent
         parent = self.DocPage(
@@ -1598,7 +1667,8 @@ class TestPageRelationshipsTable:
         expected_titles = {"Child 0", "Child 1", "Child 2"}
         assert child_titles == expected_titles
 
-    def test_get_provenance_chain_uses_relationships_table(
+    @pytest.mark.asyncio
+    async def test_get_provenance_chain_uses_relationships_table(
         self, page_cache: PageCache
     ) -> None:
         """Test that get_provenance_chain uses the relationships table efficiently."""
@@ -1700,7 +1770,8 @@ class TestComprehensiveSerialization:
         model_list: List["TestComprehensiveSerialization.NestedModel"]
         optional_model: Optional["TestComprehensiveSerialization.NestedModel"] = None
 
-    def test_store_and_retrieve_complex_page_with_pydantic_models(
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_complex_page_with_pydantic_models(
         self, page_cache: PageCache
     ) -> None:
         """Test storing and retrieving pages with nested Pydantic models."""
@@ -1732,7 +1803,7 @@ class TestComprehensiveSerialization:
         assert result is True
 
         # Retrieve the complex page
-        retrieved_page = page_cache.get(self.ComplexPage, complex_page.uri)
+        retrieved_page = await page_cache.get(self.ComplexPage, complex_page.uri)
 
         assert retrieved_page is not None
         assert retrieved_page.title == "Complex Page Test"
@@ -1763,7 +1834,8 @@ class TestComprehensiveSerialization:
         # Verify optional model is None
         assert retrieved_page.optional_model is None
 
-    def test_store_and_retrieve_complex_page_with_optional_model(
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_complex_page_with_optional_model(
         self, page_cache: PageCache
     ) -> None:
         """Test storing and retrieving pages with optional Pydantic models."""
@@ -1786,7 +1858,7 @@ class TestComprehensiveSerialization:
         assert result is True
 
         # Retrieve the complex page
-        retrieved_page = page_cache.get(self.ComplexPage, complex_page.uri)
+        retrieved_page = await page_cache.get(self.ComplexPage, complex_page.uri)
 
         assert retrieved_page is not None
         assert retrieved_page.title == "Complex Page with Optional"
@@ -1798,7 +1870,8 @@ class TestComprehensiveSerialization:
         assert isinstance(retrieved_page.optional_model.uri, PageURI)
         assert retrieved_page.optional_model.uri.id == "opt1"
 
-    def test_find_pages_with_complex_models(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_pages_with_complex_models(self, page_cache: PageCache) -> None:
         """Test querying pages that contain complex Pydantic models."""
         # Create pages with different nested model names
         page1 = self.ComplexPage(
@@ -1820,7 +1893,7 @@ class TestComprehensiveSerialization:
 
         # Find pages by title (which should work normally)
         results = (
-            page_cache.find(self.ComplexPage)
+            await page_cache.find(self.ComplexPage)
             .where(lambda t: t.title.like("Find Test%"))
             .all()
         )
@@ -1838,7 +1911,10 @@ class TestComprehensiveSerialization:
 class TestVersioning:
     """Test URI prefix and version handling with composite primary keys."""
 
-    def test_store_and_retrieve_multiple_versions(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_store_and_retrieve_multiple_versions(
+        self, page_cache: PageCache
+    ) -> None:
         """Test storing and retrieving multiple versions of the same page."""
         # Create multiple versions of the same page
         user_v1 = UserPage(
@@ -1872,9 +1948,9 @@ class TestVersioning:
         assert result3 is True
 
         # Retrieve each version
-        retrieved_v1 = page_cache.get(UserPage, user_v1.uri)
-        retrieved_v2 = page_cache.get(UserPage, user_v2.uri)
-        retrieved_v3 = page_cache.get(UserPage, user_v3.uri)
+        retrieved_v1 = await page_cache.get(UserPage, user_v1.uri)
+        retrieved_v2 = await page_cache.get(UserPage, user_v2.uri)
+        retrieved_v3 = await page_cache.get(UserPage, user_v3.uri)
 
         assert retrieved_v1 is not None
         assert retrieved_v2 is not None
@@ -1887,7 +1963,8 @@ class TestVersioning:
         assert retrieved_v3.name == "User Version 3"
         assert retrieved_v3.age == 27
 
-    def test_get_latest_version(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_latest_version(self, page_cache: PageCache) -> None:
         """Test getting the latest version number for a URI prefix."""
         prefix = "test/user:user1"
 
@@ -1920,12 +1997,13 @@ class TestVersioning:
         latest = page_cache.get_latest_version(UserPage, prefix)
         assert latest == 3
 
-    def test_get_latest_functionality(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_get_latest_functionality(self, page_cache: PageCache) -> None:
         """Test getting the latest version through get_latest method."""
         prefix = "test/user:user1"
 
         # Should return None when no versions exist
-        latest_page = page_cache.get_latest(UserPage, prefix)
+        latest_page = await page_cache.get_latest(UserPage, prefix)
         assert latest_page is None
 
         # Store multiple versions
@@ -1946,13 +2024,14 @@ class TestVersioning:
         page_cache.store(user_v2)
 
         # Should return the latest version page
-        latest_page = page_cache.get_latest(UserPage, prefix)
+        latest_page = await page_cache.get_latest(UserPage, prefix)
         assert latest_page is not None
         assert latest_page.name == "User Version 2"
         assert latest_page.age == 26
         assert latest_page.uri.version == 2
 
-    def test_prefix_property_usage(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_prefix_property_usage(self, page_cache: PageCache) -> None:
         """Test that the PageURI prefix property works correctly in practice."""
         user = UserPage(
             uri=PageURI(root="test", type="user", id="user123", version=5),
@@ -1969,11 +2048,12 @@ class TestVersioning:
         latest_version = page_cache.get_latest_version(UserPage, user.uri.prefix)
         assert latest_version == 5
 
-        latest_page = page_cache.get_latest(UserPage, user.uri.prefix)
+        latest_page = await page_cache.get_latest(UserPage, user.uri.prefix)
         assert latest_page is not None
         assert latest_page.name == "Test User"
 
-    def test_different_prefixes_independent(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_different_prefixes_independent(self, page_cache: PageCache) -> None:
         """Test that different URI prefixes are handled independently."""
         # Create pages with different prefixes
         user1_v1 = UserPage(
@@ -2005,8 +2085,8 @@ class TestVersioning:
         assert user2_latest == 1
 
         # Check that latest pages are correct
-        user1_latest_page = page_cache.get_latest(UserPage, "test/user:user1")
-        user2_latest_page = page_cache.get_latest(UserPage, "test/user:user2")
+        user1_latest_page = await page_cache.get_latest(UserPage, "test/user:user1")
+        user2_latest_page = await page_cache.get_latest(UserPage, "test/user:user2")
 
         assert user1_latest_page is not None
         assert user2_latest_page is not None
@@ -2017,7 +2097,8 @@ class TestVersioning:
 class TestPageCacheDefaultVersionFunctionality:
     """Test default version functionality in PageCache."""
 
-    def test_store_page_with_default_version_raises_error(
+    @pytest.mark.asyncio
+    async def test_store_page_with_default_version_raises_error(
         self, page_cache: PageCache
     ) -> None:
         """Test that storing a page with default version raises an error."""
@@ -2035,7 +2116,8 @@ class TestPageCacheDefaultVersionFunctionality:
         with pytest.raises(ValueError, match="Cannot store page with None version"):
             page_cache.store(user)
 
-    def test_retrieve_default_version_gets_highest_version(
+    @pytest.mark.asyncio
+    async def test_retrieve_default_version_gets_highest_version(
         self, page_cache: PageCache
     ) -> None:
         """Test that requesting default version returns the highest actual version."""
@@ -2056,18 +2138,19 @@ class TestPageCacheDefaultVersionFunctionality:
 
         # Request default version should return v3 (highest)
         default_uri = PageURI(root="test", type="user", id="user1", version=None)
-        retrieved = page_cache.get(UserPage, default_uri)
+        retrieved = await page_cache.get(UserPage, default_uri)
 
         assert retrieved is not None
         assert retrieved.name == "User v3"  # Should get version 3
         assert retrieved.uri.version == 3  # Page should have actual version
 
-    def test_retrieve_default_version_for_nonexistent_page(
+    @pytest.mark.asyncio
+    async def test_retrieve_default_version_for_nonexistent_page(
         self, page_cache: PageCache
     ) -> None:
         """Test getting default version for a page that doesn't exist."""
         uri = PageURI(root="test", type="user", id="nonexistent", version=None)
-        result = page_cache.get(UserPage, uri)
+        result = await page_cache.get(UserPage, uri)
         assert result is None
 
 
@@ -2096,10 +2179,11 @@ class TestCacheInvalidation:
             super().__init__(**data)
             self._metadata.token_count = len(self.content) // 4
 
-    def test_register_invalidator(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_register_invalidator(self, page_cache: PageCache) -> None:
         """Test registering an invalidator function."""
 
-        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+        async def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             # Mock validation - check if revision is "current"
             return page.revision == "current"
 
@@ -2107,7 +2191,8 @@ class TestCacheInvalidation:
 
         # Note: We don't test internal storage details, just that validation works
 
-    def test_invalidate_page_by_uri(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_invalidate_page_by_uri(self, page_cache: PageCache) -> None:
         """Test invalidating a specific page by URI."""
         # Store a page
         doc = self.GoogleDocPage(
@@ -2119,7 +2204,7 @@ class TestCacheInvalidation:
         page_cache.store(doc)
 
         # Verify page exists and is valid
-        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
+        retrieved = await page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is not None
 
         # Invalidate the page
@@ -2127,13 +2212,16 @@ class TestCacheInvalidation:
         assert result is True
 
         # Verify page is now invalid
-        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
+        retrieved = await page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is None
 
-    def test_page_validation_with_invalidator(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_page_validation_with_invalidator(
+        self, page_cache: PageCache
+    ) -> None:
         """Test that pages are validated using registered invalidators."""
 
-        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+        async def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             # Mock validation - only "current" revision is valid
             return page.revision == "current"
 
@@ -2158,21 +2246,22 @@ class TestCacheInvalidation:
         page_cache.store(doc_old)
 
         # Current revision should be retrievable
-        retrieved_current = page_cache.get(self.GoogleDocPage, doc_current.uri)
+        retrieved_current = await page_cache.get(self.GoogleDocPage, doc_current.uri)
         assert retrieved_current is not None
         assert retrieved_current.title == "Current Doc"
 
         # Old revision should be invalidated and not retrievable
-        retrieved_old = page_cache.get(self.GoogleDocPage, doc_old.uri)
+        retrieved_old = await page_cache.get(self.GoogleDocPage, doc_old.uri)
         assert retrieved_old is None
 
-    def test_ancestor_validation(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_ancestor_validation(self, page_cache: PageCache) -> None:
         """Test that ancestor pages are validated when retrieving child pages."""
 
-        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+        async def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             return page.revision == "current"
 
-        def validate_chunk(page: "TestCacheInvalidation.ChunkPage") -> bool:
+        async def validate_chunk(page: "TestCacheInvalidation.ChunkPage") -> bool:
             return page.doc_revision == "current"
 
         page_cache.register_validator(self.GoogleDocPage, validate_doc)
@@ -2198,8 +2287,8 @@ class TestCacheInvalidation:
         page_cache.store(child_chunk, parent_uri=parent_doc.uri)
 
         # Both should be retrievable initially
-        retrieved_parent = page_cache.get(self.GoogleDocPage, parent_doc.uri)
-        retrieved_child = page_cache.get(self.ChunkPage, child_chunk.uri)
+        retrieved_parent = await page_cache.get(self.GoogleDocPage, parent_doc.uri)
+        retrieved_child = await page_cache.get(self.ChunkPage, child_chunk.uri)
         assert retrieved_parent is not None
         assert retrieved_child is not None
 
@@ -2224,19 +2313,22 @@ class TestCacheInvalidation:
         page_cache.store(updated_child, parent_uri=updated_parent.uri)
 
         # The updated parent should be invalid
-        retrieved_updated_parent = page_cache.get(
+        retrieved_updated_parent = await page_cache.get(
             self.GoogleDocPage, updated_parent.uri
         )
         assert retrieved_updated_parent is None
 
         # The child should also be invalid because its parent is invalid
-        retrieved_updated_child = page_cache.get(self.ChunkPage, updated_child.uri)
+        retrieved_updated_child = await page_cache.get(
+            self.ChunkPage, updated_child.uri
+        )
         assert retrieved_updated_child is None
 
-    def test_find_pages_respects_validity(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_find_pages_respects_validity(self, page_cache: PageCache) -> None:
         """Test that find_pages_by_attribute only returns valid pages."""
 
-        def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
+        async def validate_doc(page: "TestCacheInvalidation.GoogleDocPage") -> bool:
             return page.revision == "current"
 
         page_cache.register_validator(self.GoogleDocPage, validate_doc)
@@ -2268,7 +2360,7 @@ class TestCacheInvalidation:
 
         # Find all documents with "Doc" in title
         results = (
-            page_cache.find(self.GoogleDocPage)
+            await page_cache.find(self.GoogleDocPage)
             .where(lambda t: t.title.like("%Doc%"))
             .all()
         )
@@ -2278,7 +2370,8 @@ class TestCacheInvalidation:
         titles = {r.title for r in results}
         assert titles == {"Current Doc 1", "Current Doc 2"}
 
-    def test_no_invalidator_allows_all_pages(self, page_cache: PageCache) -> None:
+    @pytest.mark.asyncio
+    async def test_no_invalidator_allows_all_pages(self, page_cache: PageCache) -> None:
         """Test that pages without invalidators are always considered valid."""
         # Store a page without registering an invalidator
         doc = self.GoogleDocPage(
@@ -2290,6 +2383,6 @@ class TestCacheInvalidation:
         page_cache.store(doc)
 
         # Should be retrievable since no invalidator is registered
-        retrieved = page_cache.get(self.GoogleDocPage, doc.uri)
+        retrieved = await page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is not None
         assert retrieved.title == "Test Doc"

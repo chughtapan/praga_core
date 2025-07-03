@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Awaitable, Callable, Dict, List, Type, Union
 
@@ -30,16 +31,19 @@ class PageRouter:
                     f"Example: def handle_{path}(page_uri: PageURI) -> {path.title()}Page:"
                 )
             return_type = func.__annotations__["return"]
-            
+
             # Handle async return type annotations (e.g., Awaitable[Page])
-            if hasattr(return_type, "__origin__") and return_type.__origin__ is not None:
+            if (
+                hasattr(return_type, "__origin__")
+                and return_type.__origin__ is not None
+            ):
                 if return_type.__origin__ is Union:
                     # Handle Union types, but for now we expect simple types
                     return_type = return_type.__args__[0]
                 elif hasattr(return_type, "__args__") and return_type.__args__:
                     # Handle Awaitable[Page] -> Page
                     return_type = return_type.__args__[0]
-                    
+
             if isinstance(return_type, str):
                 raise RuntimeError(
                     f"Handler for page type '{path}' has a string return type annotation '{return_type}'. "
@@ -116,7 +120,9 @@ class PageRouter:
         tasks = [self.get_page(uri) for uri in page_uris]
         return await asyncio.gather(*tasks)
 
-    async def _get_from_cache(self, page_type: Type[Page], page_uri: PageURI) -> Page | None:
+    async def _get_from_cache(
+        self, page_type: Type[Page], page_uri: PageURI
+    ) -> Page | None:
         """Attempt to retrieve page from cache."""
         try:
             cached_page = await self._page_cache.get(page_type, page_uri)
@@ -138,7 +144,7 @@ class PageRouter:
                 page_uri.type,
                 page_uri.id,
             )
-        
+
         # All handlers are now async
         return await handler(page_uri)
 
@@ -181,7 +187,7 @@ class PageRouter:
                 f"Example: def handle_{page_type_name}(page_uri: PageURI) -> {page_type_name.title()}Page:"
             )
         return_type = handler.__annotations__["return"]
-        
+
         # Handle async return type annotations (e.g., Awaitable[Page])
         if hasattr(return_type, "__origin__") and return_type.__origin__ is not None:
             if return_type.__origin__ is Union:
@@ -190,7 +196,7 @@ class PageRouter:
             elif hasattr(return_type, "__args__") and return_type.__args__:
                 # Handle Awaitable[Page] -> Page
                 return_type = return_type.__args__[0]
-                
+
         if isinstance(return_type, str):
             raise RuntimeError(
                 f"Handler for page type '{page_type_name}' has a string return type annotation '{return_type}'. "

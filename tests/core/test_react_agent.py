@@ -100,13 +100,13 @@ class MockRetrieverToolkit(RetrieverToolkit):
         self.register_tool(method=self.search_documents)
         self.register_tool(method=self.search_by_person_and_topic)
 
-    def search_documents(self, query: str) -> List[Page]:
+    async def search_documents(self, query: str) -> List[Page]:
         """Search through documents based on a query."""
         if not query:
             return []
         return [doc for doc in self.documents if query.lower() in doc.content.lower()]
 
-    def search_by_person_and_topic(self, person: str, topic: str) -> List[Page]:
+    async def search_by_person_and_topic(self, person: str, topic: str) -> List[Page]:
         """Search documents by person name and topic."""
         if not person or not topic:
             return []
@@ -143,7 +143,7 @@ class MockEmailToolkit(RetrieverToolkit):
         # Register email-specific tools
         self.register_tool(method=self.search_emails)
 
-    def search_emails(self, query: str) -> List[Page]:
+    async def search_emails(self, query: str) -> List[Page]:
         """Search through emails."""
         if not query:
             return []
@@ -173,7 +173,7 @@ class MockCalendarToolkit(RetrieverToolkit):
         # Register calendar-specific tools
         self.register_tool(method=self.search_events, name="search_events")
 
-    def search_events(self, query: str) -> List[Page]:
+    async def search_events(self, query: str) -> List[Page]:
         """Search through calendar events."""
         if not query:
             return []
@@ -195,7 +195,7 @@ class TestReactAgentBasic:
             toolkits=[self.toolkit], openai_client=self.mock_client, max_iterations=3
         )
 
-    def test_search_basic(self):
+    async def test_search_basic(self):
         """Test basic search functionality."""
         # Set up mock responses
         mock_response_1 = json.dumps(
@@ -228,7 +228,7 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_2)
 
         # Execute search
-        references = self.agent.search("Find documents about AI")
+        references = await self.agent.search("Find documents about AI")
 
         # Verify results
         assert len(references) == 2

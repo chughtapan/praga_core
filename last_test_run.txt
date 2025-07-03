@@ -1,0 +1,326 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.4, pytest-8.4.0, pluggy-1.6.0 -- /Users/tapanc/dev/praga_core/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/tapanc/dev/praga_core
+configfile: pyproject.toml
+plugins: anyio-4.9.0, asyncio-1.0.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 38 items
+
+tests/services/test_people_service.py::TestPeopleService::test_init PASSED [  2%]
+tests/services/test_people_service.py::TestPeopleService::test_handle_person_request_not_found PASSED [  5%]
+tests/services/test_people_service.py::TestPeopleService::test_get_person_records_existing PASSED [  7%]
+tests/services/test_people_service.py::TestPeopleService::test_get_person_records_create_new PASSED [ 10%]
+tests/services/test_people_service.py::TestPeopleService::test_get_person_records_creation_fails PASSED [ 13%]
+tests/services/test_people_service.py::TestPeopleService::test_lookup_people_by_email PASSED [ 15%]
+tests/services/test_people_service.py::TestPeopleService::test_lookup_people_by_full_name PASSED [ 18%]
+tests/services/test_people_service.py::TestPeopleService::test_lookup_people_by_first_name PASSED [ 21%]
+tests/services/test_people_service.py::TestPeopleService::test_lookup_people_not_found PASSED [ 23%]
+tests/services/test_people_service.py::TestPeopleService::test_create_person_existing PASSED [ 26%]
+tests/services/test_people_service.py::TestPeopleService::test_create_person_from_people_api FAILED [ 28%]
+tests/services/test_people_service.py::TestPeopleService::test_create_person_no_sources PASSED [ 31%]
+tests/services/test_people_service.py::TestPeopleService::test_create_person_filters_non_real_people PASSED [ 34%]
+tests/services/test_people_service.py::TestPeopleService::test_create_person_name_divergence_error FAILED [ 36%]
+tests/services/test_people_service.py::TestPeopleService::test_extract_people_info_from_google_people PASSED [ 39%]
+tests/services/test_people_service.py::TestPeopleService::test_extract_people_from_directory PASSED [ 42%]
+tests/services/test_people_service.py::TestPeopleService::test_extract_people_from_gmail_contacts PASSED [ 44%]
+tests/services/test_people_service.py::TestPeopleService::test_is_real_person_valid PASSED [ 47%]
+tests/services/test_people_service.py::TestPeopleService::test_is_real_person_automated PASSED [ 50%]
+tests/services/test_people_service.py::TestPeopleService::test_matches_identifier_email PASSED [ 52%]
+tests/services/test_people_service.py::TestPeopleService::test_matches_identifier_name PASSED [ 55%]
+tests/services/test_people_service.py::TestPeopleService::test_store_and_create_page PASSED [ 57%]
+tests/services/test_people_service.py::TestPeopleService::test_toolkit_get_person_records PASSED [ 60%]
+tests/services/test_people_service.py::TestPeopleService::test_find_existing_person_by_email_found PASSED [ 63%]
+tests/services/test_people_service.py::TestPeopleService::test_find_existing_person_by_email_not_found PASSED [ 65%]
+tests/services/test_people_service.py::TestPeopleService::test_real_async_query_path FAILED [ 68%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_search_explicit_sources PASSED [ 71%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_search_implicit_sources PASSED [ 73%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_create_person_name_search_prioritizes_implicit PASSED [ 76%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_create_person_email_search_prioritizes_explicit PASSED [ 78%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_removes_duplicates FAILED [ 81%]
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_filters_non_real_people FAILED [ 84%]
+
+=================================== FAILURES ===================================
+_____________ TestPeopleService.test_create_person_from_people_api _____________
+
+self = <services.test_people_service.TestPeopleService object at 0x10565da00>
+
+    @pytest.mark.asyncio
+    async def test_create_person_from_people_api(self):
+        """Test create_person from Google People API."""
+        with patch.object(self.service, "search_existing_records", return_value=[]):
+            mock_person_info = PersonInfo(
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+                source="people_api",
+            )
+    
+            with patch.object(
+                self.service,
+                "_extract_people_info_from_google_people",
+                return_value=[mock_person_info],
+            ):
+                with patch.object(
+                    self.service, "_extract_people_from_directory", return_value=[]
+                ):
+                    with patch.object(
+                        self.service,
+                        "_extract_people_from_gmail_contacts",
+                        return_value=[],
+                    ):
+                        with patch.object(
+                            self.service, "_is_real_person", return_value=True
+                        ):
+                            # Mock page cache to return no existing person
+                            mock_query = Mock()
+                            mock_query.where.return_value = mock_query
+                            mock_query.all.return_value = []
+                            self.mock_page_cache.find.return_value = mock_query
+                            mock_person_page = Mock(spec=PersonPage)
+                            with patch.object(
+                                self.service,
+                                "_store_and_create_page",
+                                return_value=mock_person_page,
+                            ):
+>                               result = await self.service.create_new_records(
+                                    "john@example.com"
+                                )
+
+tests/services/test_people_service.py:190: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/pragweb/google_api/people/service.py:147: in create_new_records
+    new_person_infos, existing_people = await self._filter_and_deduplicate_people(
+src/pragweb/google_api/people/service.py:208: in _filter_and_deduplicate_people
+    existing_person_with_email = await self._find_existing_person_by_email(email)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pragweb.google_api.people.service.PeopleService object at 0x1057675c0>
+email = 'john@example.com'
+
+    async def _find_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
+        """Find existing person in page cache by email address (async)."""
+>       matches: List[PersonPage] = await (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.email == email.lower())
+            .all()
+        )
+E       TypeError: object list can't be used in 'await' expression
+
+src/pragweb/google_api/people/service.py:119: TypeError
+__________ TestPeopleService.test_create_person_name_divergence_error __________
+
+self = <services.test_people_service.TestPeopleService object at 0x10565d5e0>
+
+    @pytest.mark.asyncio
+    async def test_create_person_name_divergence_error(self):
+        """Test create_person raises error when names diverge for same email."""
+        with patch.object(self.service, "search_existing_records", return_value=[]):
+            # Mock existing person with different name
+            existing_person = Mock(spec=PersonPage)
+            existing_person.full_name = "Jane Smith"
+            existing_person.email = "john@example.com"
+    
+            # Mock page cache to return existing person
+            mock_query = Mock()
+            mock_query.where.return_value = mock_query
+            mock_query.all.return_value = [existing_person]
+            self.mock_page_cache.find.return_value = mock_query
+    
+            mock_person_info = PersonInfo(
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+                source="people_api",
+            )
+            with patch.object(
+                self.service,
+                "_extract_people_info_from_google_people",
+                return_value=[mock_person_info],
+            ):
+                with patch.object(
+                    self.service, "_extract_people_from_directory", return_value=[]
+                ):
+                    with patch.object(
+                        self.service,
+                        "_extract_people_from_gmail_contacts",
+                        return_value=[],
+                    ):
+                        with patch.object(
+                            self.service, "_is_real_person", return_value=True
+                        ):
+                            with pytest.raises(
+                                ValueError, match="Name divergence detected"
+                            ):
+>                               await self.service.create_new_records(
+                                    "john@example.com"
+                                )
+
+tests/services/test_people_service.py:286: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/pragweb/google_api/people/service.py:147: in create_new_records
+    new_person_infos, existing_people = await self._filter_and_deduplicate_people(
+src/pragweb/google_api/people/service.py:208: in _filter_and_deduplicate_people
+    existing_person_with_email = await self._find_existing_person_by_email(email)
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <pragweb.google_api.people.service.PeopleService object at 0x105831940>
+email = 'john@example.com'
+
+    async def _find_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
+        """Find existing person in page cache by email address (async)."""
+>       matches: List[PersonPage] = await (
+            self.page_cache.find(PersonPage)
+            .where(lambda t: t.email == email.lower())
+            .all()
+        )
+E       TypeError: object list can't be used in 'await' expression
+
+src/pragweb/google_api/people/service.py:119: TypeError
+_________________ TestPeopleService.test_real_async_query_path _________________
+
+self = <services.test_people_service.TestPeopleService object at 0x10565f350>
+
+    @pytest.mark.asyncio
+    async def test_real_async_query_path(self):
+        """Test the real async query path for search_existing_records (integration)."""
+        # Setup a real async QueryBuilder
+        from praga_core.page_cache.core import QueryBuilder
+        from praga_core.page_cache.query import PageQuery
+        from praga_core.page_cache.validator import PageValidator
+        from praga_core.page_cache.storage import PageStorage
+        from praga_core.page_cache.registry import PageRegistry
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from praga_core.types import Page
+        import tempfile
+        # Setup a real in-memory page cache
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        engine = create_engine(f"sqlite:///{temp_file.name}")
+        session_factory = sessionmaker(bind=engine)
+        registry = PageRegistry(engine)
+        storage = PageStorage(session_factory, registry)
+        validator = PageValidator()
+        query_engine = PageQuery(session_factory, registry)
+        # Register PersonPage
+        registry.ensure_registered(PersonPage)
+        # Store a person
+        person = PersonPage(uri=PageURI(root="test", type="person", id="p1", version=1), first_name="John", last_name="Doe", email="john@example.com")
+        storage.store(person)
+        # Patch the service's page_cache to use this real cache
+>       self.service.page_cache = type("FakeCache", (), {"find": lambda _, t: QueryBuilder(t, query_engine, validator, storage)})()
+        ^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: property 'page_cache' of 'PeopleService' object has no setter
+
+tests/services/test_people_service.py:495: AttributeError
+_ TestPeopleServiceRefactored.test_filter_and_deduplicate_people_removes_duplicates _
+
+self = <services.test_people_service.TestPeopleServiceRefactored object at 0x10565fa70>
+
+    def test_filter_and_deduplicate_people_removes_duplicates(self):
+        """Test _filter_and_deduplicate_people removes duplicate emails."""
+        all_person_infos = [
+            PersonInfo(
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+                source="people_api",
+            ),
+            PersonInfo(
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",  # Duplicate email
+                source="emails",
+            ),
+            PersonInfo(
+                first_name="Jane",
+                last_name="Smith",
+                email="jane@example.com",
+                source="directory_api",
+            ),
+        ]
+    
+        with patch.object(self.service, "_is_real_person", return_value=True):
+            with patch.object(
+                self.service, "_find_existing_person_by_email", return_value=None
+            ):
+>               new_person_infos, existing_people = (
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    self.service._filter_and_deduplicate_people(
+                        all_person_infos, "test"
+                    )
+                )
+E               TypeError: cannot unpack non-iterable coroutine object
+
+tests/services/test_people_service.py:660: TypeError
+_ TestPeopleServiceRefactored.test_filter_and_deduplicate_people_filters_non_real_people _
+
+self = <services.test_people_service.TestPeopleServiceRefactored object at 0x10565f770>
+
+    def test_filter_and_deduplicate_people_filters_non_real_people(self):
+        """Test _filter_and_deduplicate_people filters out non-real people."""
+        all_person_infos = [
+            PersonInfo(
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+                source="people_api",
+            ),
+            PersonInfo(
+                first_name="No Reply",
+                last_name="",
+                email="noreply@example.com",
+                source="emails",
+            ),
+        ]
+    
+        def mock_is_real_person(person_info):
+            return person_info.email != "noreply@example.com"
+    
+        with patch.object(
+            self.service, "_is_real_person", side_effect=mock_is_real_person
+        ):
+            with patch.object(
+                self.service, "_find_existing_person_by_email", return_value=None
+            ):
+>               new_person_infos, existing_people = (
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    self.service._filter_and_deduplicate_people(
+                        all_person_infos, "test"
+                    )
+                )
+E               TypeError: cannot unpack non-iterable coroutine object
+
+tests/services/test_people_service.py:699: TypeError
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298
+.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298
+  /Users/tapanc/dev/praga_core/.venv/lib/python3.12/site-packages/pydantic/_internal/_generate_schema.py:298: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.11/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warnings.warn(
+
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_removes_duplicates
+  /Users/tapanc/dev/praga_core/tests/services/test_people_service.py:660: RuntimeWarning: coroutine 'PeopleService._filter_and_deduplicate_people' was never awaited
+    new_person_infos, existing_people = (
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_filters_non_real_people
+  /Users/tapanc/dev/praga_core/tests/services/test_people_service.py:699: RuntimeWarning: coroutine 'PeopleService._filter_and_deduplicate_people' was never awaited
+    new_person_infos, existing_people = (
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/services/test_people_service.py::TestPeopleService::test_create_person_from_people_api
+FAILED tests/services/test_people_service.py::TestPeopleService::test_create_person_name_divergence_error
+FAILED tests/services/test_people_service.py::TestPeopleService::test_real_async_query_path
+FAILED tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_removes_duplicates
+FAILED tests/services/test_people_service.py::TestPeopleServiceRefactored::test_filter_and_deduplicate_people_filters_non_real_people
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 5 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+=================== 5 failed, 27 passed, 7 warnings in 0.89s ===================
