@@ -124,9 +124,9 @@ class PageCache:
 
     # Validation management
     def register_validator(
-        self, page_type: Type[P], validator: Union[Callable[[P], bool], Callable[[P], Awaitable[bool]]]
+        self, page_type: Type[P], validator: Callable[[P], Awaitable[bool]]
     ) -> None:
-        """Register a validator function for a page type."""
+        """Register an async validator function for a page type."""
         self._validator.register(page_type, validator)
 
     # Cache management

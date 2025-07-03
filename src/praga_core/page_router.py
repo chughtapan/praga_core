@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from typing import Awaitable, Callable, Dict, List, Type, Union
 
@@ -8,21 +7,19 @@ from .page_cache import PageCache
 
 logger = logging.getLogger(__name__)
 
-HandlerFn = Callable[..., Page]
-AsyncHandlerFn = Callable[..., Awaitable[Page]]
-AnyHandlerFn = Union[HandlerFn, AsyncHandlerFn]
+HandlerFn = Callable[..., Awaitable[Page]]
 
-__all__ = ["PageRouter", "HandlerFn", "AsyncHandlerFn", "AnyHandlerFn"]
+__all__ = ["PageRouter", "HandlerFn"]
 
 
 class PageRouter:
     def __init__(self, page_cache: PageCache) -> None:
-        self._handlers: Dict[str, AnyHandlerFn] = {}
+        self._handlers: Dict[str, HandlerFn] = {}
         self._cache_enabled: Dict[str, bool] = {}
         self._page_cache: PageCache = page_cache
 
-    def route(self, path: str, cache: bool = True) -> Callable[[AnyHandlerFn], AnyHandlerFn]:
-        def decorator(func: AnyHandlerFn) -> AnyHandlerFn:
+    def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
+        def decorator(func: HandlerFn) -> HandlerFn:
             # Validate handler before registering
             if (
                 not hasattr(func, "__annotations__")
@@ -80,7 +77,7 @@ class PageRouter:
 
         return decorator
 
-    def get_handler(self, path: str) -> AnyHandlerFn:
+    def get_handler(self, path: str) -> HandlerFn:
         return self._handlers[path]
 
     def is_cache_enabled(self, path: str) -> bool:
@@ -132,8 +129,8 @@ class PageRouter:
             )
         return None
 
-    async def _call_handler_async(self, handler: AnyHandlerFn, page_uri: PageURI) -> Page:
-        """Call the handler to generate a page, ensuring proper URI versioning."""
+    async def _call_handler_async(self, handler: HandlerFn, page_uri: PageURI) -> Page:
+        """Call the async handler to generate a page, ensuring proper URI versioning."""
         if page_uri.version is None:
             page_uri = self._create_page_uri(
                 self._get_handler_return_type(handler, page_uri.type),
@@ -142,13 +139,8 @@ class PageRouter:
                 page_uri.id,
             )
         
-        # Check if handler is async by checking if it's a coroutine function
-        if asyncio.iscoroutinefunction(handler):
-            return await handler(page_uri)
-        else:
-            # Run sync handler in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, handler, page_uri)
+        # All handlers are now async
+        return await handler(page_uri)
 
     async def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
         """Attempt to store page in cache if not already present."""
@@ -179,7 +171,7 @@ class PageRouter:
         return PageURI(root=root, type=type_path, id=id, version=version)
 
     @staticmethod
-    def _get_handler_return_type(handler: AnyHandlerFn, page_type_name: str) -> Type[Page]:
+    def _get_handler_return_type(handler: HandlerFn, page_type_name: str) -> Type[Page]:
         if (
             not hasattr(handler, "__annotations__")
             or "return" not in handler.__annotations__

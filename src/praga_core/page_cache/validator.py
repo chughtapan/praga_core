@@ -1,8 +1,7 @@
 """Page validation logic."""
 
-import asyncio
 import logging
-from typing import Awaitable, Callable, Dict, Type, TypeVar, Union
+from typing import Awaitable, Callable, Dict, Type, TypeVar
 
 from ..types import Page
 
@@ -10,44 +9,43 @@ logger = logging.getLogger(__name__)
 
 P = TypeVar("P", bound=Page)
 
-ValidatorFn = Callable[[P], bool]
-AsyncValidatorFn = Callable[[P], Awaitable[bool]]
-AnyValidatorFn = Union[ValidatorFn, AsyncValidatorFn]
+ValidatorFn = Callable[[P], Awaitable[bool]]
 
-__all__ = ["PageValidator", "ValidatorFn", "AsyncValidatorFn", "AnyValidatorFn"]
+__all__ = ["PageValidator", "ValidatorFn"]
 
 
 class PageValidator:
-    """Handles page validation using registered validator functions."""
+    """Handles page validation using registered async validator functions."""
 
     def __init__(self) -> None:
-        self._validators: Dict[str, AnyValidatorFn] = {}
+        self._validators: Dict[str, ValidatorFn] = {}
 
-    def register(self, page_type: Type[P], validator: AnyValidatorFn) -> None:
-        """Register a validator function for a page type.
+    def register(self, page_type: Type[P], validator: ValidatorFn) -> None:
+        """Register an async validator function for a page type.
 
         The validator function should return True if the page is valid,
         False if it should be considered invalid.
         
-        Supports both sync and async validators:
-        - def validator(page: MyPage) -> bool: ...
+        All validators must be async:
         - async def validator(page: MyPage) -> bool: ...
         """
         type_name = page_type.__name__
 
-        def type_safe_validator(page: Page) -> Union[bool, Awaitable[bool]]:
+        def type_safe_validator(page: Page) -> Awaitable[bool]:
             """Wrapper that ensures type safety."""
             if not isinstance(page, page_type):
                 # If page is not the expected type, consider it valid
                 # (another validator will handle it)
-                return True
+                async def return_true() -> bool:
+                    return True
+                return return_true()
             return validator(page)
 
         self._validators[type_name] = type_safe_validator
-        logger.debug(f"Registered validator for page type: {type_name}")
+        logger.debug(f"Registered async validator for page type: {type_name}")
 
     async def is_valid(self, page: Page) -> bool:
-        """Check if a page is valid according to its registered validator (async).
+        """Check if a page is valid according to its registered async validator.
 
         If no validator is registered for the page type, the page is
         considered valid by default.
@@ -57,13 +55,7 @@ class PageValidator:
         if type_name in self._validators:
             validator = self._validators[type_name]
             try:
-                result = validator(page)
-                
-                # Handle both sync and async validators
-                if asyncio.iscoroutine(result):
-                    is_valid = await result
-                else:
-                    is_valid = bool(result)
+                is_valid = await validator(page)
                     
                 if not is_valid:
                     logger.debug(f"Page failed validation: {page.uri}")
