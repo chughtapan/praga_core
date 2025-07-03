@@ -652,7 +652,11 @@ class ActionToolkitMeta(abc.ABC):
             if hasattr(attr, "_praga_is_action_tool") and attr._praga_is_action_tool:
                 config = getattr(attr, "_praga_action_tool_config", {})
                 tool_name = config.get("name", name)
-                self.register_action_tool(attr, tool_name)
+                # Get the actual function from the descriptor
+                if hasattr(attr, 'func'):
+                    self.register_action_tool(attr.func, tool_name)
+                else:
+                    self.register_action_tool(attr, tool_name)
 
     def __getattr__(self, name: str) -> Any:
         """
