@@ -84,8 +84,13 @@ class TestCalendarService:
 
         self.mock_api_client.get_event.return_value = mock_event
 
-        # Call create_page
-        result = self.service.create_page("event123", "primary")
+        # Create expected URI
+        expected_uri = PageURI(
+            root="test-root", type="calendar_event", id="event123", version=1
+        )
+
+        # Call create_page with the new signature
+        result = self.service.create_page(expected_uri, "event123", "primary")
 
         # Verify API client call
         self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
@@ -125,7 +130,14 @@ class TestCalendarService:
 
         self.mock_api_client.get_event.return_value = mock_event
 
-        result = self.service.create_page("event123")  # No calendar_id provided
+        # Create expected URI
+        expected_uri = PageURI(
+            root="test-root", type="calendar_event", id="event123", version=1
+        )
+
+        result = self.service.create_page(
+            expected_uri, "event123"
+        )  # No calendar_id provided
 
         # Should default to "primary"
         self.mock_api_client.get_event.assert_called_once_with("event123", "primary")
@@ -142,7 +154,12 @@ class TestCalendarService:
 
         self.mock_api_client.get_event.return_value = mock_event
 
-        result = self.service.create_page("event123")
+        # Create expected URI
+        expected_uri = PageURI(
+            root="test-root", type="calendar_event", id="event123", version=1
+        )
+
+        result = self.service.create_page(expected_uri, "event123")
 
         # Should handle date-only format
         assert result.start_time == datetime.fromisoformat("2023-06-15")
@@ -158,7 +175,12 @@ class TestCalendarService:
 
         self.mock_api_client.get_event.return_value = mock_event
 
-        result = self.service.create_page("event123")
+        # Create expected URI
+        expected_uri = PageURI(
+            root="test-root", type="calendar_event", id="event123", version=1
+        )
+
+        result = self.service.create_page(expected_uri, "event123")
 
         assert result.summary == ""
         assert result.description is None
@@ -173,7 +195,11 @@ class TestCalendarService:
         with pytest.raises(
             ValueError, match="Failed to fetch event event123: API Error"
         ):
-            self.service.create_page("event123")
+            # Create expected URI
+            expected_uri = PageURI(
+                root="test-root", type="calendar_event", id="event123", version=1
+            )
+            self.service.create_page(expected_uri, "event123")
 
     def test_search_events_basic(self):
         """Test basic event search."""

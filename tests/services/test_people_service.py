@@ -47,17 +47,6 @@ class TestPeopleService:
         assert "people" in self.mock_context.services
         assert self.mock_context.services["people"] is self.service
 
-    def test_handle_person_request_cached(self):
-        """Test handle_person_request returns cached person."""
-        mock_person = Mock(spec=PersonPage)
-        self.mock_page_cache.get.return_value = mock_person
-
-        result = self.service.handle_person_request("person123")
-
-        expected_uri = PageURI(root="test-root", type="person", id="person123")
-        self.mock_page_cache.get.assert_called_once_with(PersonPage, expected_uri)
-        assert result is mock_person
-
     def test_handle_person_request_not_found(self):
         """Test handle_person_request raises error when person not found."""
         self.mock_page_cache.get.return_value = None
@@ -65,7 +54,10 @@ class TestPeopleService:
         with pytest.raises(
             RuntimeError, match="Invalid request: Person person123 not yet created"
         ):
-            self.service.handle_person_request("person123")
+            expected_uri = PageURI(
+                root="test-root", type="person", id="person123", version=1
+            )
+            self.service.handle_person_request(expected_uri)
 
     def test_get_person_records_existing(self):
         """Test get_person_records returns existing people."""

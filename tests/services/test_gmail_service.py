@@ -109,7 +109,8 @@ class TestGmailService:
         self.service.parser.extract_body = Mock(return_value=mock_body)
 
         # Call create_email_page
-        result = self.service.create_email_page("msg123")
+        expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        result = self.service.create_email_page(expected_uri)
 
         # Verify API client call
         self.mock_api_client.get_message.assert_called_once_with("msg123")
@@ -149,7 +150,8 @@ class TestGmailService:
         self.service.parser.extract_body = Mock(return_value="Test body")
 
         # Create email page
-        email_page = self.service.create_email_page("msg123")
+        expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        email_page = self.service.create_email_page(expected_uri)
 
         # Test thread_uri property
         thread_uri = email_page.thread_uri
@@ -217,7 +219,10 @@ class TestGmailService:
         self.service.parser.extract_body = Mock(return_value="Email body content")
 
         # Call create_thread_page
-        result = self.service.create_thread_page("thread456")
+        expected_uri = PageURI(
+            root="test-root", type="email_thread", id="thread456", version=1
+        )
+        result = self.service.create_thread_page(expected_uri)
 
         # Verify API client call
         self.mock_api_client.get_thread.assert_called_once_with("thread456")
@@ -256,7 +261,10 @@ class TestGmailService:
         with pytest.raises(
             ValueError, match="Failed to fetch thread thread456: API Error"
         ):
-            self.service.create_thread_page("thread456")
+            expected_uri = PageURI(
+                root="test-root", type="email_thread", id="thread456", version=1
+            )
+            self.service.create_thread_page(expected_uri)
 
     def test_create_thread_page_empty_thread(self):
         """Test create_thread_page handles thread with no messages."""
@@ -264,7 +272,10 @@ class TestGmailService:
         self.mock_api_client.get_thread.return_value = mock_thread
 
         with pytest.raises(ValueError, match="Thread thread456 contains no messages"):
-            self.service.create_thread_page("thread456")
+            expected_uri = PageURI(
+                root="test-root", type="email_thread", id="thread456", version=1
+            )
+            self.service.create_thread_page(expected_uri)
 
     def test_create_thread_page_minimal_headers(self):
         """Test create_thread_page with minimal headers."""
@@ -291,7 +302,10 @@ class TestGmailService:
         self.mock_api_client.get_thread.return_value = mock_thread
         self.service.parser.extract_body = Mock(return_value="Test body")
 
-        result = self.service.create_thread_page("thread456")
+        expected_uri = PageURI(
+            root="test-root", type="email_thread", id="thread456", version=1
+        )
+        result = self.service.create_thread_page(expected_uri)
 
         assert isinstance(result, EmailThreadPage)
         assert result.thread_id == "thread456"
@@ -323,7 +337,8 @@ class TestGmailService:
         self.mock_api_client.get_message.return_value = mock_message
         self.service.parser.extract_body = Mock(return_value="Test body")
 
-        result = self.service.create_email_page("msg123")
+        expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        result = self.service.create_email_page(expected_uri)
 
         assert isinstance(result, EmailPage)
         assert result.message_id == "msg123"
@@ -354,7 +369,8 @@ class TestGmailService:
         self.mock_api_client.get_message.return_value = mock_message
         self.service.parser.extract_body = Mock(return_value="Test body")
 
-        result = self.service.create_email_page("msg123")
+        expected_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        result = self.service.create_email_page(expected_uri)
 
         assert isinstance(result, EmailPage)
         assert result.message_id == "msg123"
@@ -771,8 +787,12 @@ class TestEmailThreadPageIntegration:
         self.service.parser.extract_body = Mock(return_value="Test body")
 
         # Create email page and thread page
-        email_page = self.service.create_email_page("msg123")
-        thread_page = self.service.create_thread_page("thread456")
+        email_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        thread_uri = PageURI(
+            root="test-root", type="email_thread", id="thread456", version=1
+        )
+        email_page = self.service.create_email_page(email_uri)
+        thread_page = self.service.create_thread_page(thread_uri)
 
         # Verify that EmailPage.thread_uri matches EmailThreadPage.uri
         assert email_page.thread_uri == thread_page.uri
@@ -825,7 +845,10 @@ class TestEmailThreadPageIntegration:
         self.service.parser.extract_body = Mock(return_value="Email body content")
 
         # Create thread page
-        thread_page = self.service.create_thread_page("thread456")
+        thread_uri = PageURI(
+            root="test-root", type="email_thread", id="thread456", version=1
+        )
+        thread_page = self.service.create_thread_page(thread_uri)
 
         # Verify email summaries have correct URIs
         assert len(thread_page.emails) == 2

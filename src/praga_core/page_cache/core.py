@@ -127,7 +127,13 @@ class PageCache:
         self, page_type: Type[P], validator: Callable[[P], bool]
     ) -> None:
         """Register a validator function for a page type."""
-        self._validator.register(page_type, validator)
+
+        def validator_wrapper(page: Page) -> bool:
+            if not isinstance(page, page_type):
+                return False
+            return validator(page)
+
+        self._validator.register(page_type, validator_wrapper)
 
     # Cache management
     def invalidate(self, uri: PageURI) -> bool:

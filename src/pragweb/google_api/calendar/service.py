@@ -28,14 +28,20 @@ class CalendarService(ToolkitService):
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
 
-        @self.context.handler(self.name)
-        def handle_event(
-            event_id: str, calendar_id: str = "primary"
-        ) -> CalendarEventPage:
-            return self.create_page(event_id, calendar_id)
+        @self.context.route(self.name, cache=True)
+        def handle_event(page_uri: PageURI) -> CalendarEventPage:
+            # Parse calendar_id from URI id if present, otherwise use default
+            event_id = page_uri.id
+            calendar_id = "primary"  # Default calendar
+
+            # If the id contains calendar info (e.g., "event_id@calendar_id"), parse it
+            if "@" in event_id:
+                event_id, calendar_id = event_id.split("@", 1)
+
+            return self.create_page(page_uri, event_id, calendar_id)
 
     def create_page(
-        self, event_id: str, calendar_id: str = "primary"
+        self, page_uri: PageURI, event_id: str, calendar_id: str = "primary"
     ) -> CalendarEventPage:
         """Create a CalendarEventPage from a Calendar event ID - matches old CalendarEventHandler.handle_event logic exactly."""
         # 1. Fetch event from Calendar API using shared client
@@ -66,12 +72,9 @@ class CalendarService(ToolkitService):
         # 6. Create permalink (exact same as old handler)
         permalink = f"https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
 
-        # 7. Create URI and return complete document
-        uri = self.context.create_page_uri(
-            CalendarEventPage, "calendar_event", event_id
-        )
+        # 7. Use provided URI instead of creating a new one
         return CalendarEventPage(
-            uri=uri,
+            uri=page_uri,
             event_id=event_id,
             calendar_id=calendar_id,
             summary=summary,

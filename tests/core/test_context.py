@@ -73,22 +73,21 @@ def sample_page_references() -> List[PageReference]:
 
 
 # Handler functions for testing
-def document_page_handler(page_id: str) -> DocumentPage:
+def document_page_handler(page_uri: PageURI) -> DocumentPage:
     """Test handler for DocumentPage."""
     return DocumentPage(
-        uri=f"test/document:{page_id}@1",
-        title=f"Test Page {page_id}",
-        content=f"Content for page {page_id}",
+        uri=page_uri,
+        title=f"Test Page {page_uri.id}",
+        content=f"Content for page {page_uri.id}",
     )
 
 
-def alternate_page_handler(page_id: str) -> AlternateTestPage:
+def alternate_page_handler(page_uri: PageURI) -> AlternateTestPage:
     """Test handler for AlternateTestPage."""
-    uri = PageURI(root="test", type="alternate", id=page_id, version=1)
     return AlternateTestPage(
-        uri=uri,
-        name=f"Alternate Page {page_id}",
-        data=f"Data for page {page_id}",
+        uri=page_uri,
+        name=f"Alternate Page {page_uri.id}",
+        data=f"Data for page {page_uri.id}",
     )
 
 
@@ -242,20 +241,21 @@ class TestPageHandlerRegistration:
 
     def test_register_handler_programmatically(self, context: ServerContext) -> None:
         """Test programmatic handler registration."""
-        context.register_handler("document", document_page_handler)
+        context.route("document")(document_page_handler)
+
         # No error means success - handler is stored internally
 
     def test_register_multiple_handlers(self, context: ServerContext) -> None:
         """Test registering handlers for multiple page types."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
         # No error means success
 
     def test_register_handler_duplicate_error(self, context: ServerContext) -> None:
         """Test error when registering duplicate handler."""
-        context.register_handler("document", document_page_handler)
+        context.route("document")(document_page_handler)
         with pytest.raises(RuntimeError, match="already registered"):
-            context.register_handler("document", document_page_handler)
+            context.route("document")(document_page_handler)
 
 
 class TestGetPage:
@@ -263,7 +263,7 @@ class TestGetPage:
 
     def test_get_page_create_new(self, context: ServerContext) -> None:
         """Test creating new page via handler."""
-        context.register_handler("document", document_page_handler)
+        context.route("document")(document_page_handler)
 
         uri = PageURI(root="test", type="document", id="new_page", version=1)
         page = context.get_page(uri)
@@ -273,7 +273,7 @@ class TestGetPage:
 
     def test_get_page_with_uri_from_reference(self, context: ServerContext) -> None:
         """Test getting page using URI from PageReference."""
-        context.register_handler("document", document_page_handler)
+        context.route("document")(document_page_handler)
 
         reference = PageReference(
             uri=PageURI(root="test", type="document", id="ref_page", version=1)
@@ -291,7 +291,9 @@ class TestGetPage:
     def test_get_page_unregistered_type_error(self, context: ServerContext) -> None:
         """Test error when getting page for unregistered type."""
         uri = PageURI(root="test", type="unregistered", id="123", version=1)
-        with pytest.raises(RuntimeError, match="No page handler registered"):
+        with pytest.raises(
+            RuntimeError, match="No handler registered for type: unregistered"
+        ):
             context.get_page(uri)
 
 
@@ -322,8 +324,8 @@ class TestSearch:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using context's retriever."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
 
         mock_retriever = MockRetrieverAgent(sample_page_references)
         context.retriever = mock_retriever
@@ -342,8 +344,8 @@ class TestSearch:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using retriever parameter."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
 
         mock_retriever = MockRetrieverAgent(sample_page_references)
         result = context.search("test query", retriever=mock_retriever)
@@ -376,8 +378,8 @@ class TestSearch:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test that parameter retriever overrides context retriever."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
 
         context_retriever = MockRetrieverAgent([])
         param_retriever = MockRetrieverAgent(sample_page_references)
@@ -399,8 +401,8 @@ class TestReferenceResolution:
         self, context: ServerContext, sample_page_references: List[PageReference]
     ) -> None:
         """Test resolving page references."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
 
         resolved_refs = context._resolve_references(sample_page_references)
 
@@ -415,9 +417,9 @@ class TestIntegration:
     def test_full_workflow_with_decorator(self, context: ServerContext) -> None:
         """Test full workflow using decorator registration."""
 
-        @context.handler("test")
-        def handle_test_page(page_id: str) -> DocumentPage:
-            return document_page_handler(page_id)
+        @context.route("test")
+        def handle_test_page(page_uri: PageURI) -> DocumentPage:
+            return document_page_handler(page_uri)
 
         # Create some test references
         refs = [
@@ -439,8 +441,8 @@ class TestIntegration:
 
     def test_mixed_page_types_workflow(self, context: ServerContext) -> None:
         """Test workflow with multiple page types."""
-        context.register_handler("document", document_page_handler)
-        context.register_handler("alternate", alternate_page_handler)
+        context.route("document")(document_page_handler)
+        context.route("alternate")(alternate_page_handler)
 
         # Create mixed references
         refs = [
@@ -461,8 +463,8 @@ class TestIntegration:
         assert resolved_refs[1].page.name == "Alternate Page alt1"
 
 
-class TestInvalidatorIntegration:
-    """Test invalidator integration with ServerContext."""
+class TestValidatorIntegration:
+    """Test validator integration with ServerContext."""
 
     class GoogleDocPage(Page):
         """Test Google Docs page with revision tracking."""
@@ -475,73 +477,27 @@ class TestInvalidatorIntegration:
             super().__init__(**data)
             self._metadata.token_count = len(self.content) // 4
 
-    def test_register_handler_with_invalidator(self, context: ServerContext) -> None:
-        """Test registering a handler with an invalidator function."""
-
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
-            # Mock handler that creates a document
-            return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
-                revision="current",
-            )
-
-        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
-            # Mock validator - only "current" revision is valid
-            return page.revision == "current"
-
-        # Register handler with invalidator
-        context.register_handler("gdoc", handle_gdoc, validate_gdoc)
-
-        # Verify both handler and invalidator are registered
-        assert "gdoc" in context._page_handlers
-        assert "gdoc" in context._page_invalidators
-
-    def test_invalidator_decorator_syntax(self, context: ServerContext) -> None:
-        """Test using invalidator with decorator syntax."""
-
-        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
-            return page.revision == "current"
-
-        @context.handler("gdoc", invalidator=validate_gdoc)
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
-            return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
-                revision="current",
-            )
-
-        # Verify both handler and invalidator are registered
-        assert "gdoc" in context._page_handlers
-        assert "gdoc" in context._page_invalidators
-
-    def test_get_page_validates_with_registered_invalidator(
+    def test_get_page_validates_with_registered_validator(
         self, context: ServerContext
     ) -> None:
         """Test that getting a page properly uses the registered validator."""
 
-        def handle_gdoc(doc_id: str) -> "TestInvalidatorIntegration.GoogleDocPage":
+        @context.route("gdoc")
+        def handle_gdoc(page_uri: PageURI) -> TestValidatorIntegration.GoogleDocPage:
+            """Handle Google Doc page."""
             # Return different revisions based on doc_id to test validation
-            revision = "current" if doc_id != "old_doc" else "old"
-            return TestInvalidatorIntegration.GoogleDocPage(
-                uri=context.create_page_uri(
-                    TestInvalidatorIntegration.GoogleDocPage, "gdoc", doc_id
-                ),
-                title=f"Document {doc_id}",
-                content=f"Content for {doc_id}",
+            revision = "current" if page_uri.id != "old_doc" else "old"
+            return TestValidatorIntegration.GoogleDocPage(
+                uri=page_uri,
+                title=f"Document {page_uri.id}",
+                content=f"Content for {page_uri.id}",
                 revision=revision,
             )
 
-        def validate_gdoc(page: "TestInvalidatorIntegration.GoogleDocPage") -> bool:
+        @context.validator
+        def validate_gdoc(page: TestValidatorIntegration.GoogleDocPage) -> bool:
+            """Validate Google Doc page."""
             return page.revision == "current"
-
-        context.register_handler("gdoc", handle_gdoc, validate_gdoc)
 
         # Get a page with "current" revision - should work
         page = context.get_page("test/gdoc:doc1")
@@ -549,3 +505,281 @@ class TestInvalidatorIntegration:
         assert page.title == "Document doc1"
 
         # This demonstrates that the validator is working when pages are accessed
+
+
+class TestStrictHandlerValidation:
+    """Test strict handler signature validation functionality."""
+
+    class ValidPage(Page):
+        """Valid test page for handler validation tests."""
+
+        title: str
+        content: str
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+
+    def test_decorator_with_proper_annotation_succeeds(
+        self, context: ServerContext
+    ) -> None:
+        """Test that the decorator also enforces proper annotations."""
+
+        @context.route("valid_decorator")
+        def valid_handler(page_uri: PageURI) -> TestStrictHandlerValidation.ValidPage:
+            return TestStrictHandlerValidation.ValidPage(
+                uri=page_uri, title="Valid Decorator", content="Content"
+            )
+
+        assert "valid_decorator" in context._router._handlers
+
+    def test_decorator_with_invalid_annotation_fails(
+        self, context: ServerContext
+    ) -> None:
+        """Test that the decorator rejects invalid annotations."""
+
+        with pytest.raises(RuntimeError, match="has a string return type annotation"):
+
+            @context.route("invalid_decorator")
+            def invalid_handler(
+                page_uri: PageURI,
+            ) -> "TestStrictHandlerValidation.ValidPage":
+                return TestStrictHandlerValidation.ValidPage(
+                    uri=page_uri, title="Invalid", content="Content"
+                )
+
+    def test_validation_happens_at_registration_not_runtime(
+        self, context: ServerContext
+    ) -> None:
+        """Test that validation happens at registration time, not when get_page is called."""
+
+        # This should fail immediately at registration
+        with pytest.raises(RuntimeError, match="must have a return type annotation"):
+
+            def invalid_handler(page_uri: PageURI):
+                return TestStrictHandlerValidation.ValidPage(
+                    uri=page_uri, title="Test", content="Content"
+                )
+
+            context.route("invalid")(invalid_handler)
+
+        # Verify handler was not registered
+        assert "invalid" not in context._router._handlers
+
+
+class TestEnhancedCaching:
+    """Test enhanced caching functionality and handler signature validation."""
+
+    class CacheTestPage(Page):
+        """Test page for caching tests."""
+
+        content: str
+        call_count: int = Field(exclude=True, default=0)
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+            self._metadata.token_count = len(self.content) // 4
+
+    def test_caching_enabled_by_default(self, context: ServerContext) -> None:
+        """Test that caching is enabled by default and works correctly."""
+        call_count = 0
+
+        def handle_cached(page_uri: PageURI) -> TestEnhancedCaching.CacheTestPage:
+            nonlocal call_count
+            call_count += 1
+            return TestEnhancedCaching.CacheTestPage(
+                uri=page_uri, content=f"Content {call_count}", call_count=call_count
+            )
+
+        context.route("cached_test", cache=True)(handle_cached)
+
+        # First call should invoke handler
+        page1 = context.get_page("test/cached_test:doc1")
+        assert page1.content == "Content 1"
+        assert call_count == 1
+
+        # Second call to same URI should use cache (handler not called again)
+        page2 = context.get_page("test/cached_test:doc1")
+        assert page2.content == "Content 1"  # Same content as first call
+        assert call_count == 1  # Handler not called again
+
+        # Different URI should call handler again
+        page3 = context.get_page("test/cached_test:doc2")
+        assert page3.content == "Content 2"
+        assert call_count == 2
+
+    def test_cache_disabled_calls_handler_every_time(
+        self, context: ServerContext
+    ) -> None:
+        """Test that disabling cache calls handler every time."""
+        call_count = 0
+
+        def handle_uncached(page_uri: PageURI) -> TestEnhancedCaching.CacheTestPage:
+            nonlocal call_count
+            call_count += 1
+            return TestEnhancedCaching.CacheTestPage(
+                uri=page_uri, content=f"Content {call_count}", call_count=call_count
+            )
+
+        context.route("uncached_test", cache=False)(handle_uncached)
+
+        # First call
+        page1 = context.get_page("test/uncached_test:doc1")
+        assert page1.content == "Content 1"
+        assert call_count == 1
+
+        # Second call to same URI should call handler again (no caching)
+        page2 = context.get_page("test/uncached_test:doc1")
+        assert page2.content == "Content 2"  # Different content
+        assert call_count == 2  # Handler called again
+
+    def test_cache_stores_after_handler_execution(self, context: ServerContext) -> None:
+        """Test that pages are stored in cache after handler execution."""
+
+        @context.route("storage_test", cache=True)
+        def handle_for_storage(page_uri: PageURI) -> TestEnhancedCaching.CacheTestPage:
+            """Handle for storage."""
+            return TestEnhancedCaching.CacheTestPage(
+                uri=page_uri, content="test content"
+            )
+
+        # Get a page to trigger handler and caching
+        page_uri = PageURI.parse("test/storage_test:doc1@1")
+        context.get_page(page_uri)
+
+        # Verify the page was stored in cache by directly checking cache
+        cached_page = context.page_cache.get(
+            TestEnhancedCaching.CacheTestPage, page_uri
+        )
+        assert cached_page is not None
+        assert cached_page.content == "test content"
+        assert cached_page.uri == page_uri
+
+
+class TestHandlerSignatureValidation:
+    """Test strict handler signature validation."""
+
+    class ValidTestPage(Page):
+        """Valid test page for signature tests."""
+
+        data: str
+
+    def test_valid_handler_signature_accepted(self, context: ServerContext) -> None:
+        """Test that valid handler signatures are accepted."""
+
+        @context.route("valid_test")
+        def valid_handler(
+            page_uri: PageURI,
+        ) -> TestHandlerSignatureValidation.ValidTestPage:
+            return TestHandlerSignatureValidation.ValidTestPage(
+                uri=page_uri, data="test"
+            )
+
+        # Should not raise any exception
+        assert "valid_test" in context._router._handlers
+
+    def test_missing_return_annotation_rejected(self, context: ServerContext) -> None:
+        """Test that handlers without return annotations are rejected."""
+
+        def invalid_handler(page_uri: PageURI):  # No return annotation
+            return TestHandlerSignatureValidation.ValidTestPage(
+                uri=page_uri, data="test"
+            )
+
+        with pytest.raises(RuntimeError, match="must have a return type annotation"):
+            context.route("invalid_test")(invalid_handler)
+
+    def test_string_return_annotation_rejected(self, context: ServerContext) -> None:
+        """Test that string forward reference annotations are rejected."""
+
+        def invalid_handler(
+            page_uri: PageURI,
+        ) -> "TestHandlerSignatureValidation.ValidTestPage":
+            return TestHandlerSignatureValidation.ValidTestPage(
+                uri=page_uri, data="test"
+            )
+
+        with pytest.raises(RuntimeError, match="has a string return type annotation"):
+            context.route("invalid_test")(invalid_handler)
+
+    def test_non_class_return_annotation_rejected(self, context: ServerContext) -> None:
+        """Test that non-class return annotations are rejected."""
+
+        def invalid_handler(page_uri: PageURI) -> str:  # str is not a Page subclass
+            return "not a page"
+
+        with pytest.raises(
+            RuntimeError, match="return type annotation must be a Page subclass"
+        ):
+            context.route("invalid_test")(invalid_handler)
+
+    def test_non_page_class_return_annotation_rejected(
+        self, context: ServerContext
+    ) -> None:
+        """Test that non-Page class return annotations are rejected."""
+
+        class NotAPage:
+            pass
+
+        def invalid_handler(page_uri: PageURI) -> NotAPage:
+            return NotAPage()
+
+        with pytest.raises(
+            RuntimeError, match="return type annotation must be a Page subclass"
+        ):
+            context.route("invalid_test")(invalid_handler)
+
+    def test_handler_validation_happens_at_registration(
+        self, context: ServerContext
+    ) -> None:
+        """Test that handler validation happens at registration time, not usage time."""
+
+        def invalid_handler(page_uri: PageURI) -> str:
+            return "invalid"
+
+        # The error should happen during registration, not when calling get_page
+        with pytest.raises(
+            RuntimeError, match="return type annotation must be a Page subclass"
+        ):
+            context.route("invalid_test")(invalid_handler)
+
+        # The handler should not be registered
+        assert "invalid_test" not in context._router._handlers
+
+
+class TestCachingIntegration:
+    """Test integration between caching and other features."""
+
+    class IntegrationTestPage(Page):
+        """Test page for integration tests."""
+
+        value: str
+        timestamp: str
+
+    def test_caching_with_invalidator(self, context: ServerContext) -> None:
+        """Test that caching works correctly with invalidators."""
+        call_count = 0
+
+        @context.route("integration_test", cache=True)
+        def handle_with_invalidator(
+            page_uri: PageURI,
+        ) -> TestCachingIntegration.IntegrationTestPage:
+            nonlocal call_count
+            call_count += 1
+            return TestCachingIntegration.IntegrationTestPage(
+                uri=page_uri, value=f"value_{call_count}", timestamp="2024-01-01"
+            )
+
+        @context.validator
+        def validate_page(page: TestCachingIntegration.IntegrationTestPage) -> bool:
+            # Only pages with timestamp "2024-01-01" are valid
+            return page.timestamp == "2024-01-01"
+
+        # First call should invoke handler and cache the result
+        page1 = context.get_page("test/integration_test:doc1")
+        assert page1.value == "value_1"
+        assert call_count == 1
+
+        # Second call should use cache
+        page2 = context.get_page("test/integration_test:doc1")
+        assert page2.value == "value_1"
+        assert call_count == 1  # Handler not called again
