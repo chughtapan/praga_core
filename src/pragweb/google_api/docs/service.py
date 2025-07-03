@@ -190,12 +190,11 @@ class GoogleDocsService(ToolkitService):
                     id=f"{document_id}({i + 1})",
                 )
 
-            # Create chunk page using same pattern as provided header URI
             chunk_uri = PageURI(
                 root=header_page_uri.root,
                 type="gdoc_chunk",
                 id=chunk_id,
-                version=None,  # Let the chunk handler create the version when needed
+                version=header_page_uri.version,
             )
             chunk_page = GDocChunk(
                 uri=chunk_uri,

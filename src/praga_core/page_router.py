@@ -72,35 +72,66 @@ class PageRouter:
         return self._cache_enabled.get(path, True)
 
     def get_page(self, page_uri: PageURI) -> Page:
+        """Retrieve a page by routing to the appropriate handler.
+
+        First checks cache if caching is enabled for the page type.
+        If not cached or caching disabled, calls the handler to generate the page.
+        """
         if page_uri.type not in self._handlers:
             raise RuntimeError(f"No handler registered for type: {page_uri.type}")
+
         cache_enabled = self.is_cache_enabled(page_uri.type)
         handler = self._handlers[page_uri.type]
         page_type = self._get_handler_return_type(handler, page_uri.type)
-        # Try cache
+
+        # Try cache first if enabled
         if cache_enabled:
-            try:
-                cached_page = self._page_cache.get(page_type, page_uri)
-                if cached_page:
-                    logger.debug(f"Found cached page for {page_uri}")
-                    return cached_page
-            except Exception as e:
-                logger.debug(
-                    f"Error checking cache for {page_uri}: {e}, falling back to handler"
-                )
-        # Not in cache or caching disabled
+            cached_page = self._get_from_cache(page_type, page_uri)
+            if cached_page:
+                return cached_page
+
+        # Not in cache or caching disabled - call handler
+        page = self._call_handler(handler, page_uri)
+
+        # Store in cache if enabled and not already cached
+        if cache_enabled:
+            self._store_in_cache(page, page_uri)
+
+        return page
+
+    def _get_from_cache(self, page_type: Type[Page], page_uri: PageURI) -> Page | None:
+        """Attempt to retrieve page from cache."""
+        try:
+            cached_page = self._page_cache.get(page_type, page_uri)
+            if cached_page:
+                logger.debug(f"Found cached page for {page_uri}")
+                return cached_page
+        except Exception as e:
+            logger.debug(
+                f"Error checking cache for {page_uri}: {e}, falling back to handler"
+            )
+        return None
+
+    def _call_handler(self, handler: HandlerFn, page_uri: PageURI) -> Page:
+        """Call the handler to generate a page, ensuring proper URI versioning."""
         if page_uri.version is None:
             page_uri = self._create_page_uri(
-                page_type, page_uri.root, page_uri.type, page_uri.id
+                self._get_handler_return_type(handler, page_uri.type),
+                page_uri.root,
+                page_uri.type,
+                page_uri.id,
             )
-        page = handler(page_uri)
-        if cache_enabled:
-            try:
+        return handler(page_uri)
+
+    def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
+        """Attempt to store page in cache if not already present."""
+        try:
+            # Check if page is already in cache
+            if not self._page_cache.get(page.__class__, page_uri):
                 self._page_cache.store(page)
                 logger.debug(f"Stored page in cache: {page_uri}")
-            except Exception as e:
-                logger.debug(f"Error storing page in cache for {page_uri}: {e}")
-        return page
+        except Exception as e:
+            logger.debug(f"Error storing page in cache for {page_uri}: {e}")
 
     def _create_page_uri(
         self, page_type: Type[Page], root: str, type_path: str, id: str
