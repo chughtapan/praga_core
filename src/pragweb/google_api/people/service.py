@@ -125,10 +125,10 @@ class PeopleService(ToolkitService):
         )
         return first_name_matches
 
-    def create_new_records(self, identifier: str) -> List[PersonPage]:
-        """Create new person pages for a given identifier."""
+    async def create_new_records(self, identifier: str) -> List[PersonPage]:
+        """Create new person pages for a given identifier (async)."""
         # First check if person already exists
-        existing_people = self.search_existing_records(identifier)
+        existing_people = await self.get_person_records(identifier)
         if existing_people:
             raise RuntimeError(f"Person already exists for identifier: {identifier}")
 
@@ -141,15 +141,15 @@ class PeopleService(ToolkitService):
                 f"Name-based search for '{identifier}' - prioritizing implicit sources"
             )
             # For name searches: implicit sources first (emails have richer name data)
-            all_person_infos.extend(self._search_implicit_sources(identifier))
-            all_person_infos.extend(self._search_explicit_sources(identifier))
+            all_person_infos.extend(await self._search_implicit_sources(identifier))
+            all_person_infos.extend(await self._search_explicit_sources(identifier))
         else:
             logger.debug(
                 f"Email-based search for '{identifier}' - prioritizing explicit sources"
             )
             # For email searches: explicit sources first (more authoritative for emails)
-            all_person_infos.extend(self._search_explicit_sources(identifier))
-            all_person_infos.extend(self._search_implicit_sources(identifier))
+            all_person_infos.extend(await self._search_explicit_sources(identifier))
+            all_person_infos.extend(await self._search_implicit_sources(identifier))
 
         # Process and deduplicate results
         new_person_infos, existing_people = self._filter_and_deduplicate_people(
@@ -157,7 +157,7 @@ class PeopleService(ToolkitService):
         )
 
         # Create PersonPage objects for new people only
-        newly_created_people = self._create_person_pages(new_person_infos)
+        newly_created_people = await self._create_person_pages(new_person_infos)
 
         # Combine existing and newly created people
         created_people = existing_people + newly_created_people
@@ -366,7 +366,7 @@ class PeopleService(ToolkitService):
         created_people: List[PersonPage] = []
 
         for person_info in new_person_infos:
-            person_page = self._store_and_create_page(person_info)
+            person_page = await self._store_and_create_page(person_info)
             created_people.append(person_page)
 
         return created_people
@@ -376,7 +376,7 @@ class PeopleService(ToolkitService):
     ) -> List[PersonInfo]:
         """Extract people information from Google People API."""
         try:
-            results = self.api_client.search_contacts(identifier)
+            results = await self.api_client.search_contacts_async(identifier)
 
             people_infos = []
             for result in results:
@@ -782,7 +782,7 @@ class PeopleService(ToolkitService):
 
         return True
 
-    def _store_and_create_page(self, person_info: PersonInfo) -> PersonPage:
+    async def _store_and_create_page(self, person_info: PersonInfo) -> PersonPage:
         """Store person information and create PersonPage."""
         person_id = self._generate_person_id(person_info.email)
 
