@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List
 
-from praga_core.context import ServerContext, action
+from praga_core.context import ServerContext
 from praga_core.types import Page, PageURI
 
 
@@ -195,20 +195,14 @@ class TestActionDecorator:
         assert "archive_email" not in context.actions
 
     def test_standalone_action_decorator(self) -> None:
-        """Test standalone @action decorator."""
+        """Test standalone action registration."""
+        context = ServerContext()
         
-        @action(name="standalone_action")
         def standalone_delete(email: EmailPage) -> bool:
             """Delete an email"""
             return True
         
-        # Check that function is marked
-        assert hasattr(standalone_delete, '_praga_is_action')
-        assert standalone_delete._praga_is_action is True
-        assert standalone_delete._praga_action_name == "standalone_action"
-        
         # Register with context
-        context = ServerContext()
         context.register_action("standalone_delete", standalone_delete)
         assert "standalone_delete" in context.actions
 
