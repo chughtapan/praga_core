@@ -15,17 +15,17 @@ __all__ = ["PageValidator", "ValidatorFn"]
 
 
 class PageValidator:
-    """Handles page validation using registered async validator functions."""
+    """Handles page validation using registered validator functions."""
 
     def __init__(self) -> None:
-        self._validators: Dict[str, ValidatorFn] = {}
+        self._validators: Dict[str, ValidatorFn[Page]] = {}
 
-    def register(self, page_type: Type[P], validator: ValidatorFn) -> None:
-        """Register an async validator function for a page type.
+    def register(self, page_type: Type[P], validator: ValidatorFn[P]) -> None:
+        """Register a validator function for a page type.
 
         The validator function should return True if the page is valid,
         False if it should be considered invalid.
-        
+
         All validators must be async:
         - async def validator(page: MyPage) -> bool: ...
         """
@@ -34,18 +34,19 @@ class PageValidator:
         def type_safe_validator(page: Page) -> Awaitable[bool]:
             """Wrapper that ensures type safety."""
             if not isinstance(page, page_type):
-                # If page is not the expected type, consider it valid
+                # If page is not the expected type, consider it invalid
                 # (another validator will handle it)
-                async def return_true() -> bool:
-                    return True
-                return return_true()
+                async def return_false() -> bool:
+                    return False
+
+                return return_false()
             return validator(page)
 
         self._validators[type_name] = type_safe_validator
-        logger.debug(f"Registered async validator for page type: {type_name}")
+        logger.debug(f"Registered validator for page type: {type_name}")
 
     async def is_valid(self, page: Page) -> bool:
-        """Check if a page is valid according to its registered async validator.
+        """Check if a page is valid according to its registered validator.
 
         If no validator is registered for the page type, the page is
         considered valid by default.
@@ -56,7 +57,7 @@ class PageValidator:
             validator = self._validators[type_name]
             try:
                 is_valid = await validator(page)
-                    
+
                 if not is_valid:
                     logger.debug(f"Page failed validation: {page.uri}")
                 return is_valid

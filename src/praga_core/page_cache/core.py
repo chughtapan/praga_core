@@ -136,7 +136,7 @@ class PageCache:
     def register_validator(
         self, page_type: Type[P], validator: Callable[[P], Awaitable[bool]]
     ) -> None:
-        """Register an async validator function for a page type."""
+        """Register an validator function for a page type."""
         self._validator.register(page_type, validator)
 
     # Cache management
@@ -220,7 +220,7 @@ class QueryBuilder(Generic[P]):
         return self
 
     async def all(self) -> List[P]:
-        """Execute query and return all matching valid pages (async validation)."""
+        """Execute query and return all matching valid pages."""
         pages = self._query_engine.find(self._page_type, self._filters)
         valid_pages: List[P] = []
         for page in pages:
@@ -231,10 +231,10 @@ class QueryBuilder(Generic[P]):
         return valid_pages
 
     async def first(self) -> Optional[P]:
-        """Execute query and return first matching valid page (async validation)."""
+        """Execute query and return first matching valid page."""
         results = await self.all()
         return results[0] if results else None
 
     async def count(self) -> int:
-        """Count matching valid pages (async validation)."""
+        """Count matching valid pages"""
         return len(await self.all())

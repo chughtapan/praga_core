@@ -147,7 +147,7 @@ class RetrieverToolkitMeta(abc.ABC):
     async def invoke_tool(
         self, name: str, raw_input: Union[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
-        """Invoke a tool by name with pagination support (async-only)."""
+        """Invoke a tool by name with pagination support."""
         tool = self.get_tool(name)
         try:
             import chainlit as cl  # type: ignore[import-not-found]
