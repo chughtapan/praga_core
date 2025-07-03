@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Callable, Dict, List, Optional, Type, TypeVar, get_type_hints
+from typing import Awaitable, Callable, Dict, List, Optional, Type, TypeVar, Union, get_type_hints
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 from .page_cache import PageCache
-from .page_router import HandlerFn, PageRouter
+from .page_router import AnyHandlerFn, PageRouter
 from .service import Service
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class ServerContext:
         self._page_cache = PageCache(cache_url)
         self._router = PageRouter(self._page_cache)
 
-    def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
+    def route(self, path: str, cache: bool = True) -> Callable[[AnyHandlerFn], AnyHandlerFn]:
         """Decorator to register a page handler.
 
         Args:
@@ -44,16 +45,28 @@ class ServerContext:
             @context.route("emails")
             def handle_emails(uri: PageURI) -> EmailPage:
                 ...
+                
+            @context.route("async_emails")
+            async def handle_async_emails(uri: PageURI) -> EmailPage:
+                ...
         """
         return self._router.route(path, cache)
 
-    def validator(self, func: Callable[[P], bool]) -> Callable[[P], bool]:
+    def validator(self, func: Callable[[P], Union[bool, Awaitable[bool]]]) -> Callable[[P], Union[bool, Awaitable[bool]]]:
         """Decorator to register a page validator.
 
-        Example:
+        Supports both sync and async validators:
+
+        Example (sync):
             @context.validator
             def validate_email(page: EmailPage) -> bool:
-                ...
+                return page.email != ""
+                
+        Example (async):
+            @context.validator
+            async def validate_email_async(page: EmailPage) -> bool:
+                # Could make API calls, DB queries, etc.
+                return await some_async_validation(page.email)
         """
         hints = {
             name: typ for name, typ in get_type_hints(func).items() if name != "return"
@@ -65,7 +78,7 @@ class ServerContext:
             raise RuntimeError("Validator function's argument must be a Page subclass.")
 
         # Create a wrapper that handles the type cast safely
-        def validator_wrapper(page: Page) -> bool:
+        def validator_wrapper(page: Page) -> Union[bool, Awaitable[bool]]:
             if not isinstance(page, page_type):
                 return False
             return func(page)  # type: ignore
@@ -125,6 +138,22 @@ class ServerContext:
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
         return self._router.get_page(page_uri)
+
+    async def get_page_async(self, page_uri: str | PageURI) -> Page:
+        """Async version of get_page that can handle both sync and async handlers."""
+        if isinstance(page_uri, str):
+            page_uri = PageURI.parse(page_uri)
+        return await self._router.get_page_async(page_uri)
+
+    def get_pages(self, page_uris: List[str | PageURI]) -> List[Page]:
+        """Bulk synchronous page retrieval."""
+        parsed_uris = [PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris]
+        return self._router.get_pages(parsed_uris)
+
+    async def get_pages_async(self, page_uris: List[str | PageURI]) -> List[Page]:
+        """Bulk asynchronous page retrieval with parallel execution."""
+        parsed_uris = [PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris]
+        return await self._router.get_pages_async(parsed_uris)
 
     def search(
         self,

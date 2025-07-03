@@ -1,7 +1,7 @@
 """Simplified PageCache implementation with clear separation of concerns."""
 
 import logging
-from typing import Any, Callable, Generic, List, Optional, Type, TypeVar, cast
+from typing import Any, Awaitable, Callable, Generic, List, Optional, Type, TypeVar, Union, cast
 
 from sqlalchemy import Table, create_engine
 from sqlalchemy.engine import Engine
@@ -124,16 +124,10 @@ class PageCache:
 
     # Validation management
     def register_validator(
-        self, page_type: Type[P], validator: Callable[[P], bool]
+        self, page_type: Type[P], validator: Union[Callable[[P], bool], Callable[[P], Awaitable[bool]]]
     ) -> None:
         """Register a validator function for a page type."""
-
-        def validator_wrapper(page: Page) -> bool:
-            if not isinstance(page, page_type):
-                return False
-            return validator(page)
-
-        self._validator.register(page_type, validator_wrapper)
+        self._validator.register(page_type, validator)
 
     # Cache management
     def invalidate(self, uri: PageURI) -> bool:
