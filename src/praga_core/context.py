@@ -1,21 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Optional, Type, TypeVar
+from typing import Callable, Dict, List, Optional, Type
 
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 from .page_cache import PageCache
+from .page_registry import PageInvalidator, PageRegistry, T
 from .service import Service
 
 logger = logging.getLogger(__name__)
-
-# Type for page handler functions
-PageHandler = Callable[..., Page]
-# Type for page invalidator functions - takes a Page and returns bool (True = valid, False = invalid)
-PageInvalidator = Callable[[Page], bool]
-T = TypeVar("T", bound=Page)
 
 
 class ServerContext:
@@ -30,15 +25,11 @@ class ServerContext:
         """
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
-        self._page_handlers: Dict[str, PageHandler] = {}
-        self._page_invalidators: Dict[str, PageInvalidator] = {}
-        self._page_cache_enabled: Dict[str, bool] = {}
         self._services: Dict[str, Service] = {}
-
-        # Initialize SQL-based PageCache (always available)
         if cache_url is None:
             cache_url = "sqlite:///:memory:"
         self._page_cache = PageCache(cache_url)
+        self._page_registry = PageRegistry(self._page_cache)
 
     def register_service(self, name: str, service: Service) -> None:
         """Register a service with the context."""
@@ -81,7 +72,7 @@ class ServerContext:
         """
         if version is None:
             # If caching is disabled for this type, just use version 1
-            if not self._page_cache_enabled.get(type_path, True):
+            if not self._page_registry.is_cache_enabled(type_path):
                 version = 1
             else:
                 try:
@@ -136,12 +127,7 @@ class ServerContext:
             def handle_email(email_uri: PageURI) -> EmailPage:
                 return EmailPage(...)
         """
-
-        def decorator(func: Callable[..., T]) -> Callable[..., T]:
-            self.register_handler(page_type, func, invalidator, cache)
-            return func
-
-        return decorator
+        return self._page_registry.handler(page_type, invalidator, cache)
 
     def _try_get_from_cache(self, page_uri: PageURI) -> Optional[Page]:
         """Try to get a page from cache if caching is enabled for this page type.
@@ -153,13 +139,13 @@ class ServerContext:
             Optional[Page]: The cached page if found and caching is enabled, None otherwise.
         """
         # Check if caching is enabled for this page type
-        cache_enabled = self._page_cache_enabled.get(page_uri.type, True)
+        cache_enabled = self._page_registry.is_cache_enabled(page_uri.type)
         if not cache_enabled:
             return None
 
         # Get handler and extract page type from return annotation
-        handler = self._page_handlers[page_uri.type]
-        page_type = self._get_handler_return_type(handler, page_uri.type)
+        handler = self._page_registry.get_handler(page_uri.type)
+        page_type = PageRegistry._get_handler_return_type(handler, page_uri.type)
 
         # Try to get from cache
         try:
@@ -175,62 +161,6 @@ class ServerContext:
 
         return None
 
-    def _get_handler_return_type(
-        self, handler: PageHandler, page_type_name: str
-    ) -> Type[Page]:
-        """Extract the return type annotation from a handler function.
-
-        Args:
-            handler: The page handler function to check
-            page_type_name: The name of the page type (used for error messages)
-
-        Returns:
-            Type[Page]: The return type of the handler (must be a Page subclass)
-
-        Raises:
-            RuntimeError: If the handler doesn't have a proper return type annotation.
-        """
-        if (
-            not hasattr(handler, "__annotations__")
-            or "return" not in handler.__annotations__
-        ):
-            raise RuntimeError(
-                f"Handler for page type '{page_type_name}' must have a return type annotation. "
-                f"Example: def handle_{page_type_name}(page_uri: PageURI) -> {page_type_name.title()}Page:"
-            )
-
-        return_type = handler.__annotations__["return"]
-
-        # Check if it's a string annotation (forward reference)
-        if isinstance(return_type, str):
-            raise RuntimeError(
-                f"Handler for page type '{page_type_name}' has a string return type annotation '{return_type}'. "
-                f"Please use a proper class import instead of a forward reference."
-            )
-
-        # Verify it's a proper type/class
-        if not isinstance(return_type, type):
-            raise RuntimeError(
-                f"Handler for page type '{page_type_name}' return type annotation must be a class, "
-                f"got {type(return_type).__name__}: {return_type}"
-            )
-
-        # Verify it's a Page subclass
-        try:
-            if not issubclass(return_type, Page):
-                raise RuntimeError(
-                    f"Handler for page type '{page_type_name}' return type annotation must be a Page subclass, "
-                    f"got {return_type.__name__}"
-                )
-        except TypeError:
-            # issubclass can raise TypeError for some types (like generics)
-            raise RuntimeError(
-                f"Handler for page type '{page_type_name}' return type annotation must be a Page subclass, "
-                f"got {return_type}"
-            )
-
-        return return_type
-
     def _register_invalidator_if_exists(
         self, page_type_name: str, page_type: Type[Page]
     ) -> None:
@@ -240,9 +170,9 @@ class ServerContext:
             page_type_name: The name/identifier of the page type
             page_type: The actual Page subclass type
         """
-        if page_type_name in self._page_invalidators:
-            invalidator = self._page_invalidators[page_type_name]
-            self._register_invalidator_with_cache(page_type, invalidator)
+        invalidator = self._page_registry.get_invalidator(page_type_name)
+        if invalidator:
+            self._page_registry._register_invalidator_with_cache(page_type, invalidator)
 
     def get_page(self, page_uri: str | PageURI) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
@@ -254,7 +184,7 @@ class ServerContext:
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
 
-        if page_uri.type not in self._page_handlers:
+        if page_uri.type not in self._page_registry._page_handlers:
             raise RuntimeError(f"No page handler registered for type: {page_uri.type}")
 
         # Try to get from cache first if caching is enabled
@@ -267,15 +197,15 @@ class ServerContext:
         if page_uri.version is None:
             # Need to create a full URI with version number
             # We need to determine the page type from the handler to call create_page_uri
-            handler = self._page_handlers[page_uri.type]
-            page_type = self._get_handler_return_type(handler, page_uri.type)
+            handler = self._page_registry.get_handler(page_uri.type)
+            page_type = PageRegistry._get_handler_return_type(handler, page_uri.type)
             page_uri = self.create_page_uri(page_type, page_uri.type, page_uri.id)
 
-        handler = self._page_handlers[page_uri.type]
+        handler = self._page_registry.get_handler(page_uri.type)
         page = handler(page_uri)
 
         # Store the page in cache if caching is enabled for this page type
-        cache_enabled = self._page_cache_enabled.get(page_uri.type, True)
+        cache_enabled = self._page_registry.is_cache_enabled(page_uri.type)
         if cache_enabled:
             try:
                 self._page_cache.store(page)
@@ -284,9 +214,11 @@ class ServerContext:
                 logger.debug(f"Error storing page in cache for {page_uri}: {e}")
 
         # Register invalidator with cache if we have one for this page type
-        if page_uri.type in self._page_invalidators:
-            invalidator = self._page_invalidators[page_uri.type]
-            self._register_invalidator_with_cache(page.__class__, invalidator)
+        invalidator = self._page_registry.get_invalidator(page_uri.type)
+        if invalidator:
+            self._page_registry._register_invalidator_with_cache(
+                page.__class__, invalidator
+            )
 
         return page
 
@@ -357,39 +289,9 @@ class ServerContext:
 
             ctx.register_handler("email", handle_email, validate_email, cache=True)
         """
-        if type_name in self._page_handlers:
-            raise RuntimeError(f"Page handler already registered for type: {type_name}")
-
-        # Validate handler signature during registration
-        page_type = self._get_handler_return_type(handler_func, type_name)
-
-        # Ensure page type is registered with cache if caching is enabled
-        if cache:
-            try:
-                self._page_cache._storage._registry.ensure_registered(page_type)
-            except Exception as e:
-                logger.debug(f"Error initializing cache for {type_name}: {e}")
-
-        self._page_handlers[type_name] = handler_func
-        self._page_cache_enabled[type_name] = cache
-
-        if invalidator_func is not None:
-            self._page_invalidators[type_name] = invalidator_func
-
-            # Register invalidator with cache immediately since we know the page type
-            if cache:
-                self._register_invalidator_with_cache(page_type, invalidator_func)
-
-    def _register_invalidator_with_cache(
-        self, page_type: Type[Page], invalidator: PageInvalidator
-    ) -> None:
-        """Register an invalidator with the page cache for a specific page type.
-
-        Args:
-            page_type: The Page subclass type to register the invalidator for
-            invalidator: The invalidator function to register
-        """
-        self._page_cache.register_validator(page_type, invalidator)
+        self._page_registry.register_handler(
+            type_name, handler_func, invalidator_func, cache
+        )
 
     @property
     def retriever(self) -> Optional[RetrieverAgentBase]:

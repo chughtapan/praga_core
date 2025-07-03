@@ -69,7 +69,9 @@ def test_context_mixin():
 
     # Register handler
     def handle_test_page(page_uri: PageURI) -> TestPage:
-        return TestPage(uri=page_uri, title=f"Test {page_uri.id}", content="Test content")
+        return TestPage(
+            uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
+        )
 
     context.register_handler("test", handle_test_page)
 
@@ -108,7 +110,7 @@ def test_manual_context_setup():
     context.register_handler("mytype", handle_my_type)
 
     # Handler should be registered
-    assert "mytype" in context._page_handlers
+    assert "mytype" in context._page_registry._page_handlers
 
     # Can use services with the context
     service = MockService()
@@ -144,10 +146,14 @@ def test_multiple_services_same_context():
 
     # Register handlers for both types
     def handle_shared(page_uri: PageURI) -> TestPage:
-        return TestPage(uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content")
+        return TestPage(
+            uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content"
+        )
 
     def handle_test(page_uri: PageURI) -> TestPage:
-        return TestPage(uri=page_uri, title=f"Test {page_uri.id}", content="Test content")
+        return TestPage(
+            uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
+        )
 
     context.register_handler("shared", handle_shared)
     context.register_handler("test", handle_test)
@@ -202,6 +208,6 @@ def test_context_with_no_handlers():
 
     # Should be able to access context even with no handlers
     assert service.context.root == "empty"
-    assert len(service.context._page_handlers) == 0
+    assert len(service.context._page_registry._page_handlers) == 0
 
     clear_global_context()

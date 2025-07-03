@@ -494,8 +494,8 @@ class TestInvalidatorIntegration:
         context.register_handler("gdoc", handle_gdoc, validate_gdoc)
 
         # Verify both handler and invalidator are registered
-        assert "gdoc" in context._page_handlers
-        assert "gdoc" in context._page_invalidators
+        assert "gdoc" in context._page_registry._page_handlers
+        assert "gdoc" in context._page_registry._page_invalidators
 
     def test_invalidator_decorator_syntax(self, context: ServerContext) -> None:
         """Test using invalidator with decorator syntax."""
@@ -513,8 +513,8 @@ class TestInvalidatorIntegration:
             )
 
         # Verify both handler and invalidator are registered
-        assert "gdoc" in context._page_handlers
-        assert "gdoc" in context._page_invalidators
+        assert "gdoc" in context._page_registry._page_handlers
+        assert "gdoc" in context._page_registry._page_invalidators
 
     def test_get_page_validates_with_registered_invalidator(
         self, context: ServerContext
@@ -568,7 +568,7 @@ class TestStrictHandlerValidation:
 
         # Should succeed without raising an exception
         context.register_handler("valid_page", valid_handler)
-        assert "valid_page" in context._page_handlers
+        assert "valid_page" in context._page_registry._page_handlers
 
     def test_handler_without_return_annotation_fails(
         self, context: ServerContext
@@ -620,7 +620,7 @@ class TestStrictHandlerValidation:
                 uri=page_uri, title="Valid Decorator", content="Content"
             )
 
-        assert "valid_decorator" in context._page_handlers
+        assert "valid_decorator" in context._page_registry._page_handlers
 
     def test_decorator_with_invalid_annotation_fails(
         self, context: ServerContext
@@ -653,7 +653,7 @@ class TestStrictHandlerValidation:
             context.register_handler("invalid", invalid_handler)
 
         # Verify handler was not registered
-        assert "invalid" not in context._page_handlers
+        assert "invalid" not in context._page_registry._page_handlers
 
 
 class TestEnhancedCaching:
@@ -765,7 +765,7 @@ class TestHandlerSignatureValidation:
 
         # Should not raise any exception
         context.register_handler("valid_test", valid_handler)
-        assert "valid_test" in context._page_handlers
+        assert "valid_test" in context._page_registry._page_handlers
 
     def test_missing_return_annotation_rejected(self, context: ServerContext) -> None:
         """Test that handlers without return annotations are rejected."""
@@ -833,7 +833,7 @@ class TestHandlerSignatureValidation:
             context.register_handler("invalid_test", invalid_handler)
 
         # The handler should not be registered
-        assert "invalid_test" not in context._page_handlers
+        assert "invalid_test" not in context._page_registry._page_handlers
 
 
 class TestCachingIntegration:
