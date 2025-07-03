@@ -72,7 +72,7 @@ class TestAsyncHandlers:
         context.route("async_test")(async_document_handler)
         
         uri = PageURI(root="test", type="async_test", id="page1", version=1)
-        page = await context.get_page_async(uri)
+        page = await context.get_page(uri)
         
         assert isinstance(page, AsyncTestPage)
         assert page.title == "Async Test Page page1"
@@ -84,18 +84,19 @@ class TestAsyncHandlers:
         context.route("sync_test")(sync_document_handler)
         
         uri = PageURI(root="test", type="sync_test", id="page1", version=1)
-        page = await context.get_page_async(uri)
+        page = await context.get_page(uri)
         
         assert isinstance(page, AsyncTestPage)
         assert page.title == "Sync Test Page page1"
         assert "Sync content" in page.content
 
-    def test_sync_handler_in_sync_context(self, context: ServerContext) -> None:
-        """Test that sync handlers still work in sync context."""
+    @pytest.mark.asyncio
+    async def test_sync_handler_in_async_context_only(self, context: ServerContext) -> None:
+        """Test that sync handlers work when called from async context (async-only architecture)."""
         context.route("sync_test")(sync_document_handler)
         
         uri = PageURI(root="test", type="sync_test", id="page1", version=1)
-        page = context.get_page(uri)
+        page = await context.get_page(uri)
         
         assert isinstance(page, AsyncTestPage)
         assert page.title == "Sync Test Page page1"
@@ -109,8 +110,8 @@ class TestAsyncHandlers:
         sync_uri = PageURI(root="test", type="sync_test", id="page1", version=1)
         async_uri = PageURI(root="test", type="async_test", id="page1", version=1)
         
-        sync_page = await context.get_page_async(sync_uri)
-        async_page = await context.get_page_async(async_uri)
+        sync_page = await context.get_page(sync_uri)
+        async_page = await context.get_page(async_uri)
         
         assert sync_page.title == "Sync Test Page page1"
         assert async_page.title == "Async Test Page page1"
@@ -151,7 +152,7 @@ class TestBulkOperations:
         # Time the async bulk operation
         import time
         start_time = time.time()
-        pages = await context.get_pages_async(uris)
+        pages = await context.get_pages(uris)
         end_time = time.time()
         
         # Should complete faster than sequential execution due to parallelism
@@ -177,7 +178,7 @@ class TestBulkOperations:
             PageURI(root="test", type="async_test", id="page4", version=1),
         ]
         
-        pages = await context.get_pages_async(uris)
+        pages = await context.get_pages(uris)
         
         assert len(pages) == 4
         assert pages[0].title == "Sync Test Page page1"
@@ -195,7 +196,7 @@ class TestBulkOperations:
             "test/test:page2@1",
         ]
         
-        pages = await context.get_pages_async(uris)
+        pages = await context.get_pages(uris)
         
         assert len(pages) == 2
         assert pages[0].title == "Sync Test Page page1"
@@ -275,7 +276,7 @@ class TestErrorHandling:
         uri = PageURI(root="test", type="error_test", id="page1", version=1)
         
         with pytest.raises(ValueError, match="Test error from async handler"):
-            await context.get_page_async(uri)
+            await context.get_page(uri)
 
     @pytest.mark.asyncio
     async def test_sync_handler_error_in_async_context(self, context: ServerContext) -> None:
@@ -287,7 +288,7 @@ class TestErrorHandling:
         uri = PageURI(root="test", type="sync_error_test", id="page1", version=1)
         
         with pytest.raises(RuntimeError, match="Test error from sync handler"):
-            await context.get_page_async(uri)
+            await context.get_page(uri)
 
     @pytest.mark.asyncio
     async def test_bulk_operation_partial_failure(self, context: ServerContext) -> None:
@@ -306,4 +307,4 @@ class TestErrorHandling:
         
         # The gather operation should propagate the first exception
         with pytest.raises(ValueError, match="Handler failure"):
-            await context.get_pages_async(uris)
+            await context.get_pages(uris)

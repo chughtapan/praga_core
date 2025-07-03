@@ -56,7 +56,7 @@ class TestAsyncPageValidator:
             status="valid"
         )
         
-        result = await validator.is_valid_async(valid_page)
+        result = await validator.is_valid(valid_page)
         assert result is True
         assert "Valid Page" in validation_calls
         
@@ -67,7 +67,7 @@ class TestAsyncPageValidator:
             status="invalid"
         )
         
-        result = await validator.is_valid_async(invalid_page)
+        result = await validator.is_valid(invalid_page)
         assert result is False
         assert "Invalid Page" in validation_calls
 
@@ -88,7 +88,7 @@ class TestAsyncPageValidator:
             status="valid"
         )
         
-        result = await validator.is_valid_async(valid_page)
+        result = await validator.is_valid(valid_page)
         assert result is True
         assert "Valid Page" in validation_calls
 
@@ -145,7 +145,7 @@ class TestAsyncPageValidator:
             name="Test"
         )
         
-        result = await validator.is_valid_async(wrong_page)
+        result = await validator.is_valid(wrong_page)
         assert result is True
 
     @pytest.mark.asyncio
@@ -156,7 +156,7 @@ class TestAsyncPageValidator:
             name="Test"
         )
         
-        result = await validator.is_valid_async(page)
+        result = await validator.is_valid(page)
         assert result is True
 
     @pytest.mark.asyncio
@@ -175,7 +175,7 @@ class TestAsyncPageValidator:
         )
         
         # Should return False when validator raises exception
-        result = await validator.is_valid_async(page)
+        result = await validator.is_valid(page)
         assert result is False
 
     def test_sync_validator_exception_handling(self, validator: PageValidator) -> None:
@@ -217,7 +217,7 @@ class TestAsyncPageValidator:
         )
         
         # Should use second validator which checks status
-        result = await validator.is_valid_async(invalid_page)
+        result = await validator.is_valid(invalid_page)
         assert result is False
 
     def test_has_validator_method(self, validator: PageValidator) -> None:
