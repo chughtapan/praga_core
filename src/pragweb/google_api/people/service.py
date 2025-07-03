@@ -1,5 +1,6 @@
 """People service for handling person data and page creation using Google People API."""
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -51,8 +52,8 @@ class PeopleService(ToolkitService):
         """Register handlers with context using decorators."""
 
         @self.context.route("person", cache=True)
-        def handle_person(page_uri: PageURI) -> PersonPage:
-            return self.handle_person_request(page_uri)
+        async def handle_person(page_uri: PageURI) -> PersonPage:
+            return await self.handle_person_request_async(page_uri)
 
     def handle_person_request(self, page_uri: PageURI) -> PersonPage:
         """Handle a person page request - get from database or create if not exists."""
@@ -61,8 +62,15 @@ class PeopleService(ToolkitService):
 
         raise RuntimeError(f"Invalid request: Person {page_uri.id} not yet created.")
 
+    async def handle_person_request_async(self, page_uri: PageURI) -> PersonPage:
+        """Handle a person page request - get from database or create if not exists (async)."""
+        # Note: Cache checking is now handled by ServerContext.get_page()
+        # This method is only called when the page is not in cache or caching is disabled
+
+        raise RuntimeError(f"Invalid request: Person {page_uri.id} not yet created.")
+
     @tool()
-    def get_person_records(self, identifier: str) -> List[PersonPage]:
+    async def get_person_records(self, identifier: str) -> List[PersonPage]:
         """Get person records by trying lookup first, then create if not found.
 
         Args:
@@ -76,7 +84,7 @@ class PeopleService(ToolkitService):
 
         # If not found, try to create new record
         try:
-            new_people = self.create_new_records(identifier)
+            new_people = await self.create_new_records_async(identifier)
             logger.debug(f"Created new person records for: {identifier}")
             return new_people
         except (ValueError, RuntimeError) as e:
@@ -159,6 +167,48 @@ class PeopleService(ToolkitService):
         )
         return created_people
 
+    async def create_new_records_async(self, identifier: str) -> List[PersonPage]:
+        """Create new person pages for a given identifier (async)."""
+        # First check if person already exists
+        existing_people = self.search_existing_records(identifier)
+        if existing_people:
+            raise RuntimeError(f"Person already exists for identifier: {identifier}")
+
+        # Extract information from various API sources with different ordering based on search type
+        all_person_infos: List[PersonInfo] = []
+        is_name_search = not self._is_email_address(identifier)
+
+        if is_name_search:
+            logger.debug(
+                f"Name-based search for '{identifier}' - prioritizing implicit sources"
+            )
+            # For name searches: implicit sources first (emails have richer name data)
+            all_person_infos.extend(await self._search_implicit_sources_async(identifier))
+            all_person_infos.extend(await self._search_explicit_sources_async(identifier))
+        else:
+            logger.debug(
+                f"Email-based search for '{identifier}' - prioritizing explicit sources"
+            )
+            # For email searches: explicit sources first (more authoritative for emails)
+            all_person_infos.extend(await self._search_explicit_sources_async(identifier))
+            all_person_infos.extend(await self._search_implicit_sources_async(identifier))
+
+        # Process and deduplicate results
+        new_person_infos, existing_people = self._filter_and_deduplicate_people(
+            all_person_infos, identifier
+        )
+
+        # Create PersonPage objects for new people only
+        newly_created_people = self._create_person_pages(new_person_infos)
+
+        # Combine existing and newly created people
+        created_people = existing_people + newly_created_people
+
+        logger.info(
+            f"Created/found {len(created_people)} people for identifier '{identifier}'"
+        )
+        return created_people
+
     def _search_explicit_sources(self, identifier: str) -> List[PersonInfo]:
         """Search explicit sources (Google People API and Directory API) for the identifier."""
         all_explicit_infos = []
@@ -179,10 +229,35 @@ class PeopleService(ToolkitService):
 
         return all_explicit_infos
 
+    async def _search_explicit_sources_async(self, identifier: str) -> List[PersonInfo]:
+        """Search explicit sources (Google People API and Directory API) for the identifier (async)."""
+        all_explicit_infos = []
+
+        # Google People API
+        people_infos = await self._extract_people_info_from_google_people_async(identifier)
+        all_explicit_infos.extend(people_infos)
+        logger.debug(
+            f"Found {len(people_infos)} people from Google People API for '{identifier}'"
+        )
+
+        # Directory API
+        directory_infos = await self._extract_people_from_directory_async(identifier)
+        all_explicit_infos.extend(directory_infos)
+        logger.debug(
+            f"Found {len(directory_infos)} people from Directory API for '{identifier}'"
+        )
+
+        return all_explicit_infos
+
     def _search_implicit_sources(self, identifier: str) -> List[PersonInfo]:
         """Search implicit sources (Gmail contacts) for the identifier."""
         # Gmail contacts
         return self._extract_people_from_gmail_contacts(identifier)
+
+    async def _search_implicit_sources_async(self, identifier: str) -> List[PersonInfo]:
+        """Search implicit sources (Gmail contacts) for the identifier (async)."""
+        # Gmail contacts
+        return await self._extract_people_from_gmail_contacts_async(identifier)
 
     def _filter_and_deduplicate_people(
         self, all_person_infos: List[PersonInfo], identifier: str
@@ -314,6 +389,24 @@ class PeopleService(ToolkitService):
             logger.debug(f"Error extracting people from Google People API: {e}")
             return []
 
+    async def _extract_people_info_from_google_people_async(
+        self, identifier: str
+    ) -> List[PersonInfo]:
+        """Extract people information from Google People API (async)."""
+        try:
+            results = await self.api_client.search_contacts_async(identifier)
+
+            people_infos = []
+            for result in results:
+                person_info = self._extract_person_from_people_api(result)
+                if person_info:
+                    people_infos.append(person_info)
+
+            return people_infos
+        except Exception as e:
+            logger.debug(f"Error extracting people from Google People API: {e}")
+            return []
+
     def _extract_people_from_directory(self, identifier: str) -> List[PersonInfo]:
         """Extract people from Directory using People API searchDirectoryPeople."""
         try:
@@ -331,6 +424,40 @@ class PeopleService(ToolkitService):
                     ],
                 )
                 .execute()
+            )
+
+            people_infos = []
+            for person in results.get("people", []):
+                person_info = self._extract_person_from_directory_result(person)
+                if person_info:
+                    people_infos.append(person_info)
+
+            return people_infos
+        except Exception as e:
+            logger.debug(f"Error extracting people from Directory API: {e}")
+            return []
+
+    async def _extract_people_from_directory_async(self, identifier: str) -> List[PersonInfo]:
+        """Extract people from Directory using People API searchDirectoryPeople (async)."""
+        try:
+            # Use People API's searchDirectoryPeople endpoint
+            people_service = self.api_client._people
+
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: (
+                    people_service.people()
+                    .searchDirectoryPeople(
+                        query=identifier,
+                        readMask="names,emailAddresses",
+                        sources=[
+                            "DIRECTORY_SOURCE_TYPE_DOMAIN_CONTACT",
+                            "DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE",
+                        ],
+                    )
+                    .execute()
+                )
             )
 
             people_infos = []
@@ -379,6 +506,55 @@ class PeopleService(ToolkitService):
 
             for message in messages[:10]:  # Limit to first 10 messages
                 message_data = self.api_client.get_message(message["id"])
+
+                # Extract people from both From and To headers
+                extracted_people = self._extract_from_gmail(message_data, identifier)
+
+                for person_info in extracted_people:
+                    if person_info and person_info.email not in seen_emails:
+                        people_infos.append(person_info)
+                        seen_emails.add(person_info.email)
+
+            return people_infos
+        except Exception as e:
+            logger.debug(f"Error extracting people from Gmail: {e}")
+            return []
+
+    async def _extract_people_from_gmail_contacts_async(self, identifier: str) -> List[PersonInfo]:
+        """Extract people from Gmail contacts by searching for identifier (async)."""
+        try:
+            # If identifier is an email, search specifically for that email
+            if self._is_email_address(identifier):
+                messages, _ = await self.api_client.search_messages_async(
+                    f"from:{identifier} OR to:{identifier}"
+                )
+            else:
+                # For name-based searches, perform broader searches to find people with matching names
+                # Search in multiple ways to catch various name formats
+                search_queries = []
+                identifier_clean = identifier.strip()
+
+                # Search for quoted exact name
+                search_queries.append(f'from:"{identifier_clean}"')
+                search_queries.append(f'to:"{identifier_clean}"')
+
+                # Search for name parts if it contains spaces (full name)
+                if " " in identifier_clean:
+                    name_parts = identifier_clean.split()
+                    if len(name_parts) >= 2:
+                        first_name = name_parts[0]
+                        search_queries.append(f'from:"{first_name}"')
+                        search_queries.append(f'to:"{first_name}"')
+
+                # Combine all queries with OR
+                combined_query = " OR ".join(f"({query})" for query in search_queries)
+                messages, _ = await self.api_client.search_messages_async(combined_query)
+
+            people_infos = []
+            seen_emails = set()
+
+            for message in messages[:10]:  # Limit to first 10 messages
+                message_data = await self.api_client.get_message_async(message["id"])
 
                 # Extract people from both From and To headers
                 extracted_people = self._extract_from_gmail(message_data, identifier)

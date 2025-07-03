@@ -1,5 +1,6 @@
 """Calendar service for handling Calendar API interactions and page creation."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,7 +30,7 @@ class CalendarService(ToolkitService):
         """Register handlers with context using decorators."""
 
         @self.context.route(self.name, cache=True)
-        def handle_event(page_uri: PageURI) -> CalendarEventPage:
+        async def handle_event(page_uri: PageURI) -> CalendarEventPage:
             # Parse calendar_id from URI id if present, otherwise use default
             event_id = page_uri.id
             calendar_id = "primary"  # Default calendar
@@ -38,7 +39,7 @@ class CalendarService(ToolkitService):
             if "@" in event_id:
                 event_id, calendar_id = event_id.split("@", 1)
 
-            return self.create_page(page_uri, event_id, calendar_id)
+            return await self.create_page_async(page_uri, event_id, calendar_id)
 
     def create_page(
         self, page_uri: PageURI, event_id: str, calendar_id: str = "primary"
@@ -47,6 +48,53 @@ class CalendarService(ToolkitService):
         # 1. Fetch event from Calendar API using shared client
         try:
             event = self.api_client.get_event(event_id, calendar_id)
+        except Exception as e:
+            raise ValueError(f"Failed to fetch event {event_id}: {e}")
+
+        # 2. Extract basic fields
+        summary = event.get("summary", "")
+        description = event.get("description")
+        location = event.get("location")
+
+        # 3. Parse times (exact same as old handler)
+        start = event.get("start", {})
+        end = event.get("end", {})
+        start_time = datetime.fromisoformat(start.get("dateTime", start.get("date")))
+        end_time = datetime.fromisoformat(end.get("dateTime", end.get("date")))
+
+        # 4. Extract attendees (exact same as old handler)
+        attendees = [
+            a.get("email", "") for a in event.get("attendees", []) if a.get("email")
+        ]
+
+        # 5. Get organizer (exact same as old handler)
+        organizer = event.get("organizer", {}).get("email", "")
+
+        # 6. Create permalink (exact same as old handler)
+        permalink = f"https://calendar.google.com/calendar/u/0/r/eventedit/{event_id}"
+
+        # 7. Use provided URI instead of creating a new one
+        return CalendarEventPage(
+            uri=page_uri,
+            event_id=event_id,
+            calendar_id=calendar_id,
+            summary=summary,
+            description=description,
+            location=location,
+            start_time=start_time,
+            end_time=end_time,
+            attendees=attendees,
+            organizer=organizer,
+            permalink=permalink,
+        )
+
+    async def create_page_async(
+        self, page_uri: PageURI, event_id: str, calendar_id: str = "primary"
+    ) -> CalendarEventPage:
+        """Create a CalendarEventPage from a Calendar event ID (async)."""
+        # 1. Fetch event from Calendar API using shared client
+        try:
+            event = await self.api_client.get_event_async(event_id, calendar_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch event {event_id}: {e}")
 
@@ -118,6 +166,37 @@ class CalendarService(ToolkitService):
             logger.error(f"Error searching events: {e}")
             raise
 
+    async def search_events_async(
+        self,
+        query_params: Dict[str, Any],
+        page_token: Optional[str] = None,
+        page_size: int = 20,
+    ) -> Tuple[List[PageURI], Optional[str]]:
+        """Search events and return list of PageURIs and next page token (async)."""
+        try:
+            logger.debug(f"Searching events with query params: {query_params}")
+            events, next_page_token = await self.api_client.search_events_async(
+                query_params, page_token=page_token, page_size=page_size
+            )
+
+            logger.debug(
+                f"Calendar API returned {len(events)} events, next_token: {bool(next_page_token)}"
+            )
+
+            # Convert to PageURIs
+            uris = [
+                self.context.create_page_uri(
+                    CalendarEventPage, "calendar_event", event["id"]
+                )
+                for event in events
+            ]
+
+            return uris, next_page_token
+
+        except Exception as e:
+            logger.error(f"Error searching events: {e}")
+            raise
+
     def _search_events_paginated_response(
         self,
         query_params: Dict[str, Any],
@@ -142,8 +221,33 @@ class CalendarService(ToolkitService):
             next_cursor=next_page_token,
         )
 
+    async def _search_events_paginated_response_async(
+        self,
+        query_params: Dict[str, Any],
+        cursor: Optional[str] = None,
+        page_size: int = 10,
+    ) -> PaginatedResponse[CalendarEventPage]:
+        """Search events and return a paginated response (async)."""
+        # Get the page data using the cursor directly
+        uris, next_page_token = await self.search_events_async(query_params, cursor, page_size)
+
+        # Resolve URIs to pages using context async - throw errors, don't fail silently
+        pages = await self.context.get_pages_async(uris)
+        
+        # Type check the results
+        for page_obj in pages:
+            if not isinstance(page_obj, CalendarEventPage):
+                raise TypeError(f"Expected CalendarEventPage but got {type(page_obj)}")
+        
+        logger.debug(f"Successfully resolved {len(pages)} calendar pages")
+
+        return PaginatedResponse(
+            results=pages,  # type: ignore
+            next_cursor=next_page_token,
+        )
+
     @tool()
-    def get_events_by_date_range(
+    async def get_events_by_date_range(
         self,
         start_date: str,
         num_days: int,
@@ -174,10 +278,10 @@ class CalendarService(ToolkitService):
         if content:
             query_params["q"] = content
 
-        return self._search_events_paginated_response(query_params, cursor)
+        return await self._search_events_paginated_response_async(query_params, cursor)
 
     @tool()
-    def get_events_with_person(
+    async def get_events_with_person(
         self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events where a specific person is involved (as attendee or organizer).
@@ -194,7 +298,7 @@ class CalendarService(ToolkitService):
             query += f" {content}"
 
         # Search for events matching the query
-        return self._search_events_paginated_response(
+        return await self._search_events_paginated_response_async(
             {
                 "q": query,
                 "calendarId": "primary",
@@ -205,7 +309,7 @@ class CalendarService(ToolkitService):
         )
 
     @tool()
-    def get_upcoming_events(
+    async def get_upcoming_events(
         self,
         days: int = 7,
         content: Optional[str] = None,
@@ -230,10 +334,10 @@ class CalendarService(ToolkitService):
             "orderBy": "startTime",
         }
 
-        return self._search_events_paginated_response(query_params, cursor)
+        return await self._search_events_paginated_response_async(query_params, cursor)
 
     @tool()
-    def get_events_by_keyword(
+    async def get_events_by_keyword(
         self, keyword: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get events containing a specific keyword in title or description."""
@@ -245,7 +349,7 @@ class CalendarService(ToolkitService):
             "singleEvents": True,
             "orderBy": "startTime",
         }
-        return self._search_events_paginated_response(query_params, cursor)
+        return await self._search_events_paginated_response_async(query_params, cursor)
 
     @property
     def name(self) -> str:
