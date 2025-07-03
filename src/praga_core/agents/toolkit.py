@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import inspect
 import json
 from collections.abc import Sequence as ABCSequence
 from datetime import datetime, timedelta
@@ -24,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from praga_core.types import Page
 
-from .tool import PaginatedResponse, Tool
+from .tool import ActionTool, ActionToolFunction, PaginatedResponse, Tool
 
 
 class FunctionInvocation(BaseModel):
@@ -528,6 +529,227 @@ def tool(
         # Store the configuration and mark as tool for later registration
         descriptor._praga_tool_config = config  # type: ignore[attr-defined]
         descriptor._praga_is_tool = True  # type: ignore[attr-defined]
+
+        return descriptor  # type: ignore[return-value]
+
+    return decorator
+
+
+# ========================================================
+# ================  ActionToolkit Classes  ==============
+# ========================================================
+
+
+def _is_action_tool_function(tool_function: ActionToolFunction) -> bool:
+    """
+    Check if a function is a valid action tool function.
+    
+    Action tool functions should:
+    1. Have a Page (or subclass) as the first parameter
+    2. Return a boolean
+    """
+    try:
+        type_hints = get_type_hints(tool_function)
+        
+        # Check return type is bool
+        return_annotation = type_hints.get("return", None)
+        if return_annotation is not bool:
+            return False
+            
+        # Check first parameter is Page or subclass
+        sig = inspect.signature(tool_function)
+        param_names = list(sig.parameters.keys())
+        if not param_names:
+            return False
+            
+        first_param = param_names[0]
+        first_param_type = type_hints.get(first_param, None)
+        
+        if first_param_type is None:
+            return False
+            
+        # Check if it's Page or a subclass of Page
+        if first_param_type is Page:
+            return True
+        if isinstance(first_param_type, type) and issubclass(first_param_type, Page):
+            return True
+            
+        return False
+    except Exception:
+        return False
+
+
+class ActionToolkitMeta(abc.ABC):
+    """Base class that handles all the internal mechanics for action toolkits."""
+
+    # Stash for decorator‑based (stateless) tools – stored at *class* level
+    _PENDING_TOOLS = "_praga_pending_action_tools"
+
+    def __init__(self) -> None:
+        # Tool registry maps <public_name> -> <ActionTool>
+        self._action_tools: Dict[str, ActionTool] = {}
+
+        # Register any methods that were tagged with @action_tool decorator
+        self._register_decorated_action_tool_methods()
+
+    def register_action_tool(
+        self,
+        method: ActionToolFunction,
+        name: str | None = None,
+    ) -> None:
+        """
+        Register an action tool with the toolkit.
+
+        Args:
+            method: The action tool function to register.
+            name: The name of the tool. If not provided, uses the function's __name__.
+        """
+        # Use function name if no name is provided
+        if name is None:
+            name = method.__name__
+            
+        if not _is_action_tool_function(method):
+            raise TypeError(
+                f"""Action tool "{name}" must have a Page (or subclass) as the first parameter 
+                and return a boolean. Got: {getattr(method, '__annotations__', {})}"""
+            )
+
+        # Create ActionTool wrapper
+        action_tool = ActionTool(
+            func=method,
+            name=name,
+            description=method.__doc__ or f"Action tool for {name}",
+        )
+
+        # Register the action tool
+        self._action_tools[name] = action_tool
+
+        # Set the direct method on the toolkit instance
+        setattr(self, name, method)
+
+    def get_action_tool(self, name: str) -> ActionTool:
+        """Get an action tool by name."""
+        if name not in self._action_tools:
+            raise ValueError(f"Action tool '{name}' not found")
+        return self._action_tools[name]
+
+    def invoke_action_tool(
+        self, name: str, raw_input: Union[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Invoke an action tool by name."""
+        action_tool = self.get_action_tool(name)
+        return action_tool.invoke(raw_input)
+
+    @property
+    def action_tools(self) -> Dict[str, ActionTool]:
+        """Get all registered action tools."""
+        return self._action_tools.copy()
+
+    def _register_decorated_action_tool_methods(self) -> None:
+        """Register action tool methods that were decorated with @action_tool."""
+        for name in dir(self):
+            attr = getattr(self, name)
+            if hasattr(attr, "_praga_is_action_tool") and attr._praga_is_action_tool:
+                config = getattr(attr, "_praga_action_tool_config", {})
+                tool_name = config.get("name", name)
+                self.register_action_tool(attr, tool_name)
+
+    def __getattr__(self, name: str) -> Any:
+        """
+        This allows mypy to understand that dynamically registered methods exist.
+        """
+        if name in self._action_tools:
+            # Return the direct method
+            return getattr(self, name, None)
+        raise AttributeError(
+            f"'{self.__class__.__name__}' object has no attribute '{name}'"
+        )
+
+
+class ActionToolkit(ActionToolkitMeta):
+    """Base class for action toolkits."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    @abc.abstractmethod
+    def name(self) -> str:
+        pass
+
+
+class ActionToolDescriptor:
+    """Descriptor that validates @action_tool usage and provides the original function."""
+
+    def __init__(self, func: ActionToolFunction, config: Dict[str, Any]):
+        self.func = func
+        self.config = config
+        self.name: Optional[str] = None
+        self.__name__: str = func.__name__
+        self.__doc__: Optional[str] = func.__doc__
+        self.__annotations__: Dict[str, Any] = getattr(func, "__annotations__", {})
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Called when the descriptor is assigned to a class attribute."""
+        self.name = name
+
+        # Check if the owner class inherits from ActionToolkitMeta
+        try:
+            is_action_toolkit_subclass = issubclass(owner, ActionToolkitMeta)
+        except TypeError:
+            # owner is not a class
+            is_action_toolkit_subclass = False
+
+        if not is_action_toolkit_subclass:
+            raise TypeError(
+                f"@action_tool decorator can only be used on ActionToolkit classes. "
+                f"Method '{name}' in class '{owner.__name__}' uses @action_tool "
+                f"but the class does not inherit from ActionToolkit."
+            )
+
+    def __get__(self, instance: Any, owner: type) -> Any:
+        """Return the bound method when accessed on an instance."""
+        if instance is None:
+            return self
+        return self.func.__get__(instance, owner)
+
+
+def action_tool(
+    *,
+    name: str | None = None,
+) -> Callable[[ActionToolFunction], ActionToolFunction]:
+    """
+    Global @action_tool decorator for methods within ActionToolkit classes.
+
+    This decorator can be applied to methods within classes that inherit from
+    ActionToolkit. It will automatically register the action tool when the class
+    is instantiated.
+
+    Args:
+        name: The name of the action tool. If not provided, uses the method's __name__.
+
+    Raises:
+        TypeError: If the decorator is applied to a method in a class that
+                  does not inherit from ActionToolkit.
+
+    Example:
+        class MyActionToolkit(ActionToolkit):
+            @action_tool()
+            def mark_email_read(self, email: EmailPage) -> bool:
+                return True
+    """
+
+    def decorator(func: ActionToolFunction) -> ActionToolFunction:
+        config = {
+            "name": name,
+        }
+
+        # Create a descriptor that validates class inheritance
+        descriptor = ActionToolDescriptor(func, config)
+
+        # Store the configuration and mark as action tool for later registration
+        descriptor._praga_action_tool_config = config  # type: ignore[attr-defined]
+        descriptor._praga_is_action_tool = True  # type: ignore[attr-defined]
 
         return descriptor  # type: ignore[return-value]
 
