@@ -99,7 +99,9 @@ class ActionExecutorMixin(ABC):
         self._actions: Dict[str, ActionFunction] = {}
 
     @abstractmethod
-    async def get_pages(self, page_uris: List[PageURI]) -> List[Page]:
+    async def get_pages(
+        self, page_uris: Sequence[str | PageURI], allow_stale: bool = False
+    ) -> List[Page]:
         """Abstract method for retrieving pages by URIs.
 
         Must be implemented by classes that use this mixin.

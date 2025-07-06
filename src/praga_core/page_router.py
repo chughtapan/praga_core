@@ -1,11 +1,16 @@
 import asyncio
 import logging
+from abc import ABC, abstractmethod
 from typing import (
+    Any,
     Awaitable,
     Callable,
     Dict,
     List,
+    Optional,
+    Sequence,
     Type,
+    TypeVar,
     Union,
     get_type_hints,
 )
@@ -17,15 +22,28 @@ from .page_cache import PageCache
 logger = logging.getLogger(__name__)
 
 HandlerFn = Callable[..., Awaitable[Page]]
+P = TypeVar("P", bound=Page)
 
-__all__ = ["PageRouter", "HandlerFn"]
+__all__ = ["PageRouterMixin", "HandlerFn"]
 
 
-class PageRouter:
-    def __init__(self, page_cache: PageCache) -> None:
+class PageRouterMixin(ABC):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self._handlers: Dict[str, HandlerFn] = {}
         self._cache_enabled: Dict[str, bool] = {}
-        self._page_cache: PageCache = page_cache
+
+    @property
+    @abstractmethod
+    def root(self) -> str:
+        """Abstract property that must be implemented by classes using this mixin."""
+        ...
+
+    @property
+    @abstractmethod
+    def page_cache(self) -> PageCache:
+        """Abstract property that must be implemented by classes using this mixin."""
+        ...
 
     def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
         def decorator(func: HandlerFn) -> HandlerFn:
@@ -56,19 +74,79 @@ class PageRouter:
 
         return decorator
 
+    async def create_page_uri(
+        self,
+        page_type: Type[Page],
+        type_path: str,
+        id: str,
+        version: Optional[int] = None,
+    ) -> PageURI:
+        """Create a PageURI with this context's root.
+
+        When version is None, determines the next version number by checking
+        the cache for the latest existing version and incrementing it.
+
+        Args:
+            page_type: The Page class type
+            type_path: String path for the page type (e.g., "email", "calendar_event")
+            id: Unique identifier
+            version: Version number (defaults to None for auto-increment)
+
+        Returns:
+            PageURI object with resolved version number
+        """
+        if version is None:
+            return await self._create_page_uri(page_type, self.root, type_path, id)
+        return PageURI(root=self.root, type=type_path, id=id, version=version)
+
+    def validator(
+        self, func: Callable[[P], Awaitable[bool]]
+    ) -> Callable[[P], Awaitable[bool]]:
+        """Decorator to register an async page validator.
+
+        All validators must be async:
+
+        Example:
+            @context.validator
+            async def validate_email(page: EmailPage) -> bool:
+                # Could make API calls, DB queries, etc.
+                return await some_async_validation(page.email)
+        """
+        hints = {
+            name: typ for name, typ in get_type_hints(func).items() if name != "return"
+        }
+        if len(hints) != 1:
+            raise RuntimeError("Validator function must have exactly one argument.")
+        page_type = next(iter(hints.values()))
+        if not isinstance(page_type, type) or not issubclass(page_type, Page):
+            raise RuntimeError("Validator function's argument must be a Page subclass.")
+
+        # Create a wrapper that handles the type cast safely
+        async def validator_wrapper(page: Page) -> bool:
+            if not isinstance(page, page_type):
+                return False
+            return await func(page)  # type: ignore
+
+        self.page_cache.register_validator(page_type, validator_wrapper)
+        return func
+
     def get_handler(self, path: str) -> HandlerFn:
         return self._handlers[path]
 
     def is_cache_enabled(self, path: str) -> bool:
         return self._cache_enabled.get(path, True)
 
-    async def get_page(self, page_uri: PageURI, allow_stale: bool = False) -> Page:
+    async def get_page(
+        self, page_uri: str | PageURI, allow_stale: bool = False
+    ) -> Page:
         """Retrieve a page by routing to the appropriate handler.
 
         First checks cache if caching is enabled for the page type.
         If not cached or caching disabled, calls the handler to generate the page.
         If allow_stale is True, will return a cached page even if it is invalid.
         """
+        if isinstance(page_uri, str):
+            page_uri = PageURI.parse(page_uri)
         if page_uri.type not in self._handlers:
             raise RuntimeError(f"No handler registered for type: {page_uri.type}")
 
@@ -92,10 +170,13 @@ class PageRouter:
         return page
 
     async def get_pages(
-        self, page_uris: List[PageURI], allow_stale: bool = False
+        self, page_uris: Sequence[str | PageURI], allow_stale: bool = False
     ) -> List[Page]:
         """Bulk asynchronous page retrieval with parallel execution. If allow_stale is True, will return cached pages even if they are invalid."""
-        tasks = [self.get_page(uri, allow_stale=allow_stale) for uri in page_uris]
+        parsed_uris = [
+            PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris
+        ]
+        tasks = [self.get_page(uri, allow_stale=allow_stale) for uri in parsed_uris]
         return await asyncio.gather(*tasks)
 
     async def _get_from_cache(
@@ -103,7 +184,7 @@ class PageRouter:
     ) -> Page | None:
         """Attempt to retrieve page from cache. If allow_stale is True, will return a cached page even if it is invalid."""
         try:
-            cached_page = await self._page_cache.get(
+            cached_page = await self.page_cache.get(
                 page_type, page_uri, allow_stale=allow_stale
             )
             if cached_page:
@@ -132,8 +213,8 @@ class PageRouter:
         """Attempt to store page in cache if not already present."""
         try:
             # Check if page is already in cache
-            if not await self._page_cache.get(page.__class__, page_uri):
-                await self._page_cache.store(page)
+            if not await self.page_cache.get(page.__class__, page_uri):
+                await self.page_cache.store(page)
                 logger.debug(f"Stored page in cache: {page_uri}")
         except Exception as e:
             logger.debug(f"Error storing page in cache for {page_uri}: {e}")
@@ -145,9 +226,9 @@ class PageRouter:
             version = 1
         else:
             try:
-                await self._page_cache._storage._registry.ensure_registered(page_type)
+                await self.page_cache._storage._registry.ensure_registered(page_type)
                 prefix = f"{root}/{type_path}:{id}"
-                latest_version = await self._page_cache.get_latest_version(
+                latest_version = await self.page_cache.get_latest_version(
                     page_type, prefix
                 )
                 version = 1 if latest_version is None else (latest_version + 1)
