@@ -1,5 +1,6 @@
 """Gmail service for handling Gmail API interactions and page creation."""
 
+import asyncio
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -33,12 +34,12 @@ class GmailService(ToolkitService):
         ctx = self.context
 
         @ctx.route("email", cache=True)
-        def handle_email(page_uri: PageURI) -> EmailPage:
-            return self.create_email_page(page_uri)
+        async def handle_email(page_uri: PageURI) -> EmailPage:
+            return await self.create_email_page(page_uri)
 
         @self.context.route("email_thread", cache=False)
-        def handle_thread(page_uri: PageURI) -> EmailThreadPage:
-            return self.create_thread_page(page_uri)
+        async def handle_thread(page_uri: PageURI) -> EmailThreadPage:
+            return await self.create_thread_page(page_uri)
 
     def _parse_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
         """Parse common email content from a Gmail message.
@@ -76,12 +77,12 @@ class GmailService(ToolkitService):
             "time": email_time,
         }
 
-    def create_email_page(self, page_uri: PageURI) -> EmailPage:
+    async def create_email_page(self, page_uri: PageURI) -> EmailPage:
         """Create an EmailPage from a Gmail message ID."""
         email_id = page_uri.id
         # Fetch message from Gmail API
         try:
-            message = self.api_client.get_message(email_id)
+            message = await self.api_client.get_message(email_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch email {email_id}: {e}")
 
@@ -106,11 +107,11 @@ class GmailService(ToolkitService):
             permalink=permalink,
         )
 
-    def create_thread_page(self, page_uri: PageURI) -> EmailThreadPage:
+    async def create_thread_page(self, page_uri: PageURI) -> EmailThreadPage:
         """Create an EmailThreadPage from a Gmail thread ID."""
         thread_id = page_uri.id
         try:
-            thread_data = self.api_client.get_thread(thread_id)
+            thread_data = await self.api_client.get_thread(thread_id)
         except Exception as e:
             raise ValueError(f"Failed to fetch thread {thread_id}: {e}")
 
@@ -162,12 +163,12 @@ class GmailService(ToolkitService):
             permalink=permalink,
         )
 
-    def search_emails(
+    async def search_emails(
         self, query: str, page_token: Optional[str] = None, page_size: int = 20
     ) -> Tuple[List[PageURI], Optional[str]]:
         """Search emails and return list of PageURIs and next page token."""
         try:
-            messages, next_page_token = self.api_client.search_messages(
+            messages, next_page_token = await self.api_client.search_messages(
                 query, page_token=page_token, page_size=page_size
             )
 
@@ -176,10 +177,11 @@ class GmailService(ToolkitService):
             )
 
             # Convert to PageURIs
-            uris = [
+            tasks = [
                 self.context.create_page_uri(EmailPage, "email", msg["id"])
                 for msg in messages
             ]
+            uris = await asyncio.gather(*tasks)
 
             return uris, next_page_token
 
@@ -187,7 +189,7 @@ class GmailService(ToolkitService):
             logger.error(f"Error searching emails: {e}")
             raise
 
-    def _search_emails_paginated_response(
+    async def _search_emails_paginated_response(
         self,
         query: str,
         cursor: Optional[str] = None,
@@ -195,24 +197,25 @@ class GmailService(ToolkitService):
     ) -> PaginatedResponse[EmailPage]:
         """Search emails and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.search_emails(query, cursor, page_size)
+        uris, next_page_token = await self.search_emails(query, cursor, page_size)
 
-        # Resolve URIs to pages using context - throw errors, don't fail silently
-        pages: List[EmailPage] = []
-        for uri in uris:
-            page_obj = self.context.get_page(uri)
+        # Resolve URIs to pages using context async - throw errors, don't fail silently
+        pages = await self.context.get_pages(uris)
+
+        # Type check the results
+        for page_obj in pages:
             if not isinstance(page_obj, EmailPage):
                 raise TypeError(f"Expected EmailPage but got {type(page_obj)}")
-            pages.append(page_obj)
+
         logger.debug(f"Successfully resolved {len(pages)} email pages")
 
         return PaginatedResponse(
-            results=pages,
+            results=pages,  # type: ignore
             next_cursor=next_page_token,
         )
 
     @tool()
-    def search_emails_from_person(
+    async def search_emails_from_person(
         self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
         """Search emails from a specific person.
@@ -231,10 +234,10 @@ class GmailService(ToolkitService):
         if content:
             query += f" {content}"
 
-        return self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails_paginated_response(query, cursor)
 
     @tool()
-    def search_emails_to_person(
+    async def search_emails_to_person(
         self, person: str, content: Optional[str] = None, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
         """Search emails sent to a specific person.
@@ -252,10 +255,10 @@ class GmailService(ToolkitService):
         if content:
             query += f" {content}"
 
-        return self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails_paginated_response(query, cursor)
 
     @tool()
-    def search_emails_by_content(
+    async def search_emails_by_content(
         self, content: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[EmailPage]:
         """Search emails by content in subject line or body.
@@ -266,10 +269,10 @@ class GmailService(ToolkitService):
         """
         # Gmail search without specific field searches both subject and body
         query = content
-        return self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails_paginated_response(query, cursor)
 
     @tool()
-    def get_recent_emails(
+    async def get_recent_emails(
         self,
         days: int = 7,
         cursor: Optional[str] = None,
@@ -282,16 +285,16 @@ class GmailService(ToolkitService):
             cursor: Cursor token for pagination (optional)
         """
         query = f"newer_than:{days}d"
-        return self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails_paginated_response(query, cursor)
 
     @tool()
-    def get_unread_emails(
+    async def get_unread_emails(
         self,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[EmailPage]:
         """Get unread emails."""
         query = "is:unread"
-        return self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails_paginated_response(query, cursor)
 
     @property
     def toolkit(self) -> "GmailService":

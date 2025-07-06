@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Callable, List, Type, TypeVar
 
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from ..types import Page
@@ -17,12 +18,14 @@ P = TypeVar("P", bound=Page)
 class PageQuery:
     """Handles page query building and execution."""
 
-    def __init__(self, session_factory: sessionmaker, registry: PageRegistry):
+    def __init__(self, session_factory: sessionmaker[Any], registry: PageRegistry):
         self._session_factory = session_factory
         self._registry = registry
 
-    def find(self, page_type: Type[P], filters: List[Callable[[Any], Any]]) -> List[P]:
-        """Find pages matching the given filters.
+    async def find(
+        self, page_type: Type[P], filters: List[Callable[[Any], Any]]
+    ) -> List[P]:
+        """Find pages matching the given filters (async).
 
         Args:
             page_type: The type of pages to search for
@@ -37,8 +40,8 @@ class PageQuery:
             # Page type not registered
             return []
 
-        with self._session_factory() as session:
-            query = session.query(table_class)
+        async with self._session_factory() as session:
+            query = select(table_class)
 
             # Apply all filters
             for filter_func in filters:
@@ -52,7 +55,8 @@ class PageQuery:
             # Only return valid pages at the database level
             query = query.filter(table_class.valid.is_(True))
 
-            entities = query.all()
+            result = await session.execute(query)
+            entities = result.scalars().all()
 
             # Convert entities back to Page instances
             results = []

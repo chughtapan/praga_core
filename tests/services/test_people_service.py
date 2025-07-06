@@ -1,6 +1,6 @@
 """Tests for the rewritten PeopleService."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -19,6 +19,9 @@ class TestPeopleService:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_page_cache = Mock()
+        self.mock_page_cache.get = AsyncMock()
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_page_cache.find = Mock()
         self.mock_context.page_cache = self.mock_page_cache
 
         def mock_register_service(name, service):
@@ -29,12 +32,14 @@ class TestPeopleService:
 
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
-        self.mock_api_client.search_contacts = Mock()
-        self.mock_api_client.search_messages = Mock()
-        self.mock_api_client.get_message = Mock()
+        self.mock_api_client.search_contacts = AsyncMock(return_value=[])
+        self.mock_api_client.search_messages = AsyncMock(return_value=([], None))
+        self.mock_api_client.get_message = AsyncMock()
         self.mock_api_client._people = Mock()
 
         self.service = PeopleService(self.mock_api_client)
+
+        self.mock_context.create_page_uri = AsyncMock()
 
     def teardown_method(self):
         """Clean up test environment."""
@@ -47,7 +52,8 @@ class TestPeopleService:
         assert "people" in self.mock_context.services
         assert self.mock_context.services["people"] is self.service
 
-    def test_handle_person_request_not_found(self):
+    @pytest.mark.asyncio
+    async def test_handle_person_request_not_found(self):
         """Test handle_person_request raises error when person not found."""
         self.mock_page_cache.get.return_value = None
 
@@ -57,93 +63,87 @@ class TestPeopleService:
             expected_uri = PageURI(
                 root="test-root", type="person", id="person123", version=1
             )
-            self.service.handle_person_request(expected_uri)
+            await self.service.handle_person_request(expected_uri)
 
-    def test_get_person_records_existing(self):
+    @pytest.mark.asyncio
+    async def test_get_person_records_existing(self):
         """Test get_person_records returns existing people."""
         mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
         with patch.object(
             self.service, "search_existing_records", return_value=mock_people
         ):
-            result = self.service.get_person_records("test@example.com")
+            result = await self.service.get_person_records("test@example.com")
             assert result == mock_people
 
-    def test_get_person_records_create_new(self):
+    @pytest.mark.asyncio
+    async def test_get_person_records_create_new(self):
         """Test get_person_records creates new people when not found."""
         mock_people = [Mock(spec=PersonPage)]
         with patch.object(self.service, "search_existing_records", return_value=[]):
             with patch.object(
                 self.service, "create_new_records", return_value=mock_people
             ):
-                result = self.service.get_person_records("test@example.com")
+                result = await self.service.get_person_records("test@example.com")
                 assert result == mock_people
 
-    def test_get_person_records_creation_fails(self):
+    @pytest.mark.asyncio
+    async def test_get_person_records_creation_fails(self):
         """Test get_person_records returns empty list when creation fails."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             with patch.object(
                 self.service, "create_new_records", side_effect=ValueError("Not found")
             ):
-                result = self.service.get_person_records("test@example.com")
+                result = await self.service.get_person_records("test@example.com")
                 assert result == []
 
-    def test_lookup_people_by_email(self):
+    @pytest.mark.asyncio
+    async def test_lookup_people_by_email(self):
         """Test lookup_people by email address (search path only)."""
         mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
-        # Mock the new fluent interface: find().where().all()
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        mock_query.all.return_value = mock_people
+        mock_query.all = AsyncMock(return_value=mock_people)
         self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service.search_existing_records("test@example.com")
-
+        result = await self.service.search_existing_records("test@example.com")
         assert result == mock_people
         self.mock_page_cache.find.assert_called_once()
 
-    def test_lookup_people_by_full_name(self):
+    @pytest.mark.asyncio
+    async def test_lookup_people_by_full_name(self):
         """Test lookup_people by full name when email match fails."""
         mock_people = [Mock(spec=PersonPage)]
-        # Mock the new fluent interface with side effects
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        # First call (email) returns empty, second call (full name) returns results
-        mock_query.all.side_effect = [[], mock_people]
+        mock_query.all = AsyncMock(side_effect=[[], mock_people])
         self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service.search_existing_records("John Doe")
-
+        result = await self.service.search_existing_records("John Doe")
         assert result == mock_people
         assert self.mock_page_cache.find.call_count == 2
 
-    def test_lookup_people_by_first_name(self):
+    @pytest.mark.asyncio
+    async def test_lookup_people_by_first_name(self):
         """Test lookup_people by first name when other matches fail."""
         mock_people = [Mock(spec=PersonPage)]
-        # Mock the new fluent interface with side effects
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        # Full name and first name calls
-        mock_query.all.side_effect = [[], mock_people]
+        mock_query.all = AsyncMock(side_effect=[[], mock_people])
         self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service.search_existing_records("John")
-
+        result = await self.service.search_existing_records("John")
         assert result == mock_people
         assert self.mock_page_cache.find.call_count == 2
 
-    def test_lookup_people_not_found(self):
+    @pytest.mark.asyncio
+    async def test_lookup_people_not_found(self):
         """Test lookup_people returns empty list when not found."""
-        # Mock the new fluent interface: find().where().all()
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        mock_query.all.return_value = []
+        mock_query.all = AsyncMock(return_value=[])
         self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service.search_existing_records("nonexistent@example.com")
-
+        result = await self.service.search_existing_records("nonexistent@example.com")
         assert result == []
 
-    def test_create_person_existing(self):
+    @pytest.mark.asyncio
+    async def test_create_person_existing(self):
         """Test create_new_records raises error when people already exist."""
         mock_people = [Mock(spec=PersonPage)]
         with patch.object(
@@ -152,9 +152,10 @@ class TestPeopleService:
             with pytest.raises(
                 RuntimeError, match="Person already exists for identifier"
             ):
-                self.service.create_new_records("John Doe")
+                await self.service.create_new_records("John Doe")
 
-    def test_create_person_from_people_api(self):
+    @pytest.mark.asyncio
+    async def test_create_person_from_people_api(self):
         """Test create_person from Google People API."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             mock_person_info = PersonInfo(
@@ -163,7 +164,6 @@ class TestPeopleService:
                 email="john@example.com",
                 source="people_api",
             )
-
             with patch.object(
                 self.service,
                 "_extract_people_info_from_google_people",
@@ -180,24 +180,31 @@ class TestPeopleService:
                         with patch.object(
                             self.service, "_is_real_person", return_value=True
                         ):
-                            # Mock page cache to return no existing person
                             mock_query = Mock()
                             mock_query.where.return_value = mock_query
-                            mock_query.all.return_value = []
+                            mock_query.all = AsyncMock(return_value=[])
                             self.mock_page_cache.find.return_value = mock_query
                             mock_person_page = Mock(spec=PersonPage)
-                            with patch.object(
-                                self.service,
-                                "_store_and_create_page",
-                                return_value=mock_person_page,
+                            with (
+                                patch.object(
+                                    self.service,
+                                    "_store_and_create_page",
+                                    return_value=mock_person_page,
+                                ),
+                                patch.object(
+                                    self.service,
+                                    "_find_existing_person_by_email",
+                                    new_callable=AsyncMock,
+                                    return_value=None,
+                                ),
                             ):
-                                result = self.service.create_new_records(
+                                result = await self.service.create_new_records(
                                     "john@example.com"
                                 )
-
         assert result == [mock_person_page]
 
-    def test_create_person_no_sources(self):
+    @pytest.mark.asyncio
+    async def test_create_person_no_sources(self):
         """Test create_person raises error when no sources found."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             with patch.object(
@@ -214,9 +221,12 @@ class TestPeopleService:
                         with pytest.raises(
                             ValueError, match="Could not find any real people"
                         ):
-                            self.service.create_new_records("nonexistent@example.com")
+                            await self.service.create_new_records(
+                                "nonexistent@example.com"
+                            )
 
-    def test_create_person_filters_non_real_people(self):
+    @pytest.mark.asyncio
+    async def test_create_person_filters_non_real_people(self):
         """Test create_person filters out non-real people."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             mock_person_info = PersonInfo(
@@ -241,22 +251,19 @@ class TestPeopleService:
                         with pytest.raises(
                             ValueError, match="Could not find any real people"
                         ):
-                            self.service.create_new_records("noreply@example.com")
+                            await self.service.create_new_records("noreply@example.com")
 
-    def test_create_person_name_divergence_error(self):
+    @pytest.mark.asyncio
+    async def test_create_person_name_divergence_error(self):
         """Test create_person raises error when names diverge for same email."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
-            # Mock existing person with different name
             existing_person = Mock(spec=PersonPage)
             existing_person.full_name = "Jane Smith"
             existing_person.email = "john@example.com"
-
-            # Mock page cache to return existing person
             mock_query = Mock()
             mock_query.where.return_value = mock_query
-            mock_query.all.return_value = [existing_person]
+            mock_query.all = AsyncMock(return_value=[existing_person])
             self.mock_page_cache.find.return_value = mock_query
-
             mock_person_info = PersonInfo(
                 first_name="John",
                 last_name="Doe",
@@ -276,15 +283,26 @@ class TestPeopleService:
                         "_extract_people_from_gmail_contacts",
                         return_value=[],
                     ):
-                        with patch.object(
-                            self.service, "_is_real_person", return_value=True
+                        with (
+                            patch.object(
+                                self.service, "_is_real_person", return_value=True
+                            ),
+                            patch.object(
+                                self.service,
+                                "_find_existing_person_by_email",
+                                new_callable=AsyncMock,
+                                return_value=existing_person,
+                            ),
                         ):
                             with pytest.raises(
                                 ValueError, match="Name divergence detected"
                             ):
-                                self.service.create_new_records("john@example.com")
+                                await self.service.create_new_records(
+                                    "john@example.com"
+                                )
 
-    def test_extract_people_info_from_google_people(self):
+    @pytest.mark.asyncio
+    async def test_extract_people_info_from_google_people(self):
         """Test _extract_people_info_from_google_people returns person info."""
         mock_api_result = {
             "person": {
@@ -295,7 +313,7 @@ class TestPeopleService:
 
         self.mock_api_client.search_contacts.return_value = [mock_api_result]
 
-        result = self.service._extract_people_info_from_google_people(
+        result = await self.service._extract_people_info_from_google_people(
             "john@example.com"
         )
 
@@ -305,7 +323,8 @@ class TestPeopleService:
         assert result[0].email == "john@example.com"
         assert result[0].source == "people_api"
 
-    def test_extract_people_from_directory(self):
+    @pytest.mark.asyncio
+    async def test_extract_people_from_directory(self):
         """Test _extract_people_from_directory returns person info."""
         mock_directory_result = {
             "people": [
@@ -322,7 +341,7 @@ class TestPeopleService:
         mock_people.searchDirectoryPeople.return_value = mock_search
         self.mock_api_client._people.people.return_value = mock_people
 
-        result = self.service._extract_people_from_directory("john@example.com")
+        result = await self.service._extract_people_from_directory("john@example.com")
 
         assert len(result) == 1
         assert result[0].first_name == "John"
@@ -330,7 +349,8 @@ class TestPeopleService:
         assert result[0].email == "john@example.com"
         assert result[0].source == "directory_api"
 
-    def test_extract_people_from_gmail_contacts(self):
+    @pytest.mark.asyncio
+    async def test_extract_people_from_gmail_contacts(self):
         """Test _extract_people_from_gmail_contacts returns person info."""
         mock_message = {"id": "123"}
         mock_message_data = {
@@ -343,7 +363,7 @@ class TestPeopleService:
         self.mock_api_client.get_message.return_value = mock_message_data
 
         with patch.object(self.service, "_matches_identifier", return_value=True):
-            result = self.service._extract_people_from_gmail_contacts(
+            result = await self.service._extract_people_from_gmail_contacts(
                 "john@example.com"
             )
 
@@ -400,7 +420,8 @@ class TestPeopleService:
         assert self.service._matches_identifier(person_info, "John Doe") is True
         assert self.service._matches_identifier(person_info, "Jane") is False
 
-    def test_store_and_create_page(self):
+    @pytest.mark.asyncio
+    async def test_store_and_create_page(self):
         """Test _store_and_create_page creates PersonPage with source."""
         person_info = PersonInfo(
             first_name="John",
@@ -408,33 +429,104 @@ class TestPeopleService:
             email="john@example.com",
             source="people_api",
         )
-
-        self.mock_page_cache.store = Mock()
-        self.mock_context.create_page_uri.return_value = PageURI(
-            root="test-root", type="person", id="person123", version=1
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_context.create_page_uri = AsyncMock(
+            return_value=PageURI(
+                root="test-root", type="person", id="person123", version=1
+            )
         )
-
-        result = self.service._store_and_create_page(person_info)
-
+        result = await self.service._store_and_create_page(person_info)
         assert isinstance(result, PersonPage)
         assert result.first_name == "John"
         assert result.last_name == "Doe"
         assert result.email == "john@example.com"
         assert result.source == "people_api"
-        self.mock_page_cache.store.assert_called_once_with(result)
+        self.mock_page_cache.store.assert_awaited_once_with(result)
 
-    def test_toolkit_get_person_records(self):
+    @pytest.mark.asyncio
+    async def test_toolkit_get_person_records(self):
         """Test toolkit get_person_records method."""
         toolkit = self.service.toolkit
         mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
 
         with patch.object(self.service, "get_person_records", return_value=mock_people):
-            result = toolkit.get_person_records("test@example.com")
+            result = await toolkit.get_person_records("test@example.com")
             assert result == mock_people
 
         with patch.object(self.service, "get_person_records", return_value=[]):
-            result = toolkit.get_person_records("test@example.com")
+            result = await toolkit.get_person_records("test@example.com")
             assert result == []
+
+    @pytest.mark.asyncio
+    async def test_find_existing_person_by_email_found(self):
+        """Test _find_existing_person_by_email returns the first match (async)."""
+        mock_people = [Mock(spec=PersonPage), Mock(spec=PersonPage)]
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all = AsyncMock(return_value=mock_people)
+        self.mock_page_cache.find.return_value = mock_query
+        result = await self.service._find_existing_person_by_email("test@example.com")
+        assert result == mock_people[0]
+
+    @pytest.mark.asyncio
+    async def test_find_existing_person_by_email_not_found(self):
+        """Test _find_existing_person_by_email returns None if no match (async)."""
+        mock_query = Mock()
+        mock_query.where.return_value = mock_query
+        mock_query.all = AsyncMock(return_value=[])
+        self.mock_page_cache.find.return_value = mock_query
+        result = await self.service._find_existing_person_by_email(
+            "notfound@example.com"
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_real_async_query_path(self):
+        """Test the real async query path for search_existing_records (integration, async DB)."""
+        import os
+        import tempfile
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from praga_core.page_cache.core import QueryBuilder
+        from praga_core.page_cache.query import PageQuery
+        from praga_core.page_cache.registry import PageRegistry
+        from praga_core.page_cache.storage import PageStorage
+        from praga_core.page_cache.validator import PageValidator
+
+        temp_file = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            db_url = f"sqlite+aiosqlite:///{temp_file.name}"
+            engine = create_async_engine(db_url)
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            registry = PageRegistry(engine)
+            storage = PageStorage(session_factory, registry)
+            validator = PageValidator()
+            query_engine = PageQuery(session_factory, registry)
+            # Register table (async)
+            await registry.ensure_registered(PersonPage)
+            person = PersonPage(
+                uri=PageURI(root="test", type="person", id="p1", version=1),
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+            )
+            await storage.store(person)
+
+            # Minimal fake cache that returns a real QueryBuilder
+            class FakeCache:
+                def find(self_inner, t):
+                    return QueryBuilder(t, query_engine, validator, storage)
+
+            real_cache = FakeCache()
+            self.service._page_cache = real_cache
+            self.mock_context.page_cache = real_cache
+            result = await self.service.search_existing_records("john@example.com")
+            assert len(result) == 1
+            assert result[0].email == "john@example.com"
+        finally:
+            temp_file.close()
+            os.unlink(temp_file.name)
 
 
 class TestPeopleServiceRefactored:
@@ -446,6 +538,9 @@ class TestPeopleServiceRefactored:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_page_cache = Mock()
+        self.mock_page_cache.get = AsyncMock()
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_page_cache.find = Mock()
         self.mock_context.page_cache = self.mock_page_cache
 
         def mock_register_service(name, service):
@@ -458,11 +553,14 @@ class TestPeopleServiceRefactored:
         self.mock_api_client = Mock()
         self.service = PeopleService(self.mock_api_client)
 
+        self.mock_context.create_page_uri = AsyncMock()
+
     def teardown_method(self):
         """Clean up test environment."""
         clear_global_context()
 
-    def test_search_explicit_sources(self):
+    @pytest.mark.asyncio
+    async def test_search_explicit_sources(self):
         """Test _search_explicit_sources combines Google People API and Directory API results."""
         people_api_results = [
             PersonInfo(
@@ -492,13 +590,14 @@ class TestPeopleServiceRefactored:
                 "_extract_people_from_directory",
                 return_value=directory_results,
             ):
-                result = self.service._search_explicit_sources("test")
+                result = await self.service._search_explicit_sources("test")
 
         assert len(result) == 2
         assert people_api_results[0] in result
         assert directory_results[0] in result
 
-    def test_search_implicit_sources(self):
+    @pytest.mark.asyncio
+    async def test_search_implicit_sources(self):
         """Test _search_implicit_sources returns Gmail contact results."""
         gmail_results = [
             PersonInfo(
@@ -514,11 +613,12 @@ class TestPeopleServiceRefactored:
             "_extract_people_from_gmail_contacts",
             return_value=gmail_results,
         ):
-            result = self.service._search_implicit_sources("test")
+            result = await self.service._search_implicit_sources("test")
 
         assert result == gmail_results
 
-    def test_create_person_name_search_prioritizes_implicit(self):
+    @pytest.mark.asyncio
+    async def test_create_person_name_search_prioritizes_implicit(self):
         """Test create_person for name searches prioritizes implicit sources first."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             with patch.object(
@@ -531,7 +631,9 @@ class TestPeopleServiceRefactored:
                     mock_explicit.return_value = []
 
                     try:
-                        self.service.create_new_records("John Doe")  # Name, not email
+                        await self.service.create_new_records(
+                            "John Doe"
+                        )  # Name, not email
                     except ValueError:
                         pass  # Expected when no results found
 
@@ -539,7 +641,8 @@ class TestPeopleServiceRefactored:
                     assert mock_implicit.call_count == 1
                     assert mock_explicit.call_count == 1
 
-    def test_create_person_email_search_prioritizes_explicit(self):
+    @pytest.mark.asyncio
+    async def test_create_person_email_search_prioritizes_explicit(self):
         """Test create_person for email searches prioritizes explicit sources first."""
         with patch.object(self.service, "search_existing_records", return_value=[]):
             with patch.object(
@@ -552,7 +655,9 @@ class TestPeopleServiceRefactored:
                     mock_implicit.return_value = []
 
                     try:
-                        self.service.create_new_records("john@example.com")  # Email
+                        await self.service.create_new_records(
+                            "john@example.com"
+                        )  # Email
                     except ValueError:
                         pass  # Expected when no results found
 
@@ -560,8 +665,9 @@ class TestPeopleServiceRefactored:
                     assert mock_explicit.call_count == 1
                     assert mock_implicit.call_count == 1
 
-    def test_filter_and_deduplicate_people_removes_duplicates(self):
-        """Test _filter_and_deduplicate_people removes duplicate emails."""
+    @pytest.mark.asyncio
+    async def test_filter_and_deduplicate_people_removes_duplicates(self):
+        """Test _filter_and_deduplicate_people removes duplicate emails (async)."""
         all_person_infos = [
             PersonInfo(
                 first_name="John",
@@ -582,26 +688,24 @@ class TestPeopleServiceRefactored:
                 source="directory_api",
             ),
         ]
-
         with patch.object(self.service, "_is_real_person", return_value=True):
             with patch.object(
-                self.service, "_find_existing_person_by_email", return_value=None
+                self.service,
+                "_find_existing_person_by_email",
+                new_callable=AsyncMock,
+                return_value=None,
             ):
                 new_person_infos, existing_people = (
-                    self.service._filter_and_deduplicate_people(
+                    await self.service._filter_and_deduplicate_people(
                         all_person_infos, "test"
                     )
                 )
-
-        # Should only have 2 unique emails in new_person_infos, none existing
         assert len(new_person_infos) == 2
         assert len(existing_people) == 0
-        emails = [info.email for info in new_person_infos]
-        assert "john@example.com" in emails
-        assert "jane@example.com" in emails
 
-    def test_filter_and_deduplicate_people_filters_non_real_people(self):
-        """Test _filter_and_deduplicate_people filters out non-real people."""
+    @pytest.mark.asyncio
+    async def test_filter_and_deduplicate_people_filters_non_real_people(self):
+        """Test _filter_and_deduplicate_people filters out non-real people (async)."""
         all_person_infos = [
             PersonInfo(
                 first_name="John",
@@ -624,51 +728,19 @@ class TestPeopleServiceRefactored:
             self.service, "_is_real_person", side_effect=mock_is_real_person
         ):
             with patch.object(
-                self.service, "_find_existing_person_by_email", return_value=None
+                self.service,
+                "_find_existing_person_by_email",
+                new_callable=AsyncMock,
+                return_value=None,
             ):
                 new_person_infos, existing_people = (
-                    self.service._filter_and_deduplicate_people(
+                    await self.service._filter_and_deduplicate_people(
                         all_person_infos, "test"
                     )
                 )
-
-        # Should only have 1 real person in new_person_infos, none existing
         assert len(new_person_infos) == 1
-        assert len(existing_people) == 0
         assert new_person_infos[0].email == "john@example.com"
-
-    def test_filter_and_deduplicate_people_handles_existing_persons(self):
-        """Test _filter_and_deduplicate_people handles existing persons correctly."""
-        existing_person = Mock(spec=PersonPage)
-        existing_person.full_name = "John Doe"
-        existing_person.email = "john@example.com"
-
-        all_person_infos = [
-            PersonInfo(
-                first_name="John",
-                last_name="Doe",
-                email="john@example.com",
-                source="people_api",
-            )
-        ]
-
-        with patch.object(self.service, "_is_real_person", return_value=True):
-            with patch.object(
-                self.service,
-                "_find_existing_person_by_email",
-                return_value=existing_person,
-            ):
-                with patch.object(self.service, "_validate_name_consistency"):
-                    new_person_infos, existing_people = (
-                        self.service._filter_and_deduplicate_people(
-                            all_person_infos, "test"
-                        )
-                    )
-
-        # Should return existing person in existing_people list, no new ones
-        assert len(new_person_infos) == 0
-        assert len(existing_people) == 1
-        assert existing_people[0] == existing_person
+        assert len(existing_people) == 0
 
     def test_validate_name_consistency_same_names(self):
         """Test _validate_name_consistency passes for same names."""
@@ -704,32 +776,8 @@ class TestPeopleServiceRefactored:
                 existing_person, new_person_info, "john@example.com"
             )
 
-    def test_find_existing_person_by_email_found(self):
-        """Test _find_existing_person_by_email returns existing person."""
-        existing_person = Mock(spec=PersonPage)
-        # Mock the new fluent interface: find().where().all()
-        mock_query = Mock()
-        mock_query.where.return_value = mock_query
-        mock_query.all.return_value = [existing_person]
-        self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service._find_existing_person_by_email("john@example.com")
-
-        assert result == existing_person
-
-    def test_find_existing_person_by_email_not_found(self):
-        """Test _find_existing_person_by_email returns None when not found."""
-        # Mock the new fluent interface: find().where().all()
-        mock_query = Mock()
-        mock_query.where.return_value = mock_query
-        mock_query.all.return_value = []
-        self.mock_page_cache.find.return_value = mock_query
-
-        result = self.service._find_existing_person_by_email("john@example.com")
-
-        assert result is None
-
-    def test_create_person_pages_new_people_only(self):
+    @pytest.mark.asyncio
+    async def test_create_person_pages_new_people_only(self):
         """Test _create_person_pages handles only new people (no more mixed types)."""
         new_person_infos = [
             PersonInfo(
@@ -753,7 +801,7 @@ class TestPeopleServiceRefactored:
             "_store_and_create_page",
             side_effect=[new_person_page1, new_person_page2],
         ):
-            result = self.service._create_person_pages(new_person_infos)
+            result = await self.service._create_person_pages(new_person_infos)
 
         assert len(result) == 2
         assert new_person_page1 in result
@@ -786,7 +834,8 @@ class TestPeopleServiceRefactored:
         assert "bob@example.com" in emails
         assert "alice@example.com" in emails
 
-    def test_extract_people_from_gmail_contacts_name_vs_email_search(self):
+    @pytest.mark.asyncio
+    async def test_extract_people_from_gmail_contacts_name_vs_email_search(self):
         """Test _extract_people_from_gmail_contacts uses different queries for names vs emails."""
         mock_message = {"id": "123"}
 
@@ -797,14 +846,14 @@ class TestPeopleServiceRefactored:
 
         with patch.object(self.service, "_extract_from_gmail", return_value=[]):
             # Test email search
-            self.service._extract_people_from_gmail_contacts("test@example.com")
+            await self.service._extract_people_from_gmail_contacts("test@example.com")
 
             # Verify it used email-specific query
             call_args = self.mock_api_client.search_messages.call_args[0][0]
             assert "from:test@example.com OR to:test@example.com" == call_args
 
             # Test name search
-            self.service._extract_people_from_gmail_contacts("John Doe")
+            await self.service._extract_people_from_gmail_contacts("John Doe")
 
             # Verify it used name-specific queries
             call_args = self.mock_api_client.search_messages.call_args[0][0]

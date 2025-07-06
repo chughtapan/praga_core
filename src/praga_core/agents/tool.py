@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Dict,
     Generic,
@@ -69,7 +70,8 @@ class PaginatedResponse(Generic[T], ABCSequence[T]):
 
 
 # Now PaginatedResponse is defined, so we can reference it
-ToolFunction = Callable[..., Union[Sequence[Page], PaginatedResponse[Page]]]
+ToolReturnType = Union[Sequence[Page], PaginatedResponse[Page]]
+ToolFunction = Callable[..., Awaitable[ToolReturnType]]
 
 
 @dataclass
@@ -249,21 +251,23 @@ class Tool:
             next_cursor=next_cursor,
         )
 
-    def _handle_native_pagination(self, **kwargs: Any) -> PaginatedResponse[Page]:
+    async def _handle_native_pagination(self, **kwargs: Any) -> PaginatedResponse[Page]:
         """Handle tools that support native pagination (accept cursor parameter)."""
-        results = self.func(**kwargs)
+        results = await self.func(**kwargs)
 
         # If function returns PaginatedResponse, use it directly
         assert isinstance(results, PaginatedResponse)
         return results
 
-    def _handle_client_side_pagination(self, **kwargs: Any) -> PaginatedResponse[Page]:
+    async def _handle_client_side_pagination(
+        self, **kwargs: Any
+    ) -> PaginatedResponse[Page]:
         """Handle tools that need client-side pagination (don't accept cursor parameter)."""
         # Extract cursor from kwargs before calling function
         cursor = kwargs.pop("cursor", None)
 
         # Call the function without cursor parameter
-        results = self.func(**kwargs)
+        results = await self.func(**kwargs)
 
         # Convert to list if needed
         if not isinstance(results, list):
@@ -275,23 +279,23 @@ class Tool:
         sig = inspect.signature(self.func)
         return "cursor" in sig.parameters
 
-    def __call__(self, **kwargs: Any) -> Union[Sequence[Page], PaginatedResponse[Page]]:
+    async def __call__(self, **kwargs: Any) -> ToolReturnType:
         """Execute the tool with the given arguments."""
         # No pagination configured - call function directly
         if not self.page_size:
-            return self.func(**kwargs)
+            return await self.func(**kwargs)
 
         # Route to appropriate pagination handler
         if self._supports_native_pagination():
-            return self._handle_native_pagination(**kwargs)
+            return await self._handle_native_pagination(**kwargs)
         else:
-            return self._handle_client_side_pagination(**kwargs)
+            return await self._handle_client_side_pagination(**kwargs)
 
-    def invoke(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    async def invoke(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         """Execute the tool with the given input and serialize the response."""
         try:
             kwargs = self._prepare_arguments(raw_input)
-            result = self(**kwargs)
+            result = await self(**kwargs)
             if len(result) == 0:
                 return {
                     "response_code": "error_no_documents_found",

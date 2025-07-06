@@ -52,7 +52,7 @@ def setup_mcp_tools(
     """
 
     # Get available page types for tool description
-    type_names = list(server_context._page_handlers.keys())
+    type_names = list(server_context._router._handlers.keys())
 
     @mcp.tool(description=get_search_tool_description(type_names))
     async def search_pages(
@@ -74,7 +74,7 @@ def setup_mcp_tools(
                 await ctx.info(f"Resolve references: {resolve_references}")
 
             # Perform the search
-            search_response = server_context.search(
+            search_response = await server_context.search(
                 instruction, resolve_references=resolve_references
             )
 
@@ -105,49 +105,58 @@ def setup_mcp_tools(
                 await ctx.info(f"Getting {len(page_uris)} pages")
                 await ctx.info(f"Page URIs: {page_uris}")
 
+            # Use the batch get_pages method
+            try:
+                pages = await server_context.get_pages(page_uris)
+            except Exception as e:
+                # If the whole batch fails, return error for all
+                error_msg = f"Failed to get pages: {str(e)}"
+                if ctx:
+                    await ctx.error(error_msg)
+                response = {
+                    "requested_count": len(page_uris),
+                    "successful_count": 0,
+                    "error_count": len(page_uris),
+                    "pages": [],
+                    "errors": [
+                        {"uri": uri, "status": "error", "error": error_msg}
+                        for uri in page_uris
+                    ],
+                }
+                return json.dumps(response, indent=2)
+
             pages_data = []
             errors = []
-
-            # Process each page ID
-            for page_uri in page_uris:
-                try:
-                    # Create page URI and get the page
-                    page = server_context.get_page(page_uri)
-
-                    # Serialize the page to JSON
-                    page_data = {
-                        "uri": page_uri,
-                        "content": page.model_dump(mode="json"),
-                        "status": "success",
-                    }
-                    pages_data.append(page_data)
-
+            for page_uri, page in zip(page_uris, pages):
+                if isinstance(page, Exception):
+                    errors.append(
+                        {
+                            "uri": page_uri,
+                            "status": "error",
+                            "error": str(page),
+                        }
+                    )
+                    if ctx:
+                        await ctx.error(f"Failed to get page {page_uri}: {str(page)}")
+                else:
+                    pages_data.append(
+                        {
+                            "uri": page_uri,
+                            "content": page.model_dump(mode="json"),
+                            "status": "success",
+                        }
+                    )
                     if ctx:
                         await ctx.info(f"Successfully retrieved page: {page_uri}")
 
-                except Exception as e:
-                    error_data = {
-                        "uri": page_uri,
-                        "status": "error",
-                        "error": str(e),
-                    }
-                    errors.append(error_data)
-
-                    if ctx:
-                        await ctx.error(f"Failed to get page {page_uri}: {str(e)}")
-
-            # Prepare response
             response = {
                 "requested_count": len(page_uris),
                 "successful_count": len(pages_data),
                 "error_count": len(errors),
                 "pages": pages_data,
             }
-
-            # Include errors if any occurred
             if errors:
                 response["errors"] = errors
-
             return json.dumps(response, indent=2)
 
         except Exception as e:

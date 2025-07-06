@@ -1,6 +1,7 @@
 """Google API authentication using singleton pattern."""
 
 import logging
+import threading
 from datetime import timezone
 from typing import Any, Optional
 
@@ -13,6 +14,9 @@ from pragweb.config import get_current_config
 from pragweb.secrets_manager import SecretsManager, get_secrets_manager
 
 logger = logging.getLogger(__name__)
+
+# Thread-local storage to safely cache per-thread Google service objects.
+_thread_local = threading.local()
 
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
@@ -40,10 +44,6 @@ class GoogleAuthManager:
             return
 
         self._creds: Optional[Credentials] = None
-        self._gmail_service = None
-        self._calendar_service = None
-        self._docs_service = None
-        self._drive_service = None
         self._authenticate()
         self._initialized = True
 
@@ -144,28 +144,35 @@ class GoogleAuthManager:
 
     def get_gmail_service(self) -> Any:
         """Get Gmail service (cached)."""
-        if self._gmail_service is None:
-            self._gmail_service = build("gmail", "v1", credentials=self._creds)
-        return self._gmail_service
+        # Use thread-local cache to avoid sharing httplib2.Http across threads.
+        if not hasattr(_thread_local, "gmail_service"):
+            _thread_local.gmail_service = build("gmail", "v1", credentials=self._creds)
+        return _thread_local.gmail_service
 
     def get_calendar_service(self) -> Any:
         """Get Calendar service (cached)."""
-        if self._calendar_service is None:
-            self._calendar_service = build("calendar", "v3", credentials=self._creds)
-        return self._calendar_service
+        if not hasattr(_thread_local, "calendar_service"):
+            _thread_local.calendar_service = build(
+                "calendar", "v3", credentials=self._creds
+            )
+        return _thread_local.calendar_service
 
     def get_people_service(self) -> Any:
         """Get People API service."""
-        return build("people", "v1", credentials=self._creds)
+        if not hasattr(_thread_local, "people_service"):
+            _thread_local.people_service = build(
+                "people", "v1", credentials=self._creds
+            )
+        return _thread_local.people_service
 
     def get_docs_service(self) -> Any:
         """Get Google Docs service (cached)."""
-        if self._docs_service is None:
-            self._docs_service = build("docs", "v1", credentials=self._creds)
-        return self._docs_service
+        if not hasattr(_thread_local, "docs_service"):
+            _thread_local.docs_service = build("docs", "v1", credentials=self._creds)
+        return _thread_local.docs_service
 
     def get_drive_service(self) -> Any:
         """Get Google Drive service (cached)."""
-        if self._drive_service is None:
-            self._drive_service = build("drive", "v3", credentials=self._creds)
-        return self._drive_service
+        if not hasattr(_thread_local, "drive_service"):
+            _thread_local.drive_service = build("drive", "v3", credentials=self._creds)
+        return _thread_local.drive_service
