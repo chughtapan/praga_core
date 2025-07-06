@@ -13,6 +13,7 @@ from typing import (
     get_type_hints,
 )
 
+from praga_core.action_executor import ActionExecutorMixin
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 P = TypeVar("P", bound=Page)
 
 
-class ServerContext:
+class ServerContext(ActionExecutorMixin):
     """Central server context that acts as single source of truth for caching and state."""
 
     def __init__(
@@ -35,7 +36,7 @@ class ServerContext:
         _page_cache: Optional[PageCache] = None,
     ) -> None:
         """Do not use directly. Use `await ServerContext.create(...)` instead."""
-
+        super().__init__()
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._services: Dict[str, Service] = {}
@@ -174,7 +175,6 @@ class ServerContext:
         resolve_references: bool = True,
     ) -> SearchResponse:
         """Execute search using the provided retriever."""
-
         active_retriever = retriever or self.retriever
         if not active_retriever:
             raise RuntimeError(

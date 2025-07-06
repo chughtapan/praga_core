@@ -2,12 +2,14 @@
 
 import json
 import logging
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastmcp import Context, FastMCP
 
+from praga_core.action_executor import ActionFunction
 from praga_core.context import ServerContext
 from praga_core.integrations.mcp.descriptions import (
+    get_action_tool_description,
     get_pages_tool_description,
     get_search_tool_description,
 )
@@ -43,12 +45,11 @@ def setup_mcp_tools(
     mcp: FastMCP,  # type: ignore[type-arg]
     server_context: ServerContext,
 ) -> None:
-    """Setup MCP tools for search operations.
+    """Setup MCP tools for search operations and actions.
 
     Args:
         mcp: FastMCP server instance
-        server_context: ServerContext with registered handlers
-        config: Configuration for the MCP server
+        server_context: ServerContext with registered handlers and actions
     """
 
     # Get available page types for tool description
@@ -169,3 +170,65 @@ def setup_mcp_tools(
             if ctx:
                 await ctx.error(error_msg)
             raise RuntimeError(error_msg)
+
+    # Setup action tools dynamically
+    setup_action_tools(mcp, server_context)
+
+
+def setup_action_tools(
+    mcp: FastMCP,  # type: ignore[type-arg]
+    server_context: ServerContext,
+) -> None:
+    """Setup MCP tools for registered actions.
+
+    Args:
+        mcp: FastMCP server instance
+        server_context: ServerContext with registered actions
+    """
+    # Get all registered actions
+    actions = server_context.actions
+
+    for action_name, action_func in actions.items():
+        # Create a tool for each action with proper closure
+        def create_action_tool(name: str, func: ActionFunction) -> None:
+            # Generate description for this specific action
+            description = get_action_tool_description(name, func)
+
+            @mcp.tool(description=description)
+            async def action_tool(
+                action_input: Dict[str, Any], ctx: Optional[Context] = None
+            ) -> str:
+                """Execute an action on a page.
+
+                Args:
+                    action_input: Dictionary containing the action parameters
+                    ctx: MCP context for logging
+
+                Returns:
+                    JSON string containing action result with success status
+                """
+                try:
+                    if ctx:
+                        await ctx.info(f"Executing action: {name}")
+                        await ctx.info(f"Action input: {action_input}")
+
+                    # Invoke the action through the server context
+                    result = await server_context.invoke_action(name, action_input)
+
+                    if ctx:
+                        await ctx.info(f"Action result: {result}")
+
+                    return json.dumps(result, indent=2)
+
+                except Exception as e:
+                    error_msg = f"Action '{name}' failed: {str(e)}"
+                    if ctx:
+                        await ctx.error(error_msg)
+
+                    return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+            # The @mcp.tool decorator handles tool registration
+            action_tool
+
+        # Create and register the tool - the @mcp.tool decorator registers it
+        create_action_tool(action_name, action_func)
