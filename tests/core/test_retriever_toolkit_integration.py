@@ -47,7 +47,9 @@ class IntegrationTestToolkit(RetrieverToolkit):
     def name(self) -> str:
         return "IntegrationTestToolkit"
 
-    def search_documents(self, query: str, limit: int = 10) -> List[SimpleDocument]:
+    async def search_documents(
+        self, query: str, limit: int = 10
+    ) -> List[SimpleDocument]:
         """Search for documents matching the query."""
         return [
             SimpleDocument(
@@ -58,7 +60,7 @@ class IntegrationTestToolkit(RetrieverToolkit):
             for i in range(limit)
         ]
 
-    def count_documents(self, query: str) -> List[SimpleDocument]:
+    async def count_documents(self, query: str) -> List[SimpleDocument]:
         """Get a count document."""
         return [
             SimpleDocument(
@@ -69,7 +71,7 @@ class IntegrationTestToolkit(RetrieverToolkit):
         ]
 
 
-def get_test_docs(category: str = "general") -> List[SimpleDocument]:
+async def get_test_docs(category: str = "general") -> List[SimpleDocument]:
     """Stateless function for testing decorator."""
     return [
         SimpleDocument(
@@ -81,11 +83,10 @@ def get_test_docs(category: str = "general") -> List[SimpleDocument]:
     ]
 
 
-# Test stateless tool with decorator
 @IntegrationTestToolkit.tool(
     cache=True, ttl=timedelta(minutes=10), paginate=True, max_docs=2
 )
-def get_cached_docs(topic: str) -> List[SimpleDocument]:
+async def get_cached_docs(topic: str) -> List[SimpleDocument]:
     """Get cached documents."""
     return [
         SimpleDocument(
@@ -100,7 +101,8 @@ def get_cached_docs(topic: str) -> List[SimpleDocument]:
 class TestRetrieverToolkitIntegration:
     """Test RetrieverToolkit integration with Tool class."""
 
-    def test_toolkit_initialization(self) -> None:
+    @pytest.mark.asyncio
+    async def test_toolkit_initialization(self) -> None:
         """Test toolkit initializes with correct tools."""
         toolkit = IntegrationTestToolkit()
 
@@ -112,23 +114,25 @@ class TestRetrieverToolkitIntegration:
         }
         assert set(toolkit.tools.keys()) == expected_tools
 
-    def test_direct_method_call_no_pagination(self) -> None:
+    @pytest.mark.asyncio
+    async def test_direct_method_call_no_pagination(self) -> None:
         """Test direct method calls bypass pagination."""
         toolkit = IntegrationTestToolkit()
 
         # Direct call should return all documents without pagination
-        docs = toolkit.search_documents("python", limit=8)
+        docs = await toolkit.search_documents("python", limit=8)
 
         assert len(docs) == 8
         assert all(isinstance(doc, SimpleDocument) for doc in docs)
         assert "python" in docs[0].title
 
-    def test_invoke_method_with_pagination(self) -> None:
+    @pytest.mark.asyncio
+    async def test_invoke_method_with_pagination(self) -> None:
         """Test invoke method applies pagination when enabled."""
         toolkit = IntegrationTestToolkit()
 
         # Invoke call should apply pagination
-        result = toolkit.invoke_tool(
+        result = await toolkit.invoke_tool(
             "search_documents", {"query": "python", "limit": 8}
         )
 
@@ -139,44 +143,48 @@ class TestRetrieverToolkitIntegration:
         assert len(result["results"]) <= 3
         assert result["next_cursor"] is not None  # Has more pages
 
-    def test_invoke_method_pagination_second_page(self) -> None:
+    @pytest.mark.asyncio
+    async def test_invoke_method_pagination_second_page(self) -> None:
         """Test invoke method can get second page."""
         toolkit = IntegrationTestToolkit()
 
-        result = toolkit.invoke_tool(
+        result = await toolkit.invoke_tool(
             "search_documents", {"query": "python", "limit": 8, "cursor": "3"}
         )
 
         assert len(result["results"]) <= 3
         assert result["next_cursor"] is not None  # Has more pages
 
-    def test_invoke_method_without_pagination(self) -> None:
+    @pytest.mark.asyncio
+    async def test_invoke_method_without_pagination(self) -> None:
         """Test invoke method on non-paginated tool."""
         toolkit = IntegrationTestToolkit()
 
         # Direct call
-        docs_direct = toolkit.count_documents("test")
+        docs_direct = await toolkit.count_documents("test")
         assert len(docs_direct) == 1
 
         # Invoke call should behave the same for non-paginated tools
-        result_invoke = toolkit.invoke_tool("count_documents", "test")
+        result_invoke = await toolkit.invoke_tool("count_documents", "test")
 
         assert "results" in result_invoke
         assert len(result_invoke["results"]) == 1
         assert "next_cursor" not in result_invoke  # No pagination metadata
 
-    def test_string_input_for_invoke(self) -> None:
+    @pytest.mark.asyncio
+    async def test_string_input_for_invoke(self) -> None:
         """Test invoke with string input maps to first parameter."""
         toolkit = IntegrationTestToolkit()
 
-        result = toolkit.invoke_tool("search_documents", "javascript")
+        result = await toolkit.invoke_tool("search_documents", "javascript")
 
         assert "results" in result
         assert len(result["results"]) <= 3  # Paginated
         doc_content = result["results"][0]["content"]
         assert "javascript" in doc_content
 
-    def test_tool_inspection(self) -> None:
+    @pytest.mark.asyncio
+    async def test_tool_inspection(self) -> None:
         """Test tool inspection and metadata."""
         toolkit = IntegrationTestToolkit()
 
@@ -194,49 +202,52 @@ class TestRetrieverToolkitIntegration:
         assert "Search for documents" in search_tool.description
         assert "Get a count document" in count_tool.description
 
-    def test_stateless_tool_decorator(self) -> None:
+    @pytest.mark.asyncio
+    async def test_stateless_tool_decorator(self) -> None:
         """Test stateless tool registration with decorator."""
         toolkit = IntegrationTestToolkit()
 
         # Direct call
-        docs_direct = toolkit.get_cached_docs("AI")
+        docs_direct = await toolkit.get_cached_docs("AI")
         assert len(docs_direct) == 5
         assert "AI" in docs_direct[0].content
 
         # Invoke call (should be paginated with max_docs=2)
-        result_invoke = toolkit.invoke_tool("get_cached_docs", "AI")
+        result_invoke = await toolkit.invoke_tool("get_cached_docs", "AI")
 
         assert len(result_invoke["results"]) <= 2
         assert result_invoke["next_cursor"] is not None  # Has more pages
 
-    def test_caching_behavior(self) -> None:
+    @pytest.mark.asyncio
+    async def test_caching_behavior(self) -> None:
         """Test that caching still works with the new Tool integration."""
         toolkit = IntegrationTestToolkit()
 
         # First call (should hit the actual function)
-        result1 = toolkit.invoke_tool(
+        result1 = await toolkit.invoke_tool(
             "search_documents", {"query": "cache_test", "limit": 5}
         )
 
         # Second call (should hit cache and return same results)
-        result2 = toolkit.invoke_tool(
+        result2 = await toolkit.invoke_tool(
             "search_documents", {"query": "cache_test", "limit": 5}
         )
 
         # Results should be identical (cached)
         assert result1 == result2
 
-    def test_different_pages_same_cache(self) -> None:
+    @pytest.mark.asyncio
+    async def test_different_pages_same_cache(self) -> None:
         """Test that different pages use the same cached underlying data."""
         toolkit = IntegrationTestToolkit()
 
         # Get page 0
-        page0 = toolkit.invoke_tool(
+        page0 = await toolkit.invoke_tool(
             "search_documents", {"query": "pagination_test", "limit": 8, "cursor": None}
         )
 
         # Get page 1 (using cursor from page 0)
-        page1 = toolkit.invoke_tool(
+        page1 = await toolkit.invoke_tool(
             "search_documents", {"query": "pagination_test", "limit": 8, "cursor": "3"}
         )
 
@@ -245,37 +256,40 @@ class TestRetrieverToolkitIntegration:
         page1_ids = [doc["uri"] for doc in page1["results"]]
         assert page0_ids != page1_ids
 
-    def test_error_handling_no_documents(self) -> None:
+    @pytest.mark.asyncio
+    async def test_error_handling_no_documents(self) -> None:
         """Test error handling is preserved through Tool wrapper."""
         toolkit = IntegrationTestToolkit()
 
         # Create a method that raises the specific error
-        def failing_search(query: str) -> List[SimpleDocument]:
+        async def failing_search(query: str) -> List[SimpleDocument]:
             if query == "no_results":
                 raise ValueError("No matching documents found")
             return []
 
         toolkit.register_tool(failing_search, "failing_search", paginate=False)
 
-        result = toolkit.invoke_tool("failing_search", "no_results")
+        result = await toolkit.invoke_tool("failing_search", "no_results")
 
         assert result["response_code"] == "error_no_documents_found"
         assert result["error_message"] == "No matching documents found"
 
-    def test_tool_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_tool_not_found(self) -> None:
         """Test error when tool doesn't exist."""
         toolkit = IntegrationTestToolkit()
 
         with pytest.raises(ValueError, match="Tool 'nonexistent' not found"):
             toolkit.get_tool("nonexistent")
 
-    def test_mixed_usage_patterns(self) -> None:
+    @pytest.mark.asyncio
+    async def test_mixed_usage_patterns(self) -> None:
         """Test that direct calls and invoke calls can be mixed."""
         toolkit = IntegrationTestToolkit()
 
         # Mix direct and invoke calls
-        docs_direct = toolkit.search_documents("mixed_test", 6)
-        result_invoke = toolkit.invoke_tool(
+        docs_direct = await toolkit.search_documents("mixed_test", 6)
+        result_invoke = await toolkit.invoke_tool(
             "search_documents", {"query": "mixed_test", "limit": 6}
         )
 

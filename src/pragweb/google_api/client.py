@@ -1,8 +1,12 @@
 """High-level Google API client that abstracts API specifics."""
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
 from .auth import GoogleAuthManager
+
+_MAX_WORKERS = 10
 
 
 class GoogleAPIClient:
@@ -11,35 +15,42 @@ class GoogleAPIClient:
     def __init__(self, auth_manager: Optional[GoogleAuthManager] = None):
         self.auth_manager = auth_manager or GoogleAuthManager()
 
-        # Lazy-load the actual Google API service objects
-        self._gmail_service = None
-        self._calendar_service = None
-        self._people_service = None
-        self._docs_service = None
-        self._drive_service = None
+        # Dedicated pool ensures we control thread lifecycle and have a bounded
+        # number of per-thread service objects.
+        self._executor = ThreadPoolExecutor(
+            max_workers=_MAX_WORKERS, thread_name_prefix="google-api-client"
+        )
 
     # Gmail Methods
-    def get_message(self, message_id: str) -> Dict[str, Any]:
+    async def get_message(self, message_id: str) -> Dict[str, Any]:
         """Get a single Gmail message by ID."""
-        result = (
-            self._gmail.users()
-            .messages()
-            .get(userId="me", id=message_id, format="full")
-            .execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._gmail.users()
+                .messages()
+                .get(userId="me", id=message_id, format="full")
+                .execute()
+            ),
         )
         return result  # type: ignore
 
-    def get_thread(self, thread_id: str) -> Dict[str, Any]:
+    async def get_thread(self, thread_id: str) -> Dict[str, Any]:
         """Get a Gmail thread by ID with all messages."""
-        result = (
-            self._gmail.users()
-            .threads()
-            .get(userId="me", id=thread_id, format="full")
-            .execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._gmail.users()
+                .threads()
+                .get(userId="me", id=thread_id, format="full")
+                .execute()
+            ),
         )
         return result  # type: ignore
 
-    def search_messages(
+    async def search_messages(
         self, query: str, page_token: Optional[str] = None, page_size: int = 20
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
         """Search Gmail messages with pagination."""
@@ -51,80 +62,107 @@ class GoogleAPIClient:
         if page_token:
             params["pageToken"] = page_token
 
-        results = self._gmail.users().messages().list(**params).execute()
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: self._gmail.users().messages().list(**params).execute()
+        )
         messages = results.get("messages", [])
         next_token = results.get("nextPageToken")
 
         return messages, next_token
 
     # Calendar Methods
-    def get_event(self, event_id: str, calendar_id: str = "primary") -> Dict[str, Any]:
+    async def get_event(
+        self, event_id: str, calendar_id: str = "primary"
+    ) -> Dict[str, Any]:
         """Get a single calendar event by ID."""
-        result = (
-            self._calendar.events()
-            .get(calendarId=calendar_id, eventId=event_id)
-            .execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._calendar.events()
+                .get(calendarId=calendar_id, eventId=event_id)
+                .execute()
+            ),
         )
         return result  # type: ignore
 
-    def search_events(
+    async def search_events(
         self,
         query_params: Dict[str, Any],
         page_token: Optional[str] = None,
         page_size: int = 20,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Search calendar events with pagination."""
+        """Search calendar events with pagination (async)."""
         params = {**query_params, "maxResults": page_size}
         if page_token:
             params["pageToken"] = page_token
 
-        results = self._calendar.events().list(**params).execute()
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None, lambda: self._calendar.events().list(**params).execute()
+        )
         events = results.get("items", [])
         next_token = results.get("nextPageToken")
 
         return events, next_token
 
     # People Methods
-    def search_contacts(self, query: str) -> List[Dict[str, Any]]:
+    async def search_contacts(self, query: str) -> List[Dict[str, Any]]:
         """Search contacts using People API."""
-        results = (
-            self._people.people()
-            .searchContacts(
-                query=query,
-                readMask="names,emailAddresses",
-                sources=[
-                    "READ_SOURCE_TYPE_PROFILE",
-                    "READ_SOURCE_TYPE_CONTACT",
-                    "READ_SOURCE_TYPE_DOMAIN_CONTACT",
-                ],
-            )
-            .execute()
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._people.people()
+                .searchContacts(
+                    query=query,
+                    readMask="names,emailAddresses",
+                    sources=[
+                        "READ_SOURCE_TYPE_PROFILE",
+                        "READ_SOURCE_TYPE_CONTACT",
+                        "READ_SOURCE_TYPE_DOMAIN_CONTACT",
+                    ],
+                )
+                .execute()
+            ),
         )
 
         return results.get("results", [])  # type: ignore
 
     # Google Docs Methods
-    def get_document(self, document_id: str) -> Dict[str, Any]:
+    async def get_document(self, document_id: str) -> Dict[str, Any]:
         """Get a Google Docs document by ID."""
-        result = self._docs.documents().get(documentId=document_id).execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: self._docs.documents().get(documentId=document_id).execute()
+        )
         return result  # type: ignore
 
-    def get_file_metadata(
+    async def get_file_metadata(
         self, file_id: str, fields: str = "name,createdTime,modifiedTime,owners"
     ) -> Dict[str, Any]:
         """Get Google Drive file metadata."""
-        result = self._drive.files().get(fileId=file_id, fields=fields).execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: self._drive.files().get(fileId=file_id, fields=fields).execute(),
+        )
         return result  # type: ignore
 
-    def get_file_revisions(self, file_id: str) -> List[Dict[str, Any]]:
+    async def get_file_revisions(self, file_id: str) -> List[Dict[str, Any]]:
         """Get all revisions for a Google Drive file."""
-        result = self._drive.revisions().list(fileId=file_id).execute()
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: self._drive.revisions().list(fileId=file_id).execute(),
+        )
         return result.get("revisions", [])  # type: ignore
 
-    def get_latest_revision_id(self, file_id: str) -> Optional[str]:
+    async def get_latest_revision_id(self, file_id: str) -> Optional[str]:
         """Get the latest revision ID for a Google Drive file."""
         try:
-            revisions = self.get_file_revisions(file_id)
+            revisions = await self.get_file_revisions(file_id)
             if revisions:
                 # Revisions are returned in chronological order, so the last one is the latest
                 return revisions[-1].get("id")
@@ -133,24 +171,24 @@ class GoogleAPIClient:
             # If we can't get revisions, return None to be safe
             return None
 
-    def check_file_revision(self, file_id: str, cached_revision_id: str) -> bool:
+    async def check_file_revision(self, file_id: str, cached_revision_id: str) -> bool:
         """Check if the cached revision ID matches the current latest revision.
-        
+
         Args:
             file_id: Google Drive file ID
             cached_revision_id: The revision ID stored in cache
-            
+
         Returns:
             True if the cached revision is still current, False otherwise
         """
         try:
-            current_revision_id = self.get_latest_revision_id(file_id)
+            current_revision_id = await self.get_latest_revision_id(file_id)
             return current_revision_id == cached_revision_id
         except Exception:
             # If we can't check, assume it's invalid to be safe
             return False
 
-    def search_documents(
+    async def search_documents(
         self,
         search_params: Dict[str, Any],
         page_token: Optional[str] = None,
@@ -195,7 +233,10 @@ class GoogleAPIClient:
             api_params["pageToken"] = page_token
 
         # Execute search
-        results = self._drive.files().list(**api_params).execute()
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            self._executor, lambda: self._drive.files().list(**api_params).execute()
+        )
         files = results.get("files", [])
         next_token = results.get("nextPageToken")
 
@@ -204,30 +245,20 @@ class GoogleAPIClient:
     # Private properties for lazy loading
     @property
     def _gmail(self) -> Any:
-        if self._gmail_service is None:
-            self._gmail_service = self.auth_manager.get_gmail_service()
-        return self._gmail_service
+        return self.auth_manager.get_gmail_service()
 
     @property
     def _calendar(self) -> Any:
-        if self._calendar_service is None:
-            self._calendar_service = self.auth_manager.get_calendar_service()
-        return self._calendar_service
+        return self.auth_manager.get_calendar_service()
 
     @property
     def _people(self) -> Any:
-        if self._people_service is None:
-            self._people_service = self.auth_manager.get_people_service()
-        return self._people_service
+        return self.auth_manager.get_people_service()
 
     @property
     def _docs(self) -> Any:
-        if self._docs_service is None:
-            self._docs_service = self.auth_manager.get_docs_service()
-        return self._docs_service
+        return self.auth_manager.get_docs_service()
 
     @property
     def _drive(self) -> Any:
-        if self._drive_service is None:
-            self._drive_service = self.auth_manager.get_drive_service()
-        return self._drive_service
+        return self.auth_manager.get_drive_service()

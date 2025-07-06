@@ -150,7 +150,7 @@ class ReactAgent(RetrieverAgentBase):
         # Configure logging
         self._configure_logging()
 
-    def search(self, query: str) -> List[PageReference]:
+    async def search(self, query: str) -> List[PageReference]:
         """
         Execute a search using the ReAct agent's approach.
 
@@ -165,7 +165,7 @@ class ReactAgent(RetrieverAgentBase):
         logger.info("Query: %s", query)
 
         try:
-            return self._run_agent(query)
+            return await self._run_agent(query)
         except Exception as e:
             logger.error("Search failed: %s", str(e))
             return []
@@ -222,7 +222,7 @@ class ReactAgent(RetrieverAgentBase):
     # Private Agent Execution Methods
     # ========================================================================
 
-    def _run_agent(self, query: str) -> List[PageReference]:
+    async def _run_agent(self, query: str) -> List[PageReference]:
         """Run the ReAct agent's search process."""
         messages: List[ChatCompletionMessageParam] = [
             {"role": "system", "content": self._system_prompt},
@@ -248,7 +248,9 @@ class ReactAgent(RetrieverAgentBase):
 
             # Handle agent action
             if isinstance(parsed_output, AgentAction):
-                messages = self._handle_agent_action(parsed_output, messages, iteration)
+                messages = await self._handle_agent_action(
+                    parsed_output, messages, iteration
+                )
             else:
                 logger.error("Unknown parsed output type: %s", type(parsed_output))
                 break
@@ -294,7 +296,7 @@ class ReactAgent(RetrieverAgentBase):
 
         return agent_response.references
 
-    def _handle_agent_action(
+    async def _handle_agent_action(
         self,
         action: AgentAction,
         messages: List[ChatCompletionMessageParam],
@@ -305,21 +307,21 @@ class ReactAgent(RetrieverAgentBase):
         messages.append({"role": "assistant", "content": action.to_json()})
 
         # Execute the tool
-        observation_content = self._execute_tool(action, iteration)
+        observation_content = await self._execute_tool(action, iteration)
 
         # Add observation to conversation
         messages.append({"role": "user", "content": observation_content})
 
         return messages
 
-    def _execute_tool(self, action: AgentAction, iteration: int) -> str:
+    async def _execute_tool(self, action: AgentAction, iteration: int) -> str:
         """Execute a tool and return observation."""
         try:
             toolkit = self._toolkit_for_tool.get(action.action)
             if toolkit is None:
                 raise ValueError(f"Tool '{action.action}' not found in any toolkit")
 
-            result = toolkit.invoke_tool(action.action, action.action_input)
+            result = await toolkit.invoke_tool(action.action, action.action_input)
 
             observation = Observation(action=action.action, result=result)
             observation_content = observation.to_json()

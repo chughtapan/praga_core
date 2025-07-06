@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from typing import Callable, Dict, Type
+from typing import Awaitable, Callable, Dict, List, Type, Union
 
 from praga_core.types import Page, PageURI
 
@@ -7,7 +8,9 @@ from .page_cache import PageCache
 
 logger = logging.getLogger(__name__)
 
-HandlerFn = Callable[..., Page]
+HandlerFn = Callable[..., Awaitable[Page]]
+
+__all__ = ["PageRouter", "HandlerFn"]
 
 
 class PageRouter:
@@ -28,6 +31,19 @@ class PageRouter:
                     f"Example: def handle_{path}(page_uri: PageURI) -> {path.title()}Page:"
                 )
             return_type = func.__annotations__["return"]
+
+            # Handle async return type annotations (e.g., Awaitable[Page])
+            if (
+                hasattr(return_type, "__origin__")
+                and return_type.__origin__ is not None
+            ):
+                if return_type.__origin__ is Union:
+                    # Handle Union types, but for now we expect simple types
+                    return_type = return_type.__args__[0]
+                elif hasattr(return_type, "__args__") and return_type.__args__:
+                    # Handle Awaitable[Page] -> Page
+                    return_type = return_type.__args__[0]
+
             if isinstance(return_type, str):
                 raise RuntimeError(
                     f"Handler for page type '{path}' has a string return type annotation '{return_type}'. "
@@ -71,7 +87,7 @@ class PageRouter:
     def is_cache_enabled(self, path: str) -> bool:
         return self._cache_enabled.get(path, True)
 
-    def get_page(self, page_uri: PageURI) -> Page:
+    async def get_page(self, page_uri: PageURI) -> Page:
         """Retrieve a page by routing to the appropriate handler.
 
         First checks cache if caching is enabled for the page type.
@@ -86,23 +102,30 @@ class PageRouter:
 
         # Try cache first if enabled
         if cache_enabled:
-            cached_page = self._get_from_cache(page_type, page_uri)
+            cached_page = await self._get_from_cache(page_type, page_uri)
             if cached_page:
                 return cached_page
 
         # Not in cache or caching disabled - call handler
-        page = self._call_handler(handler, page_uri)
+        page = await self._call_handler_async(handler, page_uri)
 
         # Store in cache if enabled and not already cached
         if cache_enabled:
-            self._store_in_cache(page, page_uri)
+            await self._store_in_cache(page, page_uri)
 
         return page
 
-    def _get_from_cache(self, page_type: Type[Page], page_uri: PageURI) -> Page | None:
+    async def get_pages(self, page_uris: List[PageURI]) -> List[Page]:
+        """Bulk asynchronous page retrieval with parallel execution."""
+        tasks = [self.get_page(uri) for uri in page_uris]
+        return await asyncio.gather(*tasks)
+
+    async def _get_from_cache(
+        self, page_type: Type[Page], page_uri: PageURI
+    ) -> Page | None:
         """Attempt to retrieve page from cache."""
         try:
-            cached_page = self._page_cache.get(page_type, page_uri)
+            cached_page = await self._page_cache.get(page_type, page_uri)
             if cached_page:
                 logger.debug(f"Found cached page for {page_uri}")
                 return cached_page
@@ -112,8 +135,8 @@ class PageRouter:
             )
         return None
 
-    def _call_handler(self, handler: HandlerFn, page_uri: PageURI) -> Page:
-        """Call the handler to generate a page, ensuring proper URI versioning."""
+    async def _call_handler_async(self, handler: HandlerFn, page_uri: PageURI) -> Page:
+        """Call the async handler to generate a page, ensuring proper URI versioning."""
         if page_uri.version is None:
             page_uri = self._create_page_uri(
                 self._get_handler_return_type(handler, page_uri.type),
@@ -121,13 +144,15 @@ class PageRouter:
                 page_uri.type,
                 page_uri.id,
             )
-        return handler(page_uri)
 
-    def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
+        # All handlers are now async
+        return await handler(page_uri)
+
+    async def _store_in_cache(self, page: Page, page_uri: PageURI) -> None:
         """Attempt to store page in cache if not already present."""
         try:
             # Check if page is already in cache
-            if not self._page_cache.get(page.__class__, page_uri):
+            if not await self._page_cache.get(page.__class__, page_uri):
                 self._page_cache.store(page)
                 logger.debug(f"Stored page in cache: {page_uri}")
         except Exception as e:
@@ -162,6 +187,16 @@ class PageRouter:
                 f"Example: def handle_{page_type_name}(page_uri: PageURI) -> {page_type_name.title()}Page:"
             )
         return_type = handler.__annotations__["return"]
+
+        # Handle async return type annotations (e.g., Awaitable[Page])
+        if hasattr(return_type, "__origin__") and return_type.__origin__ is not None:
+            if return_type.__origin__ is Union:
+                # Handle Union types, but for now we expect simple types
+                return_type = return_type.__args__[0]
+            elif hasattr(return_type, "__args__") and return_type.__args__:
+                # Handle Awaitable[Page] -> Page
+                return_type = return_type.__args__[0]
+
         if isinstance(return_type, str):
             raise RuntimeError(
                 f"Handler for page type '{page_type_name}' has a string return type annotation '{return_type}'. "

@@ -1,7 +1,17 @@
 """Simplified PageCache implementation with clear separation of concerns."""
 
 import logging
-from typing import Any, Callable, Generic, List, Optional, Type, TypeVar, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    cast,
+)
 
 from sqlalchemy import Table, create_engine
 from sqlalchemy.engine import Engine
@@ -103,17 +113,17 @@ class PageCache:
         # Store page
         return self._storage.store(page, parent_uri)
 
-    def get(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
+    async def get(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
         """Get a page by type and URI, with validation."""
         page = self._storage.get(page_type, uri)
-        if page and not self._validate_page_and_ancestors(page):
+        if page and not await self._validate_page_and_ancestors(page):
             return None
         return page
 
-    def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
+    async def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
         """Get the latest version of a page."""
         page = self._storage.get_latest(page_type, uri_prefix)
-        if page and not self._validator.is_valid(page):
+        if page and not await self._validator.is_valid(page):
             self._storage.mark_invalid(page.uri)
             return None
         return page
@@ -124,16 +134,10 @@ class PageCache:
 
     # Validation management
     def register_validator(
-        self, page_type: Type[P], validator: Callable[[P], bool]
+        self, page_type: Type[P], validator: Callable[[P], Awaitable[bool]]
     ) -> None:
-        """Register a validator function for a page type."""
-
-        def validator_wrapper(page: Page) -> bool:
-            if not isinstance(page, page_type):
-                return False
-            return validator(page)
-
-        self._validator.register(page_type, validator_wrapper)
+        """Register an validator function for a page type."""
+        self._validator.register(page_type, validator)
 
     # Cache management
     def invalidate(self, uri: PageURI) -> bool:
@@ -155,10 +159,10 @@ class PageCache:
         """Get the full lineage from root to this page."""
         return self._provenance.get_lineage(page_uri)
 
-    def _validate_page_and_ancestors(self, page: Page) -> bool:
+    async def _validate_page_and_ancestors(self, page: Page) -> bool:
         """Validate a page and its ancestors using registered validators."""
         # First, validate the page itself
-        if not self._validator.is_valid(page):
+        if not await self._validator.is_valid(page):
             self.invalidate(page.uri)
             return False
 
@@ -170,7 +174,7 @@ class PageCache:
                 ancestor_pages = provenance_chain[:-1] if provenance_chain else []
 
                 for ancestor in ancestor_pages:
-                    if not self._validator.is_valid(ancestor):
+                    if not await self._validator.is_valid(ancestor):
                         logger.debug(f"Ancestor page failed validation: {ancestor.uri}")
                         # Mark ancestor as invalid in cache
                         self.invalidate(ancestor.uri)
@@ -215,25 +219,22 @@ class QueryBuilder(Generic[P]):
         self._filters.append(condition)
         return self
 
-    def all(self) -> List[P]:
+    async def all(self) -> List[P]:
         """Execute query and return all matching valid pages."""
         pages = self._query_engine.find(self._page_type, self._filters)
         valid_pages: List[P] = []
-
         for page in pages:
-            if self._validator.is_valid(page):
+            if await self._validator.is_valid(page):
                 valid_pages.append(page)
             else:
-                # Automatically invalidate pages that fail validation
                 self._storage.mark_invalid(page.uri)
-
         return valid_pages
 
-    def first(self) -> Optional[P]:
+    async def first(self) -> Optional[P]:
         """Execute query and return first matching valid page."""
-        results = self.all()
+        results = await self.all()
         return results[0] if results else None
 
-    def count(self) -> int:
-        """Count matching valid pages."""
-        return len(self.all())
+    async def count(self) -> int:
+        """Count matching valid pages"""
+        return len(await self.all())

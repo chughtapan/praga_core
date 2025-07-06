@@ -1,6 +1,7 @@
 """Google API Integration App"""
 
 import argparse
+import asyncio
 import logging
 
 from praga_core import ServerContext, set_global_context
@@ -61,7 +62,7 @@ def setup_global_context() -> None:
     logger.info("✅ Global context setup complete!")
 
 
-def run_interactive_cli() -> None:
+async def run_interactive_cli() -> None:
     """Run interactive CLI for direct queries."""
     from praga_core import get_global_context
 
@@ -86,7 +87,7 @@ def run_interactive_cli() -> None:
             print("-" * 40)
 
             # Search and display results
-            result = context.search(query)
+            result = await context.search(query)
 
             if not result.results:
                 print("No results found.")
@@ -112,7 +113,7 @@ def run_interactive_cli() -> None:
             print("Please try again.")
 
 
-def main() -> None:
+async def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         description="Google API Integration with Global Context",
@@ -130,8 +131,8 @@ def main() -> None:
 
     # Set up global context
     setup_global_context()
-    run_interactive_cli()
+    await run_interactive_cli()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

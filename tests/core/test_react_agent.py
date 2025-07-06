@@ -1,7 +1,8 @@
 """Comprehensive pytest tests for the ReactAgent."""
 
+import asyncio
 import json
-from typing import List
+from typing import Sequence
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,13 +101,15 @@ class MockRetrieverToolkit(RetrieverToolkit):
         self.register_tool(method=self.search_documents)
         self.register_tool(method=self.search_by_person_and_topic)
 
-    def search_documents(self, query: str) -> List[Page]:
+    async def search_documents(self, query: str) -> Sequence[MockDocument]:
         """Search through documents based on a query."""
         if not query:
             return []
         return [doc for doc in self.documents if query.lower() in doc.content.lower()]
 
-    def search_by_person_and_topic(self, person: str, topic: str) -> List[Page]:
+    async def search_by_person_and_topic(
+        self, person: str, topic: str
+    ) -> Sequence[MockDocument]:
         """Search documents by person name and topic."""
         if not person or not topic:
             return []
@@ -143,7 +146,7 @@ class MockEmailToolkit(RetrieverToolkit):
         # Register email-specific tools
         self.register_tool(method=self.search_emails)
 
-    def search_emails(self, query: str) -> List[Page]:
+    async def search_emails(self, query: str) -> Sequence[Page]:
         """Search through emails."""
         if not query:
             return []
@@ -173,7 +176,7 @@ class MockCalendarToolkit(RetrieverToolkit):
         # Register calendar-specific tools
         self.register_tool(method=self.search_events, name="search_events")
 
-    def search_events(self, query: str) -> List[Page]:
+    async def search_events(self, query: str) -> Sequence[MockDocument]:
         """Search through calendar events."""
         if not query:
             return []
@@ -228,7 +231,7 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_2)
 
         # Execute search
-        references = self.agent.search("Find documents about AI")
+        references = asyncio.run(self.agent.search("Find documents about AI"))
 
         # Verify results
         assert len(references) == 2
@@ -265,7 +268,9 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find documents about quantum physics")
+        references = asyncio.run(
+            self.agent.search("Find documents about quantum physics")
+        )
         assert len(references) == 0
 
     def test_search_by_person_and_topic(self):
@@ -302,7 +307,7 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find where John talks about AI")
+        references = asyncio.run(self.agent.search("Find where John talks about AI"))
 
         assert len(references) == 2
         assert references[0].uri.id == "1"
@@ -322,7 +327,7 @@ class TestReactAgentBasic:
                 )
             )
 
-        references = self.agent.search("Test max iterations")
+        references = asyncio.run(self.agent.search("Test max iterations"))
         assert len(references) == 0  # Should return empty due to max iterations
 
     def test_markdown_json_parsing(self):
@@ -346,7 +351,7 @@ class TestReactAgentBasic:
 
         self.mock_client.add_response(markdown_response)
 
-        references = self.agent.search("Test markdown parsing")
+        references = asyncio.run(self.agent.search("Test markdown parsing"))
         assert len(references) == 1
         assert references[0].uri.id == "1"
 
@@ -444,7 +449,7 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_2)
 
         # Execute search
-        references = self.agent.search("Find documents about AI")
+        references = asyncio.run(self.agent.search("Find documents about AI"))
 
         # Verify results include documents
         assert len(references) == 2
@@ -486,7 +491,7 @@ class TestReactAgentBasic:
         self.mock_client.add_response(mock_response_2)
 
         # Execute search
-        references = self.agent.search("Find non-existent document")
+        references = asyncio.run(self.agent.search("Find non-existent document"))
 
         # Verify that the reference is created but document is None
         assert len(references) == 1
@@ -549,7 +554,7 @@ class TestReactAgentMultipleToolkits:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find emails about meetings")
+        references = asyncio.run(self.agent.search("Find emails about meetings"))
         assert len(references) == 1
         assert references[0].uri.id == "email_1"
 
@@ -583,7 +588,7 @@ class TestReactAgentMultipleToolkits:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find standup meetings")
+        references = asyncio.run(self.agent.search("Find standup meetings"))
         assert len(references) == 1
         assert references[0].uri.id == "cal_1"
 
@@ -646,7 +651,7 @@ class TestReactAgentMultipleToolkits:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find emails about meetings")
+        references = asyncio.run(self.agent.search("Find emails about meetings"))
 
         assert len(references) == 1
         assert references[0].uri.id == "email_1"
@@ -681,7 +686,7 @@ class TestReactAgentMultipleToolkits:
         self.mock_client.add_response(mock_response_1)
         self.mock_client.add_response(mock_response_2)
 
-        references = self.agent.search("Find standup meetings")
+        references = asyncio.run(self.agent.search("Find standup meetings"))
 
         assert len(references) == 1
         assert references[0].uri.id == "cal_1"
