@@ -511,17 +511,18 @@ class TestStrictHandlerValidation:
         assert "valid_decorator" in context._router._handlers
 
     @pytest.mark.asyncio
-    async def test_decorator_with_invalid_annotation_fails(self, context) -> None:
-        """Test that the decorator rejects invalid annotations."""
-        with pytest.raises(RuntimeError, match="has a string return type annotation"):
+    async def test_decorator_with_forward_reference_annotation_succeeds(
+        self, context
+    ) -> None:
+        """Test that the decorator accepts forward references."""
 
-            @context.route("invalid_decorator")
-            def invalid_handler(
-                page_uri: PageURI,
-            ) -> "TestStrictHandlerValidation.ValidPage":
-                return TestStrictHandlerValidation.ValidPage(
-                    uri=page_uri, title="Invalid", content="Content"
-                )
+        @context.route("forward_reference")
+        def forward_reference_handler(
+            page_uri: PageURI,
+        ) -> "TestStrictHandlerValidation.ValidPage":
+            return TestStrictHandlerValidation.ValidPage(
+                uri=page_uri, title="Forward Reference", content="Content"
+            )
 
     @pytest.mark.asyncio
     async def test_validation_happens_at_registration_not_runtime(
@@ -654,18 +655,6 @@ class TestHandlerSignatureValidation:
             )
 
         with pytest.raises(RuntimeError, match="must have a return type annotation"):
-            context.route("invalid_test")(invalid_handler)
-
-    @pytest.mark.asyncio
-    async def test_string_return_annotation_rejected(self, context) -> None:
-        def invalid_handler(
-            page_uri: PageURI,
-        ) -> "TestHandlerSignatureValidation.ValidTestPage":
-            return TestHandlerSignatureValidation.ValidTestPage(
-                uri=page_uri, data="test"
-            )
-
-        with pytest.raises(RuntimeError, match="has a string return type annotation"):
             context.route("invalid_test")(invalid_handler)
 
     @pytest.mark.asyncio

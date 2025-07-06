@@ -32,13 +32,12 @@ class PageRegistry:
         table_class = create_page_table(page_type)
 
         # Create the table in the database if it doesn't exist
-        if isinstance(self._engine, AsyncEngine):
-            # Use AsyncConnection.run_sync to run the synchronous create_all method
-            async with self._engine.begin() as conn:
-                await conn.run_sync(table_class.metadata.create_all, checkfirst=True)
-        else:
-            # For sync engines, create immediately
-            table_class.metadata.create_all(self._engine, checkfirst=True)
+        if not isinstance(self._engine, AsyncEngine):
+            raise RuntimeError("Must use AsyncSqlAlchemy engine")
+
+        # Use AsyncConnection.run_sync to run the synchronous create_all method
+        async with self._engine.begin() as conn:
+            await conn.run_sync(table_class.metadata.create_all, checkfirst=True)
 
         self._registered_types.add(type_name)
         self._page_classes[type_name] = page_type

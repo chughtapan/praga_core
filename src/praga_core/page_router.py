@@ -1,6 +1,14 @@
 import asyncio
 import logging
-from typing import Awaitable, Callable, Dict, List, Type, Union
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Type,
+    Union,
+    get_type_hints,
+)
 
 from praga_core.types import Page, PageURI
 
@@ -21,56 +29,29 @@ class PageRouter:
 
     def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
         def decorator(func: HandlerFn) -> HandlerFn:
-            # Validate handler before registering
-            if (
-                not hasattr(func, "__annotations__")
-                or "return" not in func.__annotations__
-            ):
-                raise RuntimeError(
-                    f"Handler for page type '{path}' must have a return type annotation. "
-                    f"Example: def handle_{path}(page_uri: PageURI) -> {path.title()}Page:"
-                )
-            return_type = func.__annotations__["return"]
-
-            # Handle async return type annotations (e.g., Awaitable[Page])
-            if (
-                hasattr(return_type, "__origin__")
-                and return_type.__origin__ is not None
-            ):
-                if return_type.__origin__ is Union:
-                    # Handle Union types, but for now we expect simple types
-                    return_type = return_type.__args__[0]
-                elif hasattr(return_type, "__args__") and return_type.__args__:
-                    # Handle Awaitable[Page] -> Page
-                    return_type = return_type.__args__[0]
-
-            if isinstance(return_type, str):
-                raise RuntimeError(
-                    f"Handler for page type '{path}' has a string return type annotation '{return_type}'. "
-                    f"Please use a proper class import instead of a forward reference."
-                )
-            if not isinstance(return_type, type):
-                raise RuntimeError(
-                    f"Handler for page type '{path}' return type annotation must be a class, "
-                    f"got {type(return_type).__name__}: {return_type}"
-                )
             try:
-                if not issubclass(return_type, Page):
-                    raise RuntimeError(
-                        f"Handler for page type '{path}' return type annotation must be a Page subclass, "
-                        f"got {return_type.__name__}"
-                    )
-            except TypeError:
+                annotations = get_type_hints(func)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Handler for page type '{path}' has invalid type annotations: {e}"
+                )
+            if "return" not in annotations:
+                raise RuntimeError(
+                    f"Handler for page type '{path}' must have a return type annotation."
+                )
+            return_type = annotations["return"]
+
+            # Only check for Page subclass
+            if not issubclass(return_type, Page):
                 raise RuntimeError(
                     f"Handler for page type '{path}' return type annotation must be a Page subclass, "
-                    f"got {return_type}"
+                    f"got {getattr(return_type, '__name__', repr(return_type))}"
                 )
 
             if path in self._handlers:
                 raise RuntimeError(f"Handler already registered for path: {path}")
             self._handlers[path] = func
             self._cache_enabled[path] = cache
-            # Register page type with cache if enabled
             return func
 
         return decorator

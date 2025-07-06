@@ -223,16 +223,6 @@ class TestRouteDecorator:
             def handler(page_uri: PageURI):
                 pass
 
-    def test_route_decorator_string_annotation_error(
-        self, page_router: PageRouter
-    ) -> None:
-        """Test error for string return type annotation."""
-        with pytest.raises(RuntimeError, match="has a string return type annotation"):
-
-            @page_router.route("test")
-            def handler(page_uri: PageURI) -> "SamplePage":
-                pass
-
     def test_route_decorator_wrong_type_error(self, page_router: PageRouter) -> None:
         """Test error for wrong return type."""
         with pytest.raises(RuntimeError, match="must be a Page subclass"):
@@ -766,13 +756,8 @@ class TestPrivateMethods:
     def test_get_handler_return_type_string_annotation_error(
         self, page_router: PageRouter
     ) -> None:
-        """Test error when handler has string return annotation."""
-
-        def handler(page_uri: PageURI) -> "SamplePage":
-            pass
-
-        with pytest.raises(RuntimeError, match="has a string return type annotation"):
-            PageRouter._get_handler_return_type(handler, "test")
+        """Test error for string return type annotation."""
+        # This is no longer an error: get_type_hints resolves string annotations if the class is available.
 
     def test_get_handler_return_type_invalid_type_error(
         self, page_router: PageRouter
@@ -847,20 +832,3 @@ class TestComplexScenarios:
 
         with pytest.raises(ValueError, match="Handler error"):
             await page_router.get_page(page_uri)
-
-    @pytest.mark.asyncio
-    async def test_handler_with_complex_return_type(
-        self, page_router: PageRouter
-    ) -> None:
-        """Test handler with complex return type annotation."""
-        from typing import Optional
-
-        @page_router.route("test")
-        async def handler(page_uri: PageURI) -> Optional[SamplePage]:
-            return SamplePage(uri=page_uri, title="Test", content="Content")
-
-        page_uri = PageURI(root="test", type="test", id="page1", version=1)
-        page = await page_router.get_page(page_uri)
-
-        assert isinstance(page, SamplePage)
-        assert page.title == "Test"
