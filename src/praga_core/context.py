@@ -36,7 +36,6 @@ class ServerContext(ActionExecutorMixin):
         _page_cache: Optional[PageCache] = None,
     ) -> None:
         """Do not use directly. Use `await ServerContext.create(...)` instead."""
-
         super().__init__()
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
@@ -102,11 +101,6 @@ class ServerContext(ActionExecutorMixin):
 
         self._page_cache.register_validator(page_type, validator_wrapper)
         return func
-
-    @property
-    def _page_handlers(self) -> Dict[str, HandlerFn]:
-        """Get all registered page handlers (for MCP compatibility)."""
-        return self._router._handlers
 
     def register_service(self, name: str, service: Service) -> None:
         """Register a service with the context."""
@@ -181,7 +175,6 @@ class ServerContext(ActionExecutorMixin):
         resolve_references: bool = True,
     ) -> SearchResponse:
         """Execute search using the provided retriever."""
-
         active_retriever = retriever or self.retriever
         if not active_retriever:
             raise RuntimeError(

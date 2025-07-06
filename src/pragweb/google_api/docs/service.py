@@ -256,9 +256,9 @@ class GoogleDocsService(ToolkitService):
     async def _store_pages(
         self, header_page: GDocHeader, chunk_pages: list[GDocChunk]
     ) -> None:
-        await self.context.page_cache.store(header_page)
+        await self.page_cache.store(header_page)
         tasks = [
-            self.context.page_cache.store(chunk_page, parent_uri=header_page.uri)
+            self.page_cache.store(chunk_page, parent_uri=header_page.uri)
             for chunk_page in chunk_pages
         ]
         await asyncio.gather(*tasks, return_exceptions=True)
