@@ -53,7 +53,7 @@ class TestActionExecutorCore:
     def test_action_registration_directly(self, context: ServerContext) -> None:
         """Test registering a standalone function as an action."""
 
-        def forward_email(email: EmailPage, recipient: str) -> bool:
+        async def forward_email(email: EmailPage, recipient: str) -> bool:
             return True
 
         context.register_action("forward_email", forward_email)
@@ -63,7 +63,7 @@ class TestActionExecutorCore:
     def test_get_action_success(self, context: ServerContext) -> None:
         """Test successful action retrieval."""
 
-        def cancel_event(event: CalendarEventPage) -> bool:
+        async def cancel_event(event: CalendarEventPage) -> bool:
             return True
 
         context.register_action("cancel_event", cancel_event)
@@ -85,10 +85,10 @@ class TestActionExecutorCore:
     def test_actions_property(self, context: ServerContext) -> None:
         """Test the actions property returns correct action mapping."""
 
-        def delete_email(email: EmailPage) -> bool:
+        async def delete_email(email: EmailPage) -> bool:
             return True
 
-        def reschedule_event(event: CalendarEventPage, new_time: str) -> bool:
+        async def reschedule_event(event: CalendarEventPage, new_time: str) -> bool:
             return True
 
         context.register_action("delete_email", delete_email)
@@ -114,7 +114,7 @@ class TestActionExecutorCore:
             return email
 
         @context.action()
-        def mark_important(email: EmailPage) -> bool:
+        async def mark_important(email: EmailPage) -> bool:
             return True
 
         result = await context.invoke_action("mark_important", {"email": email.uri})
@@ -137,7 +137,9 @@ class TestActionExecutorCore:
             return email
 
         @context.action()
-        def forward_email(email: EmailPage, recipient: str, add_note: str = "") -> bool:
+        async def forward_email(
+            email: EmailPage, recipient: str, add_note: str = ""
+        ) -> bool:
             return len(recipient) > 0
 
         result = await context.invoke_action(
@@ -151,7 +153,7 @@ class TestActionExecutorCore:
         """Test action invocation when action fails."""
 
         @context.action()
-        def unreliable_action(email: EmailPage) -> bool:
+        async def unreliable_action(email: EmailPage) -> bool:
             return False
 
         email = EmailPage(
@@ -346,7 +348,7 @@ class TestPageURIConversion:
             )
 
         @context.action()
-        def archive_email(email: EmailPage) -> bool:
+        async def archive_email(email: EmailPage) -> bool:
             return True
 
         # Use string representation of PageURI
@@ -376,7 +378,7 @@ class TestActionExamples:
             return stored_email
 
         @context.action()
-        def mark_email_as_read(email: EmailPage) -> bool:
+        async def mark_email_as_read(email: EmailPage) -> bool:
             """Mark an email as read."""
             email.read = True
             return True
@@ -402,7 +404,7 @@ class TestActionExamples:
             return email
 
         @context.action()
-        def forward_email_to_person(email: EmailPage, recipient: str) -> bool:
+        async def forward_email_to_person(email: EmailPage, recipient: str) -> bool:
             """Forward an email to a specific person."""
             return "@" in recipient  # Simple validation
 
@@ -439,7 +441,9 @@ class TestActionExamples:
             return stored_event
 
         @context.action()
-        def change_calendar_event_time(event: CalendarEventPage, new_time: str) -> bool:
+        async def change_calendar_event_time(
+            event: CalendarEventPage, new_time: str
+        ) -> bool:
             """Change a calendar event to another time."""
             if len(new_time) > 0:
                 event.start_time = new_time
