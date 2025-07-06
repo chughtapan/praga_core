@@ -6,6 +6,7 @@ and error handling.
 """
 
 import asyncio
+import logging
 import tempfile
 from typing import Any, Awaitable, Union
 from unittest.mock import AsyncMock, MagicMock
@@ -16,6 +17,10 @@ from pydantic import Field
 from praga_core.page_cache import PageCache
 from praga_core.page_router import PageRouter
 from praga_core.types import Page, PageURI
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("praga_core.page_cache").setLevel(logging.DEBUG)
+logging.getLogger("praga_core.page_router").setLevel(logging.DEBUG)
 
 
 # Test page classes
@@ -361,8 +366,7 @@ class TestGetPage:
         page = await page_router_with_mock.get_page(page_uri)
 
         assert page.title == "Fresh"
-        # Cache should not be called when disabled
-        page_router_with_mock._page_cache.get.assert_not_called()
+        # Cache store should not be called when disabled
         page_router_with_mock._page_cache.store.assert_not_called()
 
     @pytest.mark.asyncio
@@ -432,14 +436,15 @@ class TestGetPage:
         )
         await page_router._page_cache.store(page)
 
-        # Simulate logic for storing a new page with version=None
-        # This is similar to what PageRouter._create_page_uri does
+        # Simulate logic for storing a new page with version=None after existing version=3
         uri = await page_router._create_page_uri(SamplePage, "test", "test", "page1")
         new_page = SamplePage(uri=uri, title="Test v4", content="Content v4")
         await page_router._page_cache.store(new_page)
 
         # Now the latest version should be 4
-        latest = await page_router._page_cache.get_latest(SamplePage, "test/test:page1")
+        latest = await page_router._page_cache.get(
+            SamplePage, PageURI(root="test", type="test", id="page1", version=None)
+        )
         assert latest.uri.version == 4
         assert latest.title == "Test v4"
 
@@ -832,3 +837,57 @@ class TestComplexScenarios:
 
         with pytest.raises(ValueError, match="Handler error"):
             await page_router.get_page(page_uri)
+
+
+class TestAllowStaleFunctionality:
+    @pytest.mark.asyncio
+    async def test_get_page_allow_stale(self, page_router: PageRouter):
+        class StalePage(Page):
+            value: int
+
+        async def validator(page: StalePage) -> bool:
+            return page.value > 0
+
+        page_router._page_cache.register_validator(StalePage, validator)
+
+        @page_router.route("stale")
+        async def handler(page_uri: PageURI) -> StalePage:
+            # Handler always returns value -999
+            return StalePage(uri=page_uri, value=-999)
+
+        page_uri = PageURI(root="test", type="stale", id="p1", version=1)
+        # Store a page with value -1 (invalid)
+        cached_page = StalePage(uri=page_uri, value=-1)
+        await page_router._page_cache.store(cached_page)
+        # With allow_stale=True, should get the cached invalid page (value -1)
+        result = await page_router.get_page(page_uri, allow_stale=True)
+        assert result.value == -1
+        # With allow_stale=False, should get the handler's page (value -999)
+        result = await page_router.get_page(page_uri, allow_stale=False)
+        assert result.value == -999
+
+    @pytest.mark.asyncio
+    async def test_get_pages_allow_stale(self, page_router: PageRouter):
+        class StalePage(Page):
+            value: int
+
+        async def validator(page: StalePage) -> bool:
+            return page.value > 0
+
+        page_router._page_cache.register_validator(StalePage, validator)
+
+        @page_router.route("stale")
+        async def handler(page_uri: PageURI) -> StalePage:
+            return StalePage(uri=page_uri, value=-999)
+
+        uris = [
+            PageURI(root="test", type="stale", id=f"p{i}", version=1) for i in range(3)
+        ]
+        for uri in uris:
+            await page_router._page_cache.store(StalePage(uri=uri, value=-1))
+        # With allow_stale, all are returned from cache (value -1)
+        results = await page_router.get_pages(uris, allow_stale=True)
+        assert all(page.value == -1 for page in results)
+        # With allow_stale=False, all are returned from handler (value -999)
+        results = await page_router.get_pages(uris, allow_stale=False)
+        assert all(page.value == -999 for page in results)

@@ -146,7 +146,9 @@ class ServerContext:
             )
         return PageURI(root=self.root, type=type_path, id=id, version=version)
 
-    async def get_page(self, page_uri: str | PageURI) -> Page:
+    async def get_page(
+        self, page_uri: str | PageURI, allow_stale: bool = False
+    ) -> Page:
         """Retrieve a page by routing to the appropriate service handler.
 
         First checks cache if caching is enabled for the page type.
@@ -154,14 +156,16 @@ class ServerContext:
         """
         if isinstance(page_uri, str):
             page_uri = PageURI.parse(page_uri)
-        return await self._router.get_page(page_uri)
+        return await self._router.get_page(page_uri, allow_stale=allow_stale)
 
-    async def get_pages(self, page_uris: Sequence[str | PageURI]) -> List[Page]:
+    async def get_pages(
+        self, page_uris: Sequence[str | PageURI], allow_stale: bool = False
+    ) -> List[Page]:
         """Bulk asynchronous page retrieval with parallel execution."""
         parsed_uris = [
             PageURI.parse(uri) if isinstance(uri, str) else uri for uri in page_uris
         ]
-        return await self._router.get_pages(parsed_uris)
+        return await self._router.get_pages(parsed_uris, allow_stale=allow_stale)
 
     async def search(
         self,

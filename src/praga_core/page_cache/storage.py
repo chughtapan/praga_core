@@ -125,8 +125,10 @@ class PageStorage:
             logger.debug(f"[GET] No valid entity for {uri}")
             return None
 
-    async def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
-        """Get the latest version of a page (async)."""
+    async def get_latest_version(
+        self, page_type: Type[P], uri_prefix: str
+    ) -> Optional[P]:
+        """Get the latest version of a page."""
         try:
             await self._registry.ensure_registered(page_type)
             table_class = self._registry.get_table_class(page_type)
@@ -138,7 +140,6 @@ class PageStorage:
             query = (
                 select(table_class)
                 .where(table_class.uri_prefix == uri_prefix)
-                .where(table_class.valid)
                 .order_by(table_class.version.desc())
                 .limit(1)
             )

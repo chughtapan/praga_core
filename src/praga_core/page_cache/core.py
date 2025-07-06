@@ -135,18 +135,17 @@ class PageCache:
         # Store page
         return await self._storage.store(page, parent_uri)
 
-    async def get(self, page_type: Type[P], uri: PageURI) -> Optional[P]:
-        """Get a page by type and URI, with validation (async)."""
+    async def get(
+        self, page_type: Type[P], uri: PageURI, allow_stale: bool = False
+    ) -> Optional[P]:
+        """Get a page by type and URI, with validation (async). If allow_stale is True, return the page even if it is invalid."""
+        if allow_stale:
+            page = await self._storage.get(page_type, uri, ignore_validity=True)
+            return page
         page = await self._storage.get(page_type, uri)
-        if page and not await self._validate_page_and_ancestors(page):
+        if not page:
             return None
-        return page
-
-    async def get_latest(self, page_type: Type[P], uri_prefix: str) -> Optional[P]:
-        """Get the latest version of a page (async)."""
-        page = await self._storage.get_latest(page_type, uri_prefix)
-        if page and not await self._validator.is_valid(page):
-            await self._storage.mark_invalid(page.uri)
+        if not await self._validate_page_and_ancestors(page):
             return None
         return page
 
@@ -171,7 +170,7 @@ class PageCache:
         self, page_type: Type[P], uri_prefix: str
     ) -> Optional[int]:
         """Get the latest version number for a URI prefix (used by ServerContext for auto-increment)."""
-        page = await self._storage.get_latest(page_type, uri_prefix)
+        page = await self._storage.get_latest_version(page_type, uri_prefix)
         return page.uri.version if page else None
 
     # Provenance operations

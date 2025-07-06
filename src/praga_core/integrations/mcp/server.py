@@ -90,12 +90,15 @@ def setup_mcp_tools(
             raise RuntimeError(error_msg)
 
     @mcp.tool(description=get_pages_tool_description(type_names))
-    async def get_pages(page_uris: List[str], ctx: Optional[Context] = None) -> str:
+    async def get_pages(
+        page_uris: List[str], ctx: Optional[Context] = None, allow_stale: bool = False
+    ) -> str:
         """Get specific pages by their type and IDs.
 
         Args:
             page_uris: List of unique identifiers for the pages (supports single or multiple IDs)
             ctx: MCP context for logging
+            allow_stale: Whether to allow stale data
 
         Returns:
             JSON string containing the complete page data for all requested pages
@@ -107,7 +110,9 @@ def setup_mcp_tools(
 
             # Use the batch get_pages method
             try:
-                pages = await server_context.get_pages(page_uris)
+                pages = await server_context.get_pages(
+                    page_uris, allow_stale=allow_stale
+                )
             except Exception as e:
                 # If the whole batch fails, return error for all
                 error_msg = f"Failed to get pages: {str(e)}"

@@ -1,6 +1,5 @@
 """Gmail service for handling Gmail API interactions and page creation."""
 
-import asyncio
 import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -177,11 +176,10 @@ class GmailService(ToolkitService):
             )
 
             # Convert to PageURIs
-            tasks = [
-                self.context.create_page_uri(EmailPage, "email", msg["id"])
+            uris = [
+                PageURI(root=self.context.root, type=self.name, id=msg["id"])
                 for msg in messages
             ]
-            uris = await asyncio.gather(*tasks)
 
             return uris, next_page_token
 

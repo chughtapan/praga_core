@@ -1894,7 +1894,7 @@ class TestVersioning:
         prefix = "test/user:user1"
 
         # Should return None when no versions exist
-        latest_page = await page_cache.get_latest(UserPage, prefix)
+        latest_page = await page_cache.get(UserPage, PageURI.parse(prefix))
         assert latest_page is None
 
         # Store multiple versions
@@ -1915,7 +1915,9 @@ class TestVersioning:
         await page_cache.store(user_v2)
 
         # Should return the latest version page
-        latest_page = await page_cache.get_latest(UserPage, prefix)
+        latest_page = await page_cache.get(
+            UserPage, PageURI(root="test", type="user", id="user1", version=None)
+        )
         assert latest_page is not None
         assert latest_page.name == "User Version 2"
         assert latest_page.age == 26
@@ -1939,7 +1941,9 @@ class TestVersioning:
         latest_version = await page_cache.get_latest_version(UserPage, user.uri.prefix)
         assert latest_version == 5
 
-        latest_page = await page_cache.get_latest(UserPage, user.uri.prefix)
+        latest_page = await page_cache.get(
+            UserPage, PageURI(root="test", type="user", id="user123", version=None)
+        )
         assert latest_page is not None
         assert latest_page.name == "Test User"
 
@@ -1977,8 +1981,12 @@ class TestVersioning:
         assert user2_latest == 1
 
         # Check that latest pages are correct
-        user1_latest_page = await page_cache.get_latest(UserPage, "test/user:user1")
-        user2_latest_page = await page_cache.get_latest(UserPage, "test/user:user2")
+        user1_latest_page = await page_cache.get(
+            UserPage, PageURI(root="test", type="user", id="user1", version=None)
+        )
+        user2_latest_page = await page_cache.get(
+            UserPage, PageURI(root="test", type="user", id="user2", version=None)
+        )
 
         assert user1_latest_page is not None
         assert user2_latest_page is not None
@@ -2279,3 +2287,60 @@ class TestCacheInvalidation:
         retrieved = await page_cache.get(self.GoogleDocPage, doc.uri)
         assert retrieved is not None
         assert retrieved.title == "Test Doc"
+
+
+class TestAllowStaleFunctionality:
+    @pytest.mark.asyncio
+    async def test_get_invalid_page_with_allow_stale(self, page_cache: PageCache):
+        class StalePage(Page):
+            value: int
+
+        async def validator(page: StalePage) -> bool:
+            return page.value > 0
+
+        page_cache.register_validator(StalePage, validator)
+        valid_page = StalePage(
+            uri=PageURI(root="test", type="stale", id="p1", version=1), value=1
+        )
+        invalid_page = StalePage(
+            uri=PageURI(root="test", type="stale", id="p2", version=1), value=-1
+        )
+        await page_cache.store(valid_page)
+        await page_cache.store(invalid_page)
+
+        # By default, only valid page is returned
+        assert await page_cache.get(StalePage, valid_page.uri) is not None
+        assert await page_cache.get(StalePage, invalid_page.uri) is None
+        # With allow_stale, invalid page is returned
+        assert (
+            await page_cache.get(StalePage, invalid_page.uri, allow_stale=True)
+            is not None
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_page_with_invalid_ancestor_allow_stale(
+        self, page_cache: PageCache
+    ):
+        class AncestorPage(Page):
+            flag: bool
+
+        class ChildPage(Page):
+            pass
+
+        async def ancestor_validator(page: AncestorPage) -> bool:
+            return page.flag
+
+        page_cache.register_validator(AncestorPage, ancestor_validator)
+        ancestor = AncestorPage(
+            uri=PageURI(root="test", type="ancestor", id="a1", version=1), flag=False
+        )
+        child = ChildPage(
+            uri=PageURI(root="test", type="child", id="c1", version=1),
+            parent_uri=ancestor.uri,
+        )
+        await page_cache.store(ancestor)
+        await page_cache.store(child, parent_uri=ancestor.uri)
+        # By default, child is not returned due to invalid ancestor
+        assert await page_cache.get(ChildPage, child.uri) is None
+        # With allow_stale, child is returned
+        assert await page_cache.get(ChildPage, child.uri, allow_stale=True) is not None

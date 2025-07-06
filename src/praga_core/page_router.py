@@ -62,11 +62,12 @@ class PageRouter:
     def is_cache_enabled(self, path: str) -> bool:
         return self._cache_enabled.get(path, True)
 
-    async def get_page(self, page_uri: PageURI) -> Page:
+    async def get_page(self, page_uri: PageURI, allow_stale: bool = False) -> Page:
         """Retrieve a page by routing to the appropriate handler.
 
         First checks cache if caching is enabled for the page type.
         If not cached or caching disabled, calls the handler to generate the page.
+        If allow_stale is True, will return a cached page even if it is invalid.
         """
         if page_uri.type not in self._handlers:
             raise RuntimeError(f"No handler registered for type: {page_uri.type}")
@@ -76,11 +77,11 @@ class PageRouter:
         page_type = self._get_handler_return_type(handler, page_uri.type)
 
         # Try cache first if enabled
-        if cache_enabled:
-            cached_page = await self._get_from_cache(page_type, page_uri)
-            if cached_page:
-                return cached_page
-
+        cached_page = await self._get_from_cache(
+            page_type, page_uri, allow_stale=allow_stale
+        )
+        if cached_page:
+            return cached_page
         # Not in cache or caching disabled - call handler
         page = await self._call_handler_async(handler, page_uri)
 
@@ -90,17 +91,21 @@ class PageRouter:
 
         return page
 
-    async def get_pages(self, page_uris: List[PageURI]) -> List[Page]:
-        """Bulk asynchronous page retrieval with parallel execution."""
-        tasks = [self.get_page(uri) for uri in page_uris]
+    async def get_pages(
+        self, page_uris: List[PageURI], allow_stale: bool = False
+    ) -> List[Page]:
+        """Bulk asynchronous page retrieval with parallel execution. If allow_stale is True, will return cached pages even if they are invalid."""
+        tasks = [self.get_page(uri, allow_stale=allow_stale) for uri in page_uris]
         return await asyncio.gather(*tasks)
 
     async def _get_from_cache(
-        self, page_type: Type[Page], page_uri: PageURI
+        self, page_type: Type[Page], page_uri: PageURI, allow_stale: bool = False
     ) -> Page | None:
-        """Attempt to retrieve page from cache."""
+        """Attempt to retrieve page from cache. If allow_stale is True, will return a cached page even if it is invalid."""
         try:
-            cached_page = await self._page_cache.get(page_type, page_uri)
+            cached_page = await self._page_cache.get(
+                page_type, page_uri, allow_stale=allow_stale
+            )
             if cached_page:
                 logger.debug(f"Found cached page for {page_uri}")
                 return cached_page
