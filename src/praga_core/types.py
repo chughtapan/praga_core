@@ -148,7 +148,7 @@ class Page(BaseModel, ABC):
     )
 
     model_config = ConfigDict(
-        json_encoders={datetime: lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S")},
+        json_encoders={datetime: lambda dt: dt.isoformat()},
     )
 
     @property

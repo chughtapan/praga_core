@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Type
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..types import Page
 from .schema import clear_table_registry, create_page_table, get_table_registry
@@ -19,26 +20,27 @@ class PageRegistry:
         self._registered_types: set[str] = set()
         self._page_classes: Dict[str, Type[Page]] = {}
 
-    def ensure_registered(self, page_type: Type[Page]) -> None:
-        """Ensure a page type is registered, registering if needed."""
+    async def ensure_registered(self, page_type: Type[Page]) -> None:
+        """Ensure a page type is registered, registering if needed (async)."""
         type_name = page_type.__name__
         if type_name not in self._registered_types:
-            self._register(page_type)
+            await self._register(page_type)
 
-    def _register(self, page_type: Type[Page]) -> None:
-        """Register a page type for caching."""
+    async def _register(self, page_type: Type[Page]) -> None:
+        """Register a page type for caching (async)."""
         type_name = page_type.__name__
-
-        # Create or reuse the table class
         table_class = create_page_table(page_type)
 
         # Create the table in the database if it doesn't exist
-        table_class.metadata.create_all(self._engine, checkfirst=True)
+        if not isinstance(self._engine, AsyncEngine):
+            raise RuntimeError("Must use AsyncSqlAlchemy engine")
 
-        # Mark as registered
+        # Use AsyncConnection.run_sync to run the synchronous create_all method
+        async with self._engine.begin() as conn:
+            await conn.run_sync(table_class.metadata.create_all, checkfirst=True)
+
         self._registered_types.add(type_name)
         self._page_classes[type_name] = page_type
-
         logger.debug(f"Registered page type: {type_name}")
 
     def get_table_class(self, page_type: Type[Page]) -> Any:

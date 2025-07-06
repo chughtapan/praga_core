@@ -9,6 +9,7 @@ from functools import wraps
 from hashlib import md5
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Dict,
     Optional,
@@ -25,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from praga_core.types import Page
 
-from .tool import PaginatedResponse, Tool
+from .tool import PaginatedResponse, Tool, ToolReturnType
 
 
 class FunctionInvocation(BaseModel):
@@ -44,10 +45,9 @@ class FunctionInvocation(BaseModel):
         return json.dumps(payload, sort_keys=True, default=str)
 
 
-ToolReturnType = Union[Sequence[Page], PaginatedResponse[Page]]
-SequenceToolFunction = Callable[..., Sequence[Page]]
-PaginatedToolFunction = Callable[..., PaginatedResponse[Page]]
-ToolFunction = Union[SequenceToolFunction, PaginatedToolFunction]
+SequenceToolFunction = Callable[..., Awaitable[Sequence[Page]]]
+PaginatedToolFunction = Callable[..., Awaitable[PaginatedResponse[Page]]]
+ToolFunction = Callable[..., Awaitable[ToolReturnType]]
 CacheInvalidator = Callable[[str, Dict[str, Any]], bool]
 
 
@@ -145,7 +145,7 @@ class RetrieverToolkitMeta(abc.ABC):
             raise ValueError(f"Tool '{name}' not found")
         return self._tools[name]
 
-    def invoke_tool(
+    async def invoke_tool(
         self, name: str, raw_input: Union[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Invoke a tool by name with pagination support."""
@@ -158,12 +158,12 @@ class RetrieverToolkitMeta(abc.ABC):
                 name=name, type="tool", show_input="python", language="python"
             ) as step:
                 step.input = raw_input
-                response = tool.invoke(raw_input)
+                response = await tool.invoke(raw_input)
                 step.output = response
                 return response
         except (ImportError, AttributeError):
             pass
-        return tool.invoke(raw_input)
+        return await tool.invoke(raw_input)
 
     @property
     def tools(self) -> Dict[str, Tool]:
@@ -195,7 +195,7 @@ class RetrieverToolkitMeta(abc.ABC):
         """Return a cached version of the tool function."""
 
         @wraps(tool_function)
-        def cached_tool(*args: Any, **kwargs: Any) -> ToolReturnType:
+        async def cached_tool(*args: Any, **kwargs: Any) -> ToolReturnType:
             cache_key = self.make_cache_key(tool_function, *args, **kwargs)
 
             # Check if we have a fresh cached result
@@ -217,7 +217,7 @@ class RetrieverToolkitMeta(abc.ABC):
                     return cast(ToolReturnType, cached_value)
 
             # Cache miss or stale - compute fresh result
-            fresh_result = tool_function(*args, **kwargs)
+            fresh_result = await tool_function(*args, **kwargs)
             self._cache[cache_key] = (fresh_result, datetime.utcnow())
             return fresh_result
 
@@ -345,9 +345,9 @@ def _create_method_stub(fn: ToolFunction) -> ToolFunction:
     wrapped method (with caching, pagination, etc.) replaces this stub.
     """
 
-    def method_stub(self: Any, *args: Any, **kwargs: Any) -> ToolReturnType:
+    async def method_stub(self: Any, *args: Any, **kwargs: Any) -> ToolReturnType:
         # This will be replaced at runtime by the actual wrapped function
-        return fn(*args, **kwargs)
+        return await fn(*args, **kwargs)
 
     method_stub.__name__ = fn.__name__
     method_stub.__doc__ = fn.__doc__
@@ -357,52 +357,36 @@ def _create_method_stub(fn: ToolFunction) -> ToolFunction:
 
 def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
     """
-    Check if a function returns Sequence[Page], List[Page], or PaginatedResponse.
-
-    Since PaginatedResponse now implements Sequence[Page], this covers all valid
-    return types for retriever tools. Also accepts subclasses of Page.
+    Check if a function returns Awaitable[Sequence[Page]] or its subclass.
+    Accepts any type that implements collections.abc.Sequence.
     """
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
+        # print(return_annotation)
 
         if return_annotation is None:
             return False
 
-        # Handle non-generic PaginatedResponse (legacy)
-        if return_annotation is PaginatedResponse:
-            return True
-
-        # Check for generic types
+        # Determine the actual return type (unwrap Awaitable if present)
         origin_type = get_origin(return_annotation)
-        if origin_type is None:
-            return False
+        if origin_type is Awaitable:
+            # e.g., Awaitable[Sequence[Page]]
+            inner_type = get_args(return_annotation)[0]
+        else:
+            # e.g., Sequence[Page]
+            inner_type = return_annotation
 
-        # Handle generic PaginatedResponse[T] where T is bound to Page
-        if origin_type is PaginatedResponse:
-            type_args = get_args(return_annotation)
+        inner_origin = get_origin(inner_type) or inner_type
+
+        # Accept any type that implements collections.abc.Sequence
+        if isinstance(inner_origin, type) and issubclass(inner_origin, ABCSequence):
+            type_args = get_args(inner_type)
             if len(type_args) == 1:
                 Page_type = type_args[0]
                 # Check if it's Page or a subclass of Page
                 if Page_type is Page:
                     return True
-                # Check if it's a subclass of Page
-                if isinstance(Page_type, type) and issubclass(Page_type, Page):
-                    return True
-            return False
-
-        # Handle both typing.Sequence and collections.abc.Sequence
-        # Import List here to ensure we have the right reference
-        from typing import List as TypingList
-
-        if origin_type in (Sequence, ABCSequence, list, TypingList):
-            type_args = get_args(return_annotation)
-            if len(type_args) == 1:
-                Page_type = type_args[0]
-                # Check if it's Page or a subclass of Page
-                if Page_type is Page:
-                    return True
-                # Check if it's a subclass of Page
                 if isinstance(Page_type, type) and issubclass(Page_type, Page):
                     return True
 
@@ -412,21 +396,25 @@ def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
 
 
 def _returns_paginated_response(tool_function: ToolFunction) -> bool:
-    """Check if a function specifically returns PaginatedResponse (generic or non-generic)."""
+    """Check if a function returns Awaitable[PaginatedResponse]."""
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
-
         if return_annotation is None:
             return False
 
-        # Handle non-generic PaginatedResponse
-        if return_annotation is PaginatedResponse:
-            return True
+        # Get the outer type (should be Awaitable)
+        origin = get_origin(return_annotation)
+        if origin is Awaitable:
+            # Unwrap Awaitable
+            inner_type = get_args(return_annotation)[0]
+        else:
+            inner_type = return_annotation
+
+        inner_origin = get_origin(inner_type)
 
         # Handle generic PaginatedResponse[T]
-        origin_type = get_origin(return_annotation)
-        if origin_type is PaginatedResponse:
+        if inner_origin is PaginatedResponse:
             return True
 
         return False

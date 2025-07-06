@@ -1,6 +1,7 @@
 """Google API Integration App"""
 
 import argparse
+import asyncio
 import logging
 
 from praga_core import ServerContext, set_global_context
@@ -17,7 +18,7 @@ logging.basicConfig(level=getattr(logging, get_current_config().log_level))
 logger = logging.getLogger(__name__)
 
 
-def setup_global_context() -> None:
+async def setup_global_context() -> None:
     """Set up global context and initialize all components."""
     logger.info("Setting up global context...")
 
@@ -25,7 +26,9 @@ def setup_global_context() -> None:
     config = get_current_config()
 
     # Create and set global context with SQL cache
-    context = ServerContext(root=config.server_root, cache_url=config.page_cache_url)
+    context = await ServerContext.create(
+        root=config.server_root, cache_url=config.page_cache_url
+    )
     set_global_context(context)
 
     # Create single Google API client
@@ -61,7 +64,7 @@ def setup_global_context() -> None:
     logger.info("✅ Global context setup complete!")
 
 
-def run_interactive_cli() -> None:
+async def run_interactive_cli() -> None:
     """Run interactive CLI for direct queries."""
     from praga_core import get_global_context
 
@@ -86,7 +89,7 @@ def run_interactive_cli() -> None:
             print("-" * 40)
 
             # Search and display results
-            result = context.search(query)
+            result = await context.search(query)
 
             if not result.results:
                 print("No results found.")
@@ -112,7 +115,7 @@ def run_interactive_cli() -> None:
             print("Please try again.")
 
 
-def main() -> None:
+async def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         description="Google API Integration with Global Context",
@@ -129,9 +132,9 @@ def main() -> None:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Set up global context
-    setup_global_context()
-    run_interactive_cli()
+    await setup_global_context()
+    await run_interactive_cli()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

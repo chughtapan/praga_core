@@ -1,11 +1,19 @@
 """Google Docs page definitions for headers and chunks."""
 
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Annotated, List, Optional
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 
 from praga_core.types import Page, PageURI
+
+
+def _ensure_utc(v: datetime | None) -> datetime | None:
+    if v is None:
+        return v
+    if v.tzinfo is None:
+        return v.replace(tzinfo=timezone.utc)
+    return v.astimezone(timezone.utc)
 
 
 class GDocHeader(Page):
@@ -14,8 +22,12 @@ class GDocHeader(Page):
     document_id: str = Field(description="Google Docs document ID", exclude=True)
     title: str = Field(description="Document title")
     summary: str = Field(description="Document summary (first 500 chars)")
-    created_time: datetime = Field(description="Document creation timestamp")
-    modified_time: datetime = Field(description="Document last modified timestamp")
+    created_time: Annotated[datetime, BeforeValidator(_ensure_utc)] = Field(
+        description="Document creation timestamp", exclude=True
+    )
+    modified_time: Annotated[datetime, BeforeValidator(_ensure_utc)] = Field(
+        description="Document last modified timestamp", exclude=True
+    )
     owner: Optional[str] = Field(None, description="Document owner/creator email")
     word_count: int = Field(description="Total document word count")
     chunk_count: int = Field(description="Total number of chunks")
@@ -23,8 +35,6 @@ class GDocHeader(Page):
         description="List of chunk URIs for this document"
     )
     permalink: str = Field(description="Google Docs permalink URL", exclude=True)
-    # Revision tracking for cache invalidation
-    revision_id: str = Field(description="Document revision ID for cache validation", exclude=True)
 
 
 class GDocChunk(Page):
@@ -35,10 +45,7 @@ class GDocChunk(Page):
     chunk_title: str = Field(description="Chunk title (first few words)")
     content: str = Field(description="Chunk content")
     doc_title: str = Field(description="Parent document title")
-    token_count: int = Field(description="Number of tokens in this chunk")
     prev_chunk_uri: Optional[PageURI] = Field(None, description="URI of previous chunk")
     next_chunk_uri: Optional[PageURI] = Field(None, description="URI of next chunk")
     header_uri: PageURI = Field(description="URI of the parent document header")
     permalink: str = Field(description="Google Docs permalink URL", exclude=True)
-    # Revision tracking for cache invalidation
-    doc_revision_id: str = Field(description="Parent document revision ID for cache validation", exclude=True)

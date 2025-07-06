@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Sequence, Union
 
@@ -23,7 +24,7 @@ class DemoToolkit(RetrieverToolkit):
 
 
 @DemoToolkit.tool(cache=True, ttl=timedelta(minutes=5))
-def get_timestamp() -> List[Page]:
+async def get_timestamp() -> List[Page]:
     return [
         TextPage(
             uri=PageURI.parse("test/TextPage:ts@1"), content=datetime.now().isoformat()
@@ -32,7 +33,7 @@ def get_timestamp() -> List[Page]:
 
 
 @DemoToolkit.tool(cache=False)
-def get_greeting(name: str) -> List[Page]:
+async def get_greeting(name: str) -> List[Page]:
     doc = TextPage(
         uri=PageURI.parse("test/TextPage:greet@1"), content=f"Hello, {name}!"
     )
@@ -40,18 +41,20 @@ def get_greeting(name: str) -> List[Page]:
     return [doc]
 
 
-def test_toolkit() -> None:
+@pytest.mark.asyncio
+async def test_toolkit() -> None:
     tk: DemoToolkit = DemoToolkit()
     assert "get_timestamp" in tk._tools
     assert "get_greeting" in tk._tools
 
 
-def test_valid_return_types() -> None:
+@pytest.mark.asyncio
+async def test_valid_return_types() -> None:
     """Test that tools with proper return types work correctly."""
     tk: DemoToolkit = DemoToolkit()
 
     # Test List[Document] return
-    result = tk.get_greeting("world")
+    result = await tk.get_greeting("world")
     assert isinstance(result, list)
     assert len(result) == 1
     assert isinstance(result[0], Page)
@@ -71,7 +74,7 @@ def test_invalid_return_type_registration() -> None:
     with pytest.raises(TypeError, match="must have return type annotation"):
 
         @BadToolkit.tool()  # type: ignore[arg-type]
-        def bad_tool_no_annotation() -> List[Dict[str, str]]:
+        async def bad_tool_no_annotation() -> List[Dict[str, str]]:
             return [{"id": "bad", "content": "test"}]
 
         BadToolkit()  # This triggers registration
@@ -80,13 +83,14 @@ def test_invalid_return_type_registration() -> None:
     with pytest.raises(TypeError, match="must have return type annotation"):
 
         @BadToolkit.tool()  # type: ignore[arg-type]
-        def bad_tool_wrong_type() -> List[str]:
+        async def bad_tool_wrong_type() -> List[str]:
             return ["hello", "world"]
 
         BadToolkit()  # This triggers registration
 
 
-def test_pagination_with_proper_types() -> None:
+@pytest.mark.asyncio
+async def test_pagination_with_proper_types() -> None:
     """Test that pagination works with properly typed tools."""
 
     class PaginatedToolkit(RetrieverToolkit):
@@ -103,7 +107,7 @@ def test_pagination_with_proper_types() -> None:
         def name(self) -> str:
             return "PaginatedToolkit"
 
-        def get_many_docs(self) -> List[Page]:
+        async def get_many_docs(self) -> List[Page]:
             docs: List[Page] = []
             for i in range(5):
                 doc = TextPage(
@@ -117,14 +121,14 @@ def test_pagination_with_proper_types() -> None:
     tk: PaginatedToolkit = PaginatedToolkit()
 
     # Test pagination using invoke method
-    result = tk.invoke_tool("get_many_docs", {})
+    result = await tk.invoke_tool("get_many_docs", {})
     assert "results" in result
     assert "next_cursor" in result
     assert len(result["results"]) == 2
     assert result["next_cursor"] is not None  # Has more pages
 
     # Test direct method call returns all documents
-    direct_result = tk.get_many_docs()
+    direct_result = await tk.get_many_docs()
     assert len(direct_result) == 5  # All documents without pagination
 
 
@@ -134,7 +138,7 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_with_list(self) -> None:
         """Test that List[Document] is considered valid."""
 
-        def tool_with_list() -> List[Page]:
+        async def tool_with_list() -> List[Page]:
             return []
 
         assert _is_page_sequence_type(tool_with_list) is True
@@ -142,7 +146,7 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_with_sequence(self) -> None:
         """Test that Sequence[Document] is considered valid."""
 
-        def tool_with_sequence() -> Sequence[Page]:
+        async def tool_with_sequence() -> Sequence[Page]:
             return []
 
         assert _is_page_sequence_type(tool_with_sequence) is True
@@ -150,7 +154,7 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_with_paginated_response(self) -> None:
         """Test that PaginatedResponse is considered valid."""
 
-        def tool_with_paginated_response() -> PaginatedResponse[Page]:
+        async def tool_with_paginated_response() -> PaginatedResponse[Page]:
             return PaginatedResponse(results=[], next_cursor=None)
 
         assert _is_page_sequence_type(tool_with_paginated_response) is True
@@ -158,13 +162,13 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_with_invalid_type(self) -> None:
         """Test that invalid return types are rejected."""
 
-        def tool_with_string() -> str:
+        async def tool_with_string() -> str:
             return "hello"
 
-        def tool_with_no_annotation() -> List[Any]:
+        async def tool_with_no_annotation() -> List[Any]:
             return []
 
-        def tool_with_wrong_sequence() -> List[str]:
+        async def tool_with_wrong_sequence() -> List[str]:
             return ["hello"]
 
         assert _is_page_sequence_type(tool_with_string) is False  # type: ignore[arg-type]
@@ -174,13 +178,13 @@ class TestTypeCheckingLogic:
     def test_is_document_sequence_type_covers_all_valid_types(self) -> None:
         """Test that _is_document_sequence_type covers all valid return types."""
 
-        def tool_with_list() -> List[Page]:
+        async def tool_with_list() -> List[Page]:
             return []
 
         def tool_with_sequence() -> Sequence[Page]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse[Page]:
+        async def tool_with_paginated_response() -> PaginatedResponse[Page]:
             return PaginatedResponse(results=[], next_cursor=None)
 
         assert _is_page_sequence_type(tool_with_list) is True
@@ -190,13 +194,13 @@ class TestTypeCheckingLogic:
     def test_returns_paginated_response_specific(self) -> None:
         """Test that _returns_paginated_response only identifies PaginatedResponse."""
 
-        def tool_with_list() -> List[Page]:
+        async def tool_with_list() -> List[Page]:
             return []
 
-        def tool_with_sequence() -> Sequence[Page]:
+        async def tool_with_sequence() -> Sequence[Page]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse[Page]:
+        async def tool_with_paginated_response() -> PaginatedResponse[Page]:
             return PaginatedResponse(results=[], next_cursor=None)
 
         assert _returns_paginated_response(tool_with_list) is False
@@ -206,13 +210,13 @@ class TestTypeCheckingLogic:
     def test_can_be_paginated_logic(self) -> None:
         """Test the logic for determining if a tool can be paginated."""
 
-        def tool_with_list() -> List[Page]:
+        async def tool_with_list() -> List[Page]:
             return []
 
-        def tool_with_sequence() -> Sequence[Page]:
+        async def tool_with_sequence() -> Sequence[Page]:
             return []
 
-        def tool_with_paginated_response() -> PaginatedResponse[Page]:
+        async def tool_with_paginated_response() -> PaginatedResponse[Page]:
             return PaginatedResponse(results=[], next_cursor=None)
 
         # These should return True (can be paginated - not already paginated responses)
@@ -226,10 +230,11 @@ class TestTypeCheckingLogic:
 class TestPaginationPrevention:
     """Test that we prevent double-pagination correctly."""
 
-    def test_toolkit_prevents_paginating_paginated_response(self) -> None:
+    @pytest.mark.asyncio
+    async def test_toolkit_prevents_paginating_paginated_response(self) -> None:
         """Test that trying to paginate a tool that returns PaginatedResponse raises an error."""
 
-        def tool_returning_paginated_response() -> PaginatedResponse[Page]:
+        async def tool_returning_paginated_response() -> PaginatedResponse[Page]:
             return PaginatedResponse(results=[], next_cursor=None)
 
         class MockToolkit(RetrieverToolkit):
@@ -247,7 +252,8 @@ class TestPaginationPrevention:
                 paginate=True,
             )
 
-    def test_toolkit_allows_paginating_document_sequence(self) -> None:
+    @pytest.mark.asyncio
+    async def test_toolkit_allows_paginating_document_sequence(self) -> None:
         """Test that we can paginate tools that return document sequences."""
 
         class TestToolkit(RetrieverToolkit):
@@ -255,14 +261,14 @@ class TestPaginationPrevention:
             def name(self) -> str:
                 return "TestToolkit"
 
-        def tool_returning_list() -> List[Page]:
+        async def tool_returning_list() -> List[Page]:
             return [
                 TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1"),
                 TextPage(uri=PageURI.parse("test/TextPage:2@1"), content="Content 2"),
                 TextPage(uri=PageURI.parse("test/TextPage:3@1"), content="Content 3"),
             ]
 
-        def tool_returning_sequence() -> Sequence[Page]:
+        async def tool_returning_sequence() -> Sequence[Page]:
             return [
                 TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1"),
                 TextPage(uri=PageURI.parse("test/TextPage:2@1"), content="Content 2"),
@@ -284,8 +290,8 @@ class TestPaginationPrevention:
         assert "sequence_tool" in toolkit.tools
 
         # Test direct calls return all documents (no pagination)
-        direct_result1 = toolkit.list_tool()
-        direct_result2 = toolkit.sequence_tool()
+        direct_result1 = await toolkit.list_tool()
+        direct_result2 = await toolkit.sequence_tool()
 
         assert isinstance(direct_result1, list)
         assert isinstance(direct_result2, list)
@@ -293,8 +299,8 @@ class TestPaginationPrevention:
         assert len(direct_result2) == 2
 
         # Test invoke calls apply pagination
-        invoke_result1 = toolkit.invoke_tool("list_tool", {})
-        invoke_result2 = toolkit.invoke_tool("sequence_tool", {})
+        invoke_result1 = await toolkit.invoke_tool("list_tool", {})
+        invoke_result2 = await toolkit.invoke_tool("sequence_tool", {})
 
         assert "results" in invoke_result1
         assert "next_cursor" in invoke_result1
@@ -304,7 +310,7 @@ class TestPaginationPrevention:
     def test_toolkit_allows_non_paginated_paginated_response(self) -> None:
         """Test that we can register tools that return PaginatedResponse without pagination."""
 
-        def tool_returning_paginated_response() -> PaginatedResponse[TextPage]:
+        async def tool_returning_paginated_response() -> PaginatedResponse[TextPage]:
             docs = [
                 TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Content 1")
             ]
@@ -331,7 +337,7 @@ class TestPaginationPrevention:
         assert "paginated_tool" in toolkit.tools
 
         # Verify it returns PaginatedResponse directly
-        result = toolkit.paginated_tool()
+        result = asyncio.run(toolkit.paginated_tool())
         assert isinstance(result, PaginatedResponse)
         assert len(result.results) == 1
         assert result.results[0].uri == PageURI.parse("test/TextPage:1@1")
@@ -343,7 +349,7 @@ class SimpleTestDocumentSubclassTypeChecking:
     def test_text_document_subclass_accepted(self) -> None:
         """Test that functions returning List[TextDocument] are accepted."""
 
-        def tool_with_text_document() -> List[TextPage]:
+        async def tool_with_text_document() -> List[TextPage]:
             return [
                 TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Text content")
             ]
@@ -353,7 +359,7 @@ class SimpleTestDocumentSubclassTypeChecking:
     def test_sequence_of_text_document_accepted(self) -> None:
         """Test that functions returning Sequence[TextDocument] are accepted."""
 
-        def tool_with_text_document_sequence() -> Sequence[TextPage]:
+        async def tool_with_text_document_sequence() -> Sequence[TextPage]:
             return [
                 TextPage(uri=PageURI.parse("test/TextPage:1@1"), content="Test content")
             ]
@@ -370,7 +376,7 @@ class SimpleTestDocumentSubclassTypeChecking:
             def __init__(self, **data: Any) -> None:
                 super().__init__(**data)
 
-        def tool_with_custom_document() -> List[CustomDocument]:
+        async def tool_with_custom_document() -> List[CustomDocument]:
             return [
                 CustomDocument(
                     uri=PageURI.parse("test/CustomDocument:1@1"), custom_field="test"
@@ -389,7 +395,7 @@ class SimpleTestDocumentSubclassTypeChecking:
             def __init__(self, **data: Any) -> None:
                 super().__init__(**data)
 
-        def tool_with_special_document() -> List[SpecialTextDocument]:
+        async def tool_with_special_document() -> List[SpecialTextDocument]:
             return [
                 SpecialTextDocument(
                     uri=PageURI.parse("test/SpecialTextDocument:1@1"),
@@ -406,7 +412,7 @@ class SimpleTestDocumentSubclassTypeChecking:
         class NotADocument:
             uri: str
 
-        def tool_with_non_document() -> List[NotADocument]:
+        async def tool_with_non_document() -> List[NotADocument]:
             return [NotADocument()]
 
         assert _is_page_sequence_type(tool_with_non_document) is False  # type: ignore[arg-type]
@@ -414,13 +420,14 @@ class SimpleTestDocumentSubclassTypeChecking:
     def test_mixed_types_rejected(self) -> None:
         """Test that functions with mixed or union types are rejected."""
 
-        def tool_with_union() -> List[Union[Page, str]]:
+        async def tool_with_union() -> List[Union[Page, str]]:
             return []
 
         # This should be rejected as it's not a pure Document sequence
         assert _is_page_sequence_type(tool_with_union) is False  # type: ignore[arg-type]
 
-    def test_subclass_with_toolkit_registration(self) -> None:
+    @pytest.mark.asyncio
+    async def test_subclass_with_toolkit_registration(self) -> None:
         """Test that Document subclasses work with actual toolkit registration."""
 
         class TestToolkit(RetrieverToolkit):
@@ -428,7 +435,7 @@ class SimpleTestDocumentSubclassTypeChecking:
             def name(self) -> str:
                 return "TestToolkit"
 
-        def text_document_tool() -> List[TextPage]:
+        async def text_document_tool() -> List[TextPage]:
             return [
                 TextPage(
                     uri=PageURI.parse("test/TextPage:test@1"), content="Test content"
@@ -449,13 +456,14 @@ class SimpleTestDocumentSubclassTypeChecking:
         assert "text_tool" in toolkit.tools
 
         # Verify it can be called and returns the correct type
-        result = toolkit.text_tool()
+        result = await toolkit.text_tool()
         assert isinstance(result, list)
         assert len(result) == 1
         assert isinstance(result[0], TextPage)
         assert result[0].content == "Test content"
 
-    def test_subclass_pagination_compatibility(self) -> None:
+    @pytest.mark.asyncio
+    async def test_subclass_pagination_compatibility(self) -> None:
         """Test that Document subclasses work with pagination."""
 
         class TestToolkit(RetrieverToolkit):
@@ -463,7 +471,7 @@ class SimpleTestDocumentSubclassTypeChecking:
             def name(self) -> str:
                 return "TestToolkit"
 
-        def many_text_documents() -> List[TextPage]:
+        async def many_text_documents() -> List[TextPage]:
             return [
                 TextPage(
                     uri=PageURI.parse(f"test/TextPage:doc_{i}@1"),
@@ -486,20 +494,20 @@ class SimpleTestDocumentSubclassTypeChecking:
         assert "paginated_text_tool" in toolkit.tools
 
         # Test direct call returns all documents
-        direct_result = toolkit.paginated_text_tool()
+        direct_result = await toolkit.paginated_text_tool()
         assert len(direct_result) == 5
         for doc in direct_result:
             assert isinstance(doc, TextPage)
 
         # Test invoke call applies pagination
-        invoke_result = toolkit.invoke_tool("paginated_text_tool", {})
+        invoke_result = await toolkit.invoke_tool("paginated_text_tool", {})
         assert "results" in invoke_result
         assert "next_cursor" in invoke_result
         assert len(invoke_result["results"]) == 2
         assert invoke_result["next_cursor"] is not None  # Has more pages
 
         # Test we can get the next page via invoke using cursor
-        invoke_result_page2 = toolkit.invoke_tool(
+        invoke_result_page2 = await toolkit.invoke_tool(
             "paginated_text_tool", {"cursor": invoke_result["next_cursor"]}
         )
         assert len(invoke_result_page2["results"]) == 2

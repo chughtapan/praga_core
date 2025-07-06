@@ -7,5 +7,5 @@ from praga_core.types import PageReference
 class RetrieverAgentBase(abc.ABC):
 
     @abc.abstractmethod
-    def search(self, query: str) -> List[PageReference]:
-        """Search for documents matching the query."""
+    async def search(self, query: str) -> List[PageReference]:
+        """Execute a search and return matching page references."""

@@ -1,10 +1,13 @@
 """Google Docs service for handling document data and page creation using Google Docs API."""
 
+import asyncio
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+import traceback
+from datetime import datetime, timezone
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from chonkie import RecursiveChunker
+from chonkie.types.recursive import RecursiveChunk
 
 from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import PageURI
@@ -17,8 +20,31 @@ from .page import GDocChunk, GDocHeader
 logger = logging.getLogger(__name__)
 
 
+class IngestedDocInfo(NamedTuple):
+    doc: dict[str, Any]
+    file_metadata: dict[str, Any]
+    created_time: datetime
+    modified_time: datetime
+    title: str
+    full_content: str
+    word_count: int
+    owner: Optional[str]
+    permalink: str
+
+
 class GoogleDocsService(ToolkitService):
     """Service for managing Google Docs data and page creation using Google Docs API."""
+
+    @staticmethod
+    def _parse_google_datetime(dt_str: str) -> datetime:
+        """Parse Google API datetime string (handles both Z and offset, always returns aware)."""
+        if dt_str.endswith("Z"):
+            dt = datetime.fromisoformat(dt_str[:-1] + "+00:00")
+        else:
+            dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
     def __init__(self, api_client: GoogleAPIClient, chunk_size: int = 4000) -> None:
         super().__init__()
@@ -41,160 +67,176 @@ class GoogleDocsService(ToolkitService):
         ctx = self.context
 
         @ctx.route("gdoc_header", cache=True)
-        def handle_gdoc_header(page_uri: PageURI) -> GDocHeader:
-            return self.handle_header_request(page_uri)
+        async def handle_gdoc_header(page_uri: PageURI) -> GDocHeader:
+            return await self.handle_header_request(page_uri)
 
         @ctx.validator
-        def validate_gdoc_header(page: GDocHeader) -> bool:
-            return self._validate_gdoc_header(page)
+        async def validate_gdoc_header(page: GDocHeader) -> bool:
+            return await self._validate_gdoc_header(page)
 
         @ctx.route("gdoc_chunk", cache=True)
-        def handle_gdoc_chunk(page_uri: PageURI) -> GDocChunk:
-            return self.handle_chunk_request(page_uri)
+        async def handle_gdoc_chunk(page_uri: PageURI) -> GDocChunk:
+            return await self.handle_chunk_request(page_uri)
 
-    def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
+    async def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
         """Handle a Google Docs header page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
 
         # Not in cache, ingest the document (ingest on touch)
         logger.info(f"Document {page_uri.id} not in cache, ingesting...")
-        header_page = self._ingest_document(page_uri)
+        header_page = await self._ingest_document(page_uri)
         return header_page
 
-    def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
+    async def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
         """Handle a Google Docs chunk page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
 
-        page_cache = self.context.page_cache
+        raise NotImplementedError("Chunk requests should be handled in the cache")
 
-        # Parse chunk_id to get document_id
-        chunk_id = page_uri.id
-        if "(" not in chunk_id or not chunk_id.endswith(")"):
-            raise ValueError(f"Invalid chunk ID format: {chunk_id}")
-
-        document_id = chunk_id[: chunk_id.rfind("(")]
-
-        # Not in cache, ingest the document (ingest on touch)
-        logger.info(
-            f"Chunk {chunk_id} not in cache, ingesting document {document_id}..."
-        )
-        # Create a temporary header URI for ingestion
-        header_uri = PageURI(root=page_uri.root, type="gdoc_header", id=document_id)
-        self._ingest_document(header_uri)
-
-        # Now try to get the chunk again
-        cached_chunk = page_cache.get(GDocChunk, page_uri)
-        if not cached_chunk:
-            raise ValueError(f"Chunk {chunk_id} not found after ingestion")
-
-        return cached_chunk
-
-    def _validate_gdoc_header(self, page: GDocHeader) -> bool:
-        """Validate that a GDocHeader page is still current by checking revision ID."""
+    async def _validate_gdoc_header(self, page: GDocHeader) -> bool:
+        """Validate that a GDocHeader page is still current by checking modified time."""
         try:
-            # Get latest revision ID from API
-            latest_revision_id = self.api_client.get_latest_revision_id(
-                page.document_id
-            )
-            if not latest_revision_id:
+            # Get latest file metadata from API
+            file_metadata = await self.api_client.get_file_metadata(page.document_id)
+            if not file_metadata:
                 logger.warning(
-                    f"Could not get revision ID for document {page.document_id}"
+                    f"Could not get file metadata for document {page.document_id}"
                 )
                 return False
-            # Compare with stored revision ID
-            return bool(latest_revision_id == page.revision_id)
+            # Parse the modifiedTime from metadata
+            latest_modified_time = self._parse_google_datetime(
+                file_metadata.get("modifiedTime", "")
+            )
+            # Compare with stored modified time
+            return bool(latest_modified_time <= page.modified_time)
         except Exception as e:
-            logger.warning(f"Failed to validate header {page.uri}: {e}")
+            logger.error(
+                f"Failed to validate header {page.uri}: {e}\n{traceback.format_exc()}"
+            )
             return False
 
-    def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
+    async def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
         """Ingest a document by fetching content, chunking, and storing in page cache."""
         document_id = header_page_uri.id
-        logger.info(f"Starting ingestion for document: {document_id}")
+        logger.info(f"Starting async ingestion for document: {document_id}")
 
+        doc_info = await self._fetch_and_extract_document_info(document_id)
+        chunks = self._chunk_content(doc_info.full_content)
+        logger.info(f"Document {document_id} chunked into {len(chunks)} pieces")
+        header_page, chunk_pages = self._build_header_and_chunk_pages(
+            header_page_uri,
+            document_id,
+            doc_info,
+            chunks,
+        )
+        await self._store_pages(header_page, chunk_pages)
+        logger.info(
+            f"Successfully ingested document {document_id} with {len(chunks)} chunks"
+        )
+        return header_page
+
+    async def _fetch_and_extract_document_info(
+        self, document_id: str
+    ) -> IngestedDocInfo:
         try:
-            # Fetch the document content from Docs API
-            doc = self.api_client.get_document(document_id)
-
-            # Fetch file metadata from Drive API
-            file_metadata = self.api_client.get_file_metadata(document_id)
-
-            # Get the latest revision ID for cache invalidation
-            revision_id = self.api_client.get_latest_revision_id(document_id)
-            if not revision_id:
-                logger.warning(f"Could not get revision ID for document {document_id}")
-                revision_id = "unknown"
-
+            doc = await self.api_client.get_document(document_id)
+            file_metadata = await self.api_client.get_file_metadata(document_id)
+            created_time = self._parse_google_datetime(
+                file_metadata.get("createdTime", "")
+            )
+            modified_time = self._parse_google_datetime(
+                file_metadata.get("modifiedTime", "")
+            )
+            title = doc.get("title", "Untitled Document")
+            content_elements = doc.get("body", {}).get("content", [])
+            full_content = self._extract_text_from_content(content_elements)
+            word_count = len(full_content.split()) if full_content else 0
+            owners = file_metadata.get("owners", [])
+            owner = owners[0].get("emailAddress") if owners else None
+            permalink = f"https://docs.google.com/document/d/{document_id}/edit"
+            return IngestedDocInfo(
+                doc=doc,
+                file_metadata=file_metadata,
+                created_time=created_time,
+                modified_time=modified_time,
+                title=title,
+                full_content=full_content,
+                word_count=word_count,
+                owner=owner,
+                permalink=permalink,
+            )
         except Exception as e:
             raise ValueError(f"Failed to fetch document {document_id}: {e}")
 
-        # Extract basic information
-        title = doc.get("title", "Untitled Document")
+    def _chunk_content(self, full_content: str) -> Sequence[RecursiveChunk]:
+        return self.chunker.chunk(full_content)
 
-        # Extract text content
-        content_elements = doc.get("body", {}).get("content", [])
-        full_content = self._extract_text_from_content(content_elements)
-
-        # Calculate word count
-        word_count = len(full_content.split()) if full_content else 0
-
-        # Parse timestamps
-        created_time = datetime.fromisoformat(
-            file_metadata["createdTime"].replace("Z", "+00:00")
-        )
-        modified_time = datetime.fromisoformat(
-            file_metadata["modifiedTime"].replace("Z", "+00:00")
-        )
-
-        # Get owner information
-        owners = file_metadata.get("owners", [])
-        owner = owners[0].get("emailAddress") if owners else None
-
-        # Chunk the content using Chonkie
-        chunks = self.chunker.chunk(full_content)
-        chunk_count = len(chunks)
-
-        logger.info(f"Document {document_id} chunked into {chunk_count} pieces")
-
-        # Create permalink
-        permalink = f"https://docs.google.com/document/d/{document_id}/edit"
-
-        # Use provided header URI instead of creating a new one
+    def _build_header_and_chunk_pages(
+        self,
+        header_page_uri: PageURI,
+        document_id: str,
+        doc_info: IngestedDocInfo,
+        chunks: Sequence[RecursiveChunk],
+    ) -> tuple[GDocHeader, list[GDocChunk]]:
         header_uri = header_page_uri
-
-        # Store chunks in page cache first
-        chunk_pages: List[GDocChunk] = []
+        chunk_uris = [
+            PageURI(
+                root=header_uri.root,
+                type="gdoc_chunk",
+                id=f"{document_id}({i})",
+                version=header_uri.version,
+            )
+            for i in range(len(chunks))
+        ]
+        header_page = GDocHeader(
+            uri=header_uri,
+            document_id=document_id,
+            title=doc_info.title,
+            summary=(
+                doc_info.full_content[:500] + "..."
+                if len(doc_info.full_content) > 500
+                else doc_info.full_content
+            ),
+            created_time=doc_info.created_time,
+            modified_time=doc_info.modified_time,
+            owner=doc_info.owner,
+            word_count=doc_info.word_count,
+            chunk_count=len(chunks),
+            chunk_uris=chunk_uris,
+            permalink=doc_info.permalink,
+        )
+        chunk_pages: list[GDocChunk] = []
         for i, chunk in enumerate(chunks):
             chunk_id = f"{document_id}({i})"
-            # Type cast: chunk is from chonkie chunker, has .text and .token_count attributes
             chunk_text = getattr(chunk, "text", str(chunk))
-            chunk_token_count = getattr(chunk, "token_count", 0)
             chunk_title = self._get_chunk_title(chunk_text)
-
-            # Create next/prev chunk URIs
-            prev_chunk_uri = None
-            if i > 0:
-                prev_chunk_uri = PageURI(
+            prev_chunk_uri = (
+                PageURI(
                     root=self.context.root,
                     type="gdoc_chunk",
                     id=f"{document_id}({i - 1})",
+                    version=header_uri.version,
                 )
-
-            next_chunk_uri = None
-            if i < chunk_count - 1:
-                next_chunk_uri = PageURI(
+                if i > 0
+                else None
+            )
+            next_chunk_uri = (
+                PageURI(
                     root=self.context.root,
                     type="gdoc_chunk",
                     id=f"{document_id}({i + 1})",
+                    version=header_uri.version,
                 )
-
+                if i < len(chunks) - 1
+                else None
+            )
             chunk_uri = PageURI(
-                root=header_page_uri.root,
+                root=header_uri.root,
                 type="gdoc_chunk",
                 id=chunk_id,
-                version=header_page_uri.version,
+                version=header_uri.version,
             )
             chunk_page = GDocChunk(
                 uri=chunk_uri,
@@ -202,53 +244,24 @@ class GoogleDocsService(ToolkitService):
                 chunk_index=i,
                 chunk_title=chunk_title,
                 content=chunk_text,
-                doc_title=title,
-                token_count=chunk_token_count,
+                doc_title=doc_info.title,
                 prev_chunk_uri=prev_chunk_uri,
                 next_chunk_uri=next_chunk_uri,
                 header_uri=header_uri,
-                permalink=permalink,
-                doc_revision_id=revision_id,
+                permalink=doc_info.permalink,
             )
-
             chunk_pages.append(chunk_page)
+        return header_page, chunk_pages
 
-        # Create chunk URIs for header
-        chunk_uris = [chunk.uri for chunk in chunk_pages]
-
-        # Create summary (first 500 chars + chunk info)
-        summary = full_content[:500]
-        if len(full_content) > 500:
-            summary += "..."
-        summary += f" [{chunk_count} chunks]"
-
-        # Create and store header page first (to satisfy parent existence requirement)
-        header_page = GDocHeader(
-            uri=header_uri,
-            document_id=document_id,
-            title=title,
-            summary=summary,
-            created_time=created_time,
-            modified_time=modified_time,
-            owner=owner,
-            word_count=word_count,
-            chunk_count=chunk_count,
-            chunk_uris=chunk_uris,
-            permalink=permalink,
-            revision_id=revision_id,
-        )
-
-        # Store header in page cache first
-        self.context.page_cache.store(header_page)
-
-        # Now store chunks with header as parent for provenance tracking
-        for chunk_page in chunk_pages:
-            self.context.page_cache.store(chunk_page, parent_uri=header_uri)
-
-        logger.info(
-            f"Successfully ingested document {document_id} with {chunk_count} chunks"
-        )
-        return header_page
+    async def _store_pages(
+        self, header_page: GDocHeader, chunk_pages: list[GDocChunk]
+    ) -> None:
+        await self.context.page_cache.store(header_page)
+        tasks = [
+            self.context.page_cache.store(chunk_page, parent_uri=header_page.uri)
+            for chunk_page in chunk_pages
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     def _extract_text_from_content(self, content: List[Dict[str, Any]]) -> str:
         """Extract plain text from Google Docs content structure."""
@@ -289,7 +302,7 @@ class GoogleDocsService(ToolkitService):
             # Take first 50 characters and add ellipsis
             return content[:47].strip() + "..."
 
-    def search_documents(
+    async def search_documents(
         self,
         search_params: Dict[str, Any],
         page_token: Optional[str] = None,
@@ -298,7 +311,7 @@ class GoogleDocsService(ToolkitService):
         """Generic document search method that delegates to API client."""
         try:
             # Delegate directly to API client
-            files, next_page_token = self.api_client.search_documents(
+            files, next_page_token = await self.api_client.search_documents(
                 search_params=search_params,
                 page_token=page_token,
                 page_size=page_size,
@@ -320,7 +333,7 @@ class GoogleDocsService(ToolkitService):
             logger.error(f"Error searching documents: {e}")
             raise
 
-    def search_chunks_in_document(
+    async def search_chunks_in_document(
         self, doc_header_uri: str, query: str
     ) -> List[GDocChunk]:
         """Search for chunks within a specific document using simple text matching."""
@@ -335,13 +348,13 @@ class GoogleDocsService(ToolkitService):
 
         # Ensure document is ingested (ingest on touch)
         header_uri = PageURI(root=self.context.root, type="gdoc_header", id=document_id)
-        self.handle_header_request(header_uri)
+        await self.handle_header_request(header_uri)
 
         # Get all chunks for this document from page cache
         page_cache = self.context.page_cache
 
         # Find all chunks for this document
-        chunk_pages = (
+        chunk_pages = await (
             page_cache.find(GDocChunk)
             .where(lambda chunk: chunk.document_id == document_id)
             .all()
@@ -375,7 +388,7 @@ class GoogleDocsService(ToolkitService):
 
         return result_chunks
 
-    def _search_documents_paginated_response(
+    async def _search_documents_paginated_response(
         self,
         search_params: Dict[str, Any],
         cursor: Optional[str] = None,
@@ -383,24 +396,27 @@ class GoogleDocsService(ToolkitService):
     ) -> PaginatedResponse[GDocHeader]:
         """Search documents and return a paginated response."""
         # Get the page data using the cursor directly
-        uris, next_page_token = self.search_documents(search_params, cursor, page_size)
+        uris, next_page_token = await self.search_documents(
+            search_params, cursor, page_size
+        )
 
-        # Resolve URIs to pages using context (this will trigger ingestion if needed)
-        pages: List[GDocHeader] = []
-        for uri in uris:
-            page_obj = self.context.get_page(uri)
+        # Resolve URIs to pages using context async (this will trigger ingestion if needed)
+        pages = await self.context.get_pages(uris)
+
+        # Type check the results
+        for page_obj in pages:
             if not isinstance(page_obj, GDocHeader):
                 raise TypeError(f"Expected GDocHeader but got {type(page_obj)}")
-            pages.append(page_obj)
+
         logger.debug(f"Successfully resolved {len(pages)} document header pages")
 
         return PaginatedResponse(
-            results=pages,
+            results=pages,  # type: ignore
             next_cursor=next_page_token,
         )
 
     @tool()
-    def search_documents_by_title(
+    async def search_documents_by_title(
         self, title_query: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[GDocHeader]:
         """Search for documents that match a title query.
@@ -409,12 +425,12 @@ class GoogleDocsService(ToolkitService):
             title_query: Search query for document titles
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_documents_paginated_response(
+        return await self._search_documents_paginated_response(
             {"title_query": title_query}, cursor=cursor
         )
 
     @tool()
-    def search_documents_by_topic(
+    async def search_documents_by_topic(
         self, topic_query: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[GDocHeader]:
         """Search for documents that match a topic/content query.
@@ -423,12 +439,12 @@ class GoogleDocsService(ToolkitService):
             topic_query: Search query for document content/topics
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_documents_paginated_response(
+        return await self._search_documents_paginated_response(
             {"query": topic_query}, cursor=cursor
         )
 
     @tool()
-    def search_documents_by_owner(
+    async def search_documents_by_owner(
         self, owner_identifier: str, cursor: Optional[str] = None
     ) -> PaginatedResponse[GDocHeader]:
         """Search for documents owned by a specific user.
@@ -439,12 +455,12 @@ class GoogleDocsService(ToolkitService):
         """
         # Resolve person identifier to email address if needed
         resolved_owner = resolve_person_identifier(owner_identifier)
-        return self._search_documents_paginated_response(
+        return await self._search_documents_paginated_response(
             {"owner_email": resolved_owner}, cursor=cursor
         )
 
     @tool()
-    def search_recently_modified_documents(
+    async def search_recently_modified_documents(
         self, days: int = 7, cursor: Optional[str] = None
     ) -> PaginatedResponse[GDocHeader]:
         """Search for recently modified documents.
@@ -453,10 +469,12 @@ class GoogleDocsService(ToolkitService):
             days: Number of days to look back for recent modifications (default: 7)
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_documents_paginated_response({"days": days}, cursor=cursor)
+        return await self._search_documents_paginated_response(
+            {"days": days}, cursor=cursor
+        )
 
     @tool()
-    def search_all_documents(
+    async def search_all_documents(
         self, cursor: Optional[str] = None
     ) -> PaginatedResponse[GDocHeader]:
         """Get all Google Docs documents (ordered by most recently modified).
@@ -464,10 +482,12 @@ class GoogleDocsService(ToolkitService):
         Args:
             cursor: Cursor token for pagination (optional)
         """
-        return self._search_documents_paginated_response({"query": ""}, cursor=cursor)
+        return await self._search_documents_paginated_response(
+            {"query": ""}, cursor=cursor
+        )
 
     @tool()
-    def find_chunks_in_document(
+    async def find_chunks_in_document(
         self, doc_header_uri: str, query: str
     ) -> PaginatedResponse[GDocChunk]:
         """Search for specific content within a document's chunks.
@@ -477,7 +497,7 @@ class GoogleDocsService(ToolkitService):
             query: Search query to find within the document chunks
         """
         # Use the service's text matching search for chunks
-        matching_chunks = self.search_chunks_in_document(doc_header_uri, query)
+        matching_chunks = await self.search_chunks_in_document(doc_header_uri, query)
 
         return PaginatedResponse(
             results=matching_chunks,

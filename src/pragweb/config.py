@@ -78,7 +78,7 @@ def load_default_config() -> AppConfig:
     load_dotenv()
 
     # Create config from environment variables with defaults
-    page_cache_url = os.getenv("PAGE_CACHE_URL", "sqlite:///praga_cache.db")
+    page_cache_url = os.getenv("PAGE_CACHE_URL", "sqlite+aiosqlite:///praga_cache.db")
     return AppConfig(
         server_root=os.getenv("SERVER_ROOT", "google"),
         page_cache_url=page_cache_url,
