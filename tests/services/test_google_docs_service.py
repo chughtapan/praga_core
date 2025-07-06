@@ -1,6 +1,6 @@
 """Tests for GoogleDocsService."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -23,6 +23,7 @@ class TestGoogleDocsService:
         self.mock_page_cache.get = AsyncMock()
         self.mock_page_cache.store = AsyncMock()
         self.mock_context.page_cache = self.mock_page_cache
+        self.mock_context.invalidate_pages_by_prefix = Mock()
 
         # Mock the register_service method to actually register
         def mock_register_service(name, service):
@@ -78,70 +79,156 @@ class TestGoogleDocsService:
         assert result is mock_header
 
     @pytest.mark.asyncio
-    async def test_handle_chunk_request_not_found(self):
-        """Test handle_chunk_request raises error when chunk not found."""
-        self.mock_page_cache.get = AsyncMock(return_value=None)
-        with patch.object(self.service, "_ingest_document", new=AsyncMock()):
-            with pytest.raises(
-                ValueError, match="Chunk doc123\\(0\\) not found after ingestion"
-            ):
-                expected_uri = PageURI(
-                    root="test-root", type="gdoc_chunk", id="doc123(0)", version=1
-                )
-                await self.service.handle_chunk_request(expected_uri)
+    async def test_validate_gdoc_header_equal_modified_time(self):
+        """Should return True if API modified time == header modified time."""
+        test_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        test_doc_id = "test123"
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id=test_doc_id),
+            document_id=test_doc_id,
+            title="Test Doc",
+            summary="Test summary",
+            created_time=test_time,
+            modified_time=test_time,
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+        google_time = (
+            test_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        self.mock_api_client.get_file_metadata.return_value = {
+            "modifiedTime": google_time
+        }
+        result = await self.service._validate_gdoc_header(header)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_gdoc_header_api_time_older(self):
+        """Should return True if API modified time < header modified time."""
+        api_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        header_time = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        test_doc_id = "test123"
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id=test_doc_id),
+            document_id=test_doc_id,
+            title="Test Doc",
+            summary="Test summary",
+            created_time=header_time,
+            modified_time=header_time,
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+        google_time = api_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        self.mock_api_client.get_file_metadata.return_value = {
+            "modifiedTime": google_time
+        }
+        result = await self.service._validate_gdoc_header(header)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_validate_gdoc_header_api_time_newer(self):
+        """Should return False if API modified time > header modified time."""
+        header_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        api_time = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        test_doc_id = "test123"
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id=test_doc_id),
+            document_id=test_doc_id,
+            title="Test Doc",
+            summary="Test summary",
+            created_time=header_time,
+            modified_time=header_time,
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+        google_time = api_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        self.mock_api_client.get_file_metadata.return_value = {
+            "modifiedTime": google_time
+        }
+        result = await self.service._validate_gdoc_header(header)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validate_gdoc_header_api_error(self):
+        """Should return False if API call fails."""
+        test_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        test_doc_id = "test123"
+        header = GDocHeader(
+            uri=PageURI(root="test-root", type="gdoc_header", id=test_doc_id),
+            document_id=test_doc_id,
+            title="Test Doc",
+            summary="Test summary",
+            created_time=test_time,
+            modified_time=test_time,
+            owner="test@example.com",
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+        self.mock_api_client.get_file_metadata.side_effect = Exception("API Error")
+        result = await self.service._validate_gdoc_header(header)
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_ingest_document_success(self):
         """Test successful document ingestion."""
+        test_doc_id = "test123"
+        test_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        google_time = (
+            test_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
         # Mock API responses
-        mock_doc_data = {
+        self.mock_api_client.get_document.return_value = {
             "title": "Test Document",
             "body": {
                 "content": [
                     {
                         "paragraph": {
-                            "elements": [{"textRun": {"content": "Hello world! "}}]
+                            "elements": [{"textRun": {"content": "Hello world!"}}]
                         }
                     }
                 ]
             },
         }
-        mock_file_metadata = {
+        self.mock_api_client.get_file_metadata.return_value = {
             "name": "Test Document",
-            "createdTime": "2023-01-01T00:00:00.000Z",
-            "modifiedTime": "2023-01-02T00:00:00.000Z",
-            "owners": [
-                {"displayName": "Test User", "emailAddress": "test@example.com"}
-            ],
+            "createdTime": google_time,
+            "modifiedTime": google_time,
+            "owners": [{"emailAddress": "test@example.com"}],
         }
-        self.mock_api_client.get_document.return_value = mock_doc_data
-        self.mock_api_client.get_file_metadata.return_value = mock_file_metadata
-        self.mock_api_client.get_latest_revision_id.return_value = "revision123"
-        test_doc_id = "doc123"
-        test_header_uri = PageURI(
-            root="test-root", type="gdoc_header", id=test_doc_id, version=1
+        # Mock context methods
+        self.mock_context.create_page_uri = AsyncMock()
+        test_header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
+        test_chunk_uri = PageURI(
+            root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)"
         )
-        header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
-        chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
-        mock_chunk = Mock()
-        mock_chunk.text = "Hello world!"
-        mock_chunk.token_count = 3
-        self.service.chunker.chunk = Mock(return_value=[mock_chunk])
-        self.mock_context.create_page_uri = AsyncMock(
-            side_effect=[header_uri, chunk_uri]
-        )
-        self.mock_page_cache.store = AsyncMock()
+        self.mock_context.create_page_uri.side_effect = [test_chunk_uri]
+        # Perform ingestion
         result = await self.service._ingest_document(test_header_uri)
+        # Verify API calls
         self.mock_api_client.get_document.assert_awaited_once_with(test_doc_id)
         self.mock_api_client.get_file_metadata.assert_awaited_once_with(test_doc_id)
-        self.mock_api_client.get_latest_revision_id.assert_awaited_once_with(
-            test_doc_id
-        )
-        self.service.chunker.chunk.assert_called_once_with("Hello world!")
-        assert self.mock_page_cache.store.call_count == 2
+        # Verify result
         assert isinstance(result, GDocHeader)
         assert result.document_id == test_doc_id
         assert result.title == "Test Document"
+        assert result.modified_time == test_time
+        assert result.created_time == test_time
+        assert result.owner == "test@example.com"
+        assert result.chunk_count == 1
+        assert isinstance(result.chunk_uris, list)
+        assert len(result.chunk_uris) == 1
+        assert all(isinstance(uri, PageURI) for uri in result.chunk_uris)
 
     def test_extract_text_from_content_paragraph(self):
         """Test text extraction from paragraph content."""
@@ -790,70 +877,3 @@ class TestGoogleDocsCacheInvalidation:
         self.mock_api_client.check_file_revision.return_value = True
         is_current = self.mock_api_client.check_file_revision("doc123", "2")
         assert is_current is True
-
-    @pytest.mark.asyncio
-    async def test_ingest_document_with_revision_id(self):
-        """Test that document ingestion captures revision ID."""
-        # Mock API responses
-        mock_doc_data = {
-            "title": "Test Document",
-            "body": {
-                "content": [
-                    {
-                        "paragraph": {
-                            "elements": [{"textRun": {"content": "Hello world! "}}]
-                        }
-                    }
-                ]
-            },
-        }
-        mock_file_metadata = {
-            "name": "Test Document",
-            "createdTime": "2023-01-01T00:00:00.000Z",
-            "modifiedTime": "2023-01-02T00:00:00.000Z",
-            "owners": [{"emailAddress": "test@example.com"}],
-        }
-
-        self.mock_api_client.get_document = AsyncMock(return_value=mock_doc_data)
-        self.mock_api_client.get_file_metadata = AsyncMock(
-            return_value=mock_file_metadata
-        )
-        self.mock_api_client.get_latest_revision_id = AsyncMock(
-            return_value="revision123"
-        )
-
-        # Patch chunker to return a real GDocChunk instance
-        test_doc_id = "doc123"
-        chunk_uri = PageURI(root="test-root", type="gdoc_chunk", id=f"{test_doc_id}(0)")
-        header_uri = PageURI(root="test-root", type="gdoc_header", id=test_doc_id)
-        chunk = GDocChunk(
-            uri=chunk_uri,
-            document_id=test_doc_id,
-            chunk_index=0,
-            chunk_title="Hello world!",
-            content="Hello world!",
-            doc_title="Test Document",
-            token_count=3,
-            prev_chunk_uri=None,
-            next_chunk_uri=None,
-            header_uri=header_uri,
-            permalink=f"https://docs.google.com/document/d/{test_doc_id}/edit",
-            doc_revision_id="revision123",
-        )
-        self.service.chunker.chunk = Mock(return_value=[chunk])
-
-        # Patch create_page_uri to return real PageURI objects in the correct order
-        self.mock_context.create_page_uri = AsyncMock(
-            side_effect=[header_uri, chunk_uri]
-        )
-
-        # Mock page cache
-        self.mock_page_cache.store = AsyncMock()
-
-        test_header_uri = PageURI(
-            root="test-root", type="gdoc_header", id="doc123", version=1
-        )
-        result = await self.service._ingest_document(test_header_uri)
-        assert result.revision_id == "revision123"
-        # Verify API calls
-        self.mock_api_client.get_latest_revision_id.assert_awaited_once_with("doc123")

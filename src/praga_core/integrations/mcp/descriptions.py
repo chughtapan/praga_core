@@ -19,7 +19,7 @@ Examples:
 
 
 def get_pages_tool_description(type_names: List[str]) -> str:
-    """Generate description for the get_pages tool."""
+    """Generate description for the get_pages tool. Optionally accepts allow_stale to return invalid pages."""
     return f"""Get specific pages/documents by their type and ID(s).
 
 Returns JSON with complete page content and metadata. Supports both single page and bulk operations.
