@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastmcp import Context, FastMCP
 
+from praga_core.action_executor import ActionFunction
 from praga_core.context import ServerContext
 from praga_core.integrations.mcp.descriptions import (
     get_action_tool_description,
@@ -186,15 +187,17 @@ def setup_action_tools(
     """
     # Get all registered actions
     actions = server_context.actions
-    
+
     for action_name, action_func in actions.items():
         # Create a tool for each action with proper closure
-        def create_action_tool(name: str, func: object):
+        def create_action_tool(name: str, func: ActionFunction) -> None:
             # Generate description for this specific action
             description = get_action_tool_description(name, func)
-            
+
             @mcp.tool(description=description)
-            async def action_tool(action_input: Dict[str, Any], ctx: Optional[Context] = None) -> str:
+            async def action_tool(
+                action_input: Dict[str, Any], ctx: Optional[Context] = None
+            ) -> str:
                 """Execute an action on a page.
 
                 Args:
@@ -210,7 +213,7 @@ def setup_action_tools(
                         await ctx.info(f"Action input: {action_input}")
 
                     # Invoke the action through the server context
-                    result = server_context.invoke_action(name, action_input)
+                    result = await server_context.invoke_action(name, action_input)
 
                     if ctx:
                         await ctx.info(f"Action result: {result}")
@@ -221,12 +224,11 @@ def setup_action_tools(
                     error_msg = f"Action '{name}' failed: {str(e)}"
                     if ctx:
                         await ctx.error(error_msg)
-                    
+
                     return json.dumps({"success": False, "error": str(e)}, indent=2)
-            
-            # Set the function name dynamically for better MCP tool naming
-            action_tool.__name__ = f"action_{name}"
-            return action_tool
-        
+
+            # The @mcp.tool decorator handles tool registration
+            action_tool
+
         # Create and register the tool - the @mcp.tool decorator registers it
         create_action_tool(action_name, action_func)

@@ -1,7 +1,7 @@
 """Description templates for MCP tools and resources."""
 
 import inspect
-from typing import Dict, List
+from typing import List
 
 from praga_core.action_executor import ActionFunction
 
@@ -45,18 +45,30 @@ def get_action_tool_description(action_name: str, action_func: ActionFunction) -
     # Get function signature and docstring
     sig = inspect.signature(action_func)
     doc = inspect.getdoc(action_func) or "Perform an action on a page."
-    
+
     # Extract parameters (excluding the first Page parameter)
-    params = list(sig.parameters.items())[1:]  # Skip first parameter which should be Page
-    
+    params = list(sig.parameters.items())[
+        1:
+    ]  # Skip first parameter which should be Page
+
     param_descriptions = []
     for param_name, param in params:
-        param_type = param.annotation if param.annotation != inspect.Parameter.empty else "Any"
-        default_text = f" (default: {param.default})" if param.default != inspect.Parameter.empty else ""
+        param_type = (
+            param.annotation if param.annotation != inspect.Parameter.empty else "Any"
+        )
+        default_text = (
+            f" (default: {param.default})"
+            if param.default != inspect.Parameter.empty
+            else ""
+        )
         param_descriptions.append(f"- {param_name}: {param_type}{default_text}")
-    
-    param_text = "\n".join(param_descriptions) if param_descriptions else "No additional parameters required."
-    
+
+    param_text = (
+        "\n".join(param_descriptions)
+        if param_descriptions
+        else "No additional parameters required."
+    )
+
     return f"""Action: {action_name}
 
 {doc}

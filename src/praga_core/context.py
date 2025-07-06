@@ -10,11 +10,10 @@ from typing import (
     Sequence,
     Type,
     TypeVar,
-    Union
     get_type_hints,
 )
 
-from praga_core.action_executor import ActionExecutor, ActionFunction
+from praga_core.action_executor import ActionExecutorMixin
 from praga_core.retriever import RetrieverAgentBase
 from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
@@ -24,8 +23,10 @@ from .service import Service
 
 logger = logging.getLogger(__name__)
 
+P = TypeVar("P", bound=Page)
 
-class ServerContext:
+
+class ServerContext(ActionExecutorMixin):
     """Central server context that acts as single source of truth for caching and state."""
 
     def __init__(
@@ -36,6 +37,7 @@ class ServerContext:
     ) -> None:
         """Do not use directly. Use `await ServerContext.create(...)` instead."""
 
+        super().__init__()
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._services: Dict[str, Service] = {}
@@ -46,7 +48,6 @@ class ServerContext:
                 "Use `await ServerContext.create(...)` to instantiate ServerContext."
             )
         self._router = PageRouter(self._page_cache)
-        self._action_executor = ActionExecutor(self)
 
     @classmethod
     async def create(
@@ -71,25 +72,7 @@ class ServerContext:
         """
         return self._router.route(path, cache)
 
-    def action(self, name: str | None = None) -> Callable[[ActionFunction], ActionFunction]:
-        """Decorator to register an action function.
-
-        Args:
-            name: Optional name for the action. If not provided, uses function name.
-
-        Example:
-            @context.action()
-            def mark_email_read(email: EmailPage) -> bool:
-                email.read = True
-                return True
-        """
-        def decorator(func: ActionFunction) -> ActionFunction:
-            action_name = name if name is not None else func.__name__
-            self._action_executor.register_action(action_name, func)
-            return func
-        return decorator
-      
-      def validator(
+    def validator(
         self, func: Callable[[P], Awaitable[bool]]
     ) -> Callable[[P], Awaitable[bool]]:
         """Decorator to register an async page validator.
@@ -118,35 +101,9 @@ class ServerContext:
             return await func(page)  # type: ignore
 
         self._page_cache.register_validator(page_type, validator_wrapper)
-        return func      
-
-    def register_action(self, name: str, func: ActionFunction) -> None:
-        """Register an action function directly.
-        
-        Args:
-            name: Name of the action
-            func: Action function that takes Page (or subclass) as first param and returns bool
-        """
-        self._action_executor.register_action(name, func)
-
-    def invoke_action(self, name: str, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Invoke an action by name.
-        
-        Args:
-            name: Name of the action to invoke
-            raw_input: Input arguments
-            
-        Returns:
-            Dict with 'success' key and boolean value
-        """
-        return self._action_executor.invoke_action(name, raw_input)
+        return func
 
     @property
-    def actions(self) -> Dict[str, ActionFunction]:
-        """Get all registered actions."""
-        return self._action_executor.actions
-
-    @property  
     def _page_handlers(self) -> Dict[str, HandlerFn]:
         """Get all registered page handlers (for MCP compatibility)."""
         return self._router._handlers
@@ -277,32 +234,3 @@ class ServerContext:
     def page_cache(self) -> PageCache:
         """Get access to the SQL-based page cache."""
         return self._page_cache
-
-
-def action(
-    name: str | None = None
-) -> Callable[[ActionFunction], ActionFunction]:
-    """
-    Standalone @action decorator for functions that will be registered later.
-    
-    This decorator marks a function as an action but doesn't register it immediately.
-    The function can be registered later with a ServerContext.
-    
-    Args:
-        name: Optional name for the action. If not provided, uses function name.
-
-    Example:
-        @action()
-        def mark_email_read(email: EmailPage) -> bool:
-            email.read = True
-            return True
-            
-        # Later, register with context:
-        context.register_action("mark_email_read", mark_email_read)
-    """
-    def decorator(func: ActionFunction) -> ActionFunction:
-        # Mark the function as an action for later registration
-        func._praga_action_name = name or func.__name__  # type: ignore[attr-defined]
-        func._praga_is_action = True  # type: ignore[attr-defined]
-        return func
-    return decorator

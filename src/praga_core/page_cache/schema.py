@@ -245,9 +245,7 @@ def create_page_table(page_class: Type[P]) -> Any:
         "version": Column(
             Integer, primary_key=True
         ),  # Version as part of composite primary key
-        "valid": Column(
-            Boolean, default=True, nullable=False
-        ),  # Cache validity flag
+        "valid": Column(Boolean, default=True, nullable=False),  # Cache validity flag
         "created_at": Column(
             TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
         ),

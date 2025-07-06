@@ -1,12 +1,11 @@
 """
 Praga Core
 
-A framework for building document retrieval toolkits and agents for LLM applications.
-Includes LLMRP (LLM Retrieval Protocol) implementation for standardized document retrieval over HTTP.
+A framework for building web-services for LLM agents.
 """
 
 from .agents import ReactAgent, RetrieverToolkit
-from .context import ActionExecutor, ServerContext, action
+from .context import ServerContext
 from .global_context import (
     ContextMixin,
     ServiceContext,
@@ -22,8 +21,6 @@ from .types import Page, PageReference, PageURI, TextPage
 __version__ = "0.1.0"
 
 __all__ = [
-    "ActionExecutor",
-    "action",
     "ServerContext",
     "ContextMixin",
     "ServiceContext",

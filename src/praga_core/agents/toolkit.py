@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import abc
-import inspect
 import json
 from collections.abc import Sequence as ABCSequence
 from datetime import datetime, timedelta
@@ -521,6 +520,3 @@ def tool(
         return descriptor  # type: ignore[return-value]
 
     return decorator
-
-
-
