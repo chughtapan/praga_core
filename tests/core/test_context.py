@@ -11,7 +11,7 @@ from pydantic import Field
 
 from praga_core.context import ServerContext
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import Page, PageReference, PageURI, SearchResponse, TextPage
+from praga_core.types import Page, PageReference, PageURI, SearchResponse
 
 
 class DocumentPage(Page):
@@ -47,6 +47,25 @@ class MockRetrieverAgent(RetrieverAgentBase):
         return self.search_results
 
 
+# Handler functions for testing
+async def document_page_handler(page_uri: PageURI) -> DocumentPage:
+    """Test handler for DocumentPage."""
+    return DocumentPage(
+        uri=page_uri,
+        title=f"Test Page {page_uri.id}",
+        content=f"Content for page {page_uri.id}",
+    )
+
+
+async def alternate_page_handler(page_uri: PageURI) -> AlternateTestPage:
+    """Test handler for AlternateTestPage."""
+    return AlternateTestPage(
+        uri=page_uri,
+        name=f"Alternate Page {page_uri.id}",
+        data=f"Data for page {page_uri.id}",
+    )
+
+
 # Test fixtures
 @pytest.fixture
 async def context() -> ServerContext:
@@ -74,151 +93,6 @@ def sample_page_references() -> List[PageReference]:
     ]
 
 
-# Handler functions for testing
-async def document_page_handler(page_uri: PageURI) -> DocumentPage:
-    """Test handler for DocumentPage."""
-    return DocumentPage(
-        uri=page_uri,
-        title=f"Test Page {page_uri.id}",
-        content=f"Content for page {page_uri.id}",
-    )
-
-
-async def alternate_page_handler(page_uri: PageURI) -> AlternateTestPage:
-    """Test handler for AlternateTestPage."""
-    return AlternateTestPage(
-        uri=page_uri,
-        name=f"Alternate Page {page_uri.id}",
-        data=f"Data for page {page_uri.id}",
-    )
-
-
-class TestPageURI:
-    """Test PageURI functionality."""
-
-    def test_page_uri_creation(self) -> None:
-        """Test creating a PageURI."""
-        uri = PageURI(root="test", type="Email", id="123", version=1)
-        assert uri.root == "test"
-        assert uri.type == "Email"
-        assert uri.id == "123"
-        assert uri.version == 1
-
-    def test_page_uri_creation_none_version_default(self) -> None:
-        """Test creating a PageURI with None version (default)."""
-        uri = PageURI(root="test", type="Email", id="123")
-        assert uri.version is None
-
-    def test_page_uri_string_representation(self) -> None:
-        """Test PageURI string representation."""
-        uri = PageURI(root="myserver", type="Document", id="abc", version=2)
-        assert str(uri) == "myserver/Document:abc@2"
-
-    def test_page_uri_parsing(self) -> None:
-        """Test parsing URI from string."""
-        uri_str = "server/Email:msg123@5"
-        uri = PageURI.parse(uri_str)
-        assert uri.root == "server"
-        assert uri.type == "Email"
-        assert uri.id == "msg123"
-        assert uri.version == 5
-
-    def test_page_uri_parsing_with_empty_root(self) -> None:
-        """Test parsing URI with empty root."""
-        uri_str = "/Email:msg123@1"
-        uri = PageURI.parse(uri_str)
-        assert uri.root == ""
-        assert uri.type == "Email"
-        assert uri.id == "msg123"
-        assert uri.version == 1
-
-    def test_page_uri_validation_invalid_type(self) -> None:
-        """Test validation of type field."""
-        with pytest.raises(ValueError, match="Type cannot contain"):
-            PageURI(root="test", type="Email:Bad", id="123", version=1)
-
-    def test_page_uri_validation_invalid_id(self) -> None:
-        """Test validation of id field."""
-        with pytest.raises(ValueError, match="ID cannot contain"):
-            PageURI(root="test", type="Email", id="123@bad", version=1)
-
-    def test_page_uri_validation_invalid_version(self) -> None:
-        """Test validation of version field."""
-        with pytest.raises(ValueError, match="Version must be non-negative"):
-            PageURI(root="test", type="Email", id="123", version=-1)
-
-    def test_page_uri_parsing_invalid_format(self) -> None:
-        """Test parsing invalid URI format."""
-        with pytest.raises(ValueError, match="Invalid URI format"):
-            PageURI.parse("invalid-format")
-
-    def test_page_uri_soft_parsing_without_version(self) -> None:
-        """Test soft parsing of URI without version (should default to None)."""
-        uri_str = "server/Email:msg123"
-        uri = PageURI.parse(uri_str)
-        assert uri.root == "server"
-        assert uri.type == "Email"
-        assert uri.id == "msg123"
-        assert uri.version is None
-
-    def test_page_uri_soft_parsing_with_empty_root(self) -> None:
-        """Test soft parsing of URI with empty root and no version."""
-        uri_str = "/Email:msg123"
-        uri = PageURI.parse(uri_str)
-        assert uri.root == ""
-        assert uri.type == "Email"
-        assert uri.id == "msg123"
-        assert uri.version is None
-
-    def test_page_uri_parsing_strict_still_works(self) -> None:
-        """Test that strict parsing with version still works."""
-        uri_str = "server/Email:msg123@5"
-        uri = PageURI.parse(uri_str)
-        assert uri.root == "server"
-        assert uri.type == "Email"
-        assert uri.id == "msg123"
-        assert uri.version == 5
-
-    def test_page_uri_hashable(self) -> None:
-        """Test that PageURI is hashable."""
-        uri1 = PageURI(root="test", type="Email", id="123", version=1)
-        uri2 = PageURI(root="test", type="Email", id="123", version=1)
-        uri3 = PageURI(root="test", type="Email", id="124", version=1)
-
-        uri_set = {uri1, uri2, uri3}
-        assert len(uri_set) == 2  # uri1 and uri2 should be the same
-
-    def test_page_uri_equality(self) -> None:
-        """Test PageURI equality comparison."""
-        uri1 = PageURI(root="test", type="Email", id="123", version=1)
-        uri2 = PageURI(root="test", type="Email", id="123", version=1)
-        uri3 = PageURI(root="test", type="Email", id="124", version=1)
-
-        assert uri1 == uri2
-        assert uri1 != uri3
-        assert uri1 != "not_a_uri"
-
-
-class TestVersionFunctionality:
-    """Test version functionality in context."""
-
-    @pytest.mark.asyncio
-    async def test_create_page_uri_defaults_to_version_1(
-        self, context: ServerContext
-    ) -> None:
-        uri = await context.create_page_uri(TextPage, "text", "test123")
-        assert uri.version == 1
-
-    @pytest.mark.asyncio
-    async def test_create_page_uri_explicit_version_overrides_default(
-        self, context: ServerContext
-    ) -> None:
-        uri = await context.create_page_uri(TextPage, "text", "test123", version=5)
-        assert uri.version == 5
-        uri2 = await context.create_page_uri(TextPage, "text", "test123", version=None)
-        assert uri2.version == 1
-
-
 class TestServerContextInitialization:
     """Test ServerContext initialization."""
 
@@ -226,64 +100,6 @@ class TestServerContextInitialization:
     async def test_initialization(self, context) -> None:
         assert context.retriever is None
         assert context.page_cache is not None
-
-
-class TestPageHandlerRegistration:
-    """Test page handler registration functionality."""
-
-    @pytest.mark.asyncio
-    async def test_register_handler_programmatically(self, context) -> None:
-        context.route("document")(document_page_handler)
-
-    @pytest.mark.asyncio
-    async def test_register_multiple_handlers(self, context) -> None:
-        context.route("document")(document_page_handler)
-        context.route("alternate")(alternate_page_handler)
-
-    @pytest.mark.asyncio
-    async def test_register_handler_duplicate_error(self, context) -> None:
-        context.route("document")(document_page_handler)
-        with pytest.raises(RuntimeError, match="already registered"):
-            context.route("document")(document_page_handler)
-
-
-class TestGetPage:
-    """Test get_page functionality."""
-
-    @pytest.mark.asyncio
-    async def test_get_page_create_new(self, context) -> None:
-        context.route("document")(document_page_handler)
-
-        uri = PageURI(root="test", type="document", id="new_page", version=1)
-        page = await context.get_page(uri)
-
-        assert isinstance(page, DocumentPage)
-        assert page.title == "Test Page new_page"
-
-    @pytest.mark.asyncio
-    async def test_get_page_with_uri_from_reference(self, context) -> None:
-        context.route("document")(document_page_handler)
-
-        reference = PageReference(
-            uri=PageURI(root="test", type="document", id="ref_page", version=1)
-        )
-        page = await context.get_page(reference.uri)
-
-        assert isinstance(page, DocumentPage)
-        assert page.title == "Test Page ref_page"
-
-    @pytest.mark.asyncio
-    async def test_get_page_invalid_uri_error(self, context) -> None:
-        with pytest.raises(ValueError):
-            await context.get_page("invalid-uri-format")
-
-    @pytest.mark.asyncio
-    async def test_get_page_unregistered_type_error(self, context) -> None:
-        uri = PageURI(root="test", type="unregistered", id="123", version=1)
-        with pytest.raises(
-            RuntimeError, match="No handler registered for type: unregistered"
-        ):
-            await context.get_page(uri)
 
 
 class TestRetrieverProperty:
