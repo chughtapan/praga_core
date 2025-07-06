@@ -56,13 +56,13 @@ class PeopleService(ToolkitService):
             return await self.handle_person_request(page_uri)
 
     async def handle_person_request(self, page_uri: PageURI) -> PersonPage:
-        """Handle a person page request - get from database or create if not exists (async)."""
+        """Handle a person page request - get from database or create if not exists."""
         # This method is only called when the page is not in cache
         raise RuntimeError(f"Invalid request: Person {page_uri.id} not yet created.")
 
     @tool()
     async def get_person_records(self, identifier: str) -> List[PersonPage]:
-        """Get person records by trying lookup first, then create if not found (async)."""
+        """Get person records by trying lookup first, then create if not found."""
         existing_people = await self.search_existing_records(identifier)
         if existing_people:
             logger.debug(f"Found existing person records for: {identifier}")
@@ -76,7 +76,7 @@ class PeopleService(ToolkitService):
             return []
 
     async def search_existing_records(self, identifier: str) -> List[PersonPage]:
-        """Search for existing records in the page cache by identifier (async)."""
+        """Search for existing records in the page cache by identifier."""
         identifier_lower = identifier.lower().strip()
 
         # Try exact email match first
@@ -106,7 +106,7 @@ class PeopleService(ToolkitService):
         return first_name_matches
 
     async def _find_existing_person_by_email(self, email: str) -> Optional[PersonPage]:
-        """Find existing person in page cache by email address (async)."""
+        """Find existing person in page cache by email address."""
         matches: List[PersonPage] = await (
             self.page_cache.find(PersonPage)
             .where(lambda t: t.email == email.lower())
@@ -115,7 +115,7 @@ class PeopleService(ToolkitService):
         return matches[0] if matches else None
 
     async def create_new_records(self, identifier: str) -> List[PersonPage]:
-        """Create new person pages for a given identifier (async)."""
+        """Create new person pages for a given identifier."""
         existing_people = await self.search_existing_records(identifier)
         if existing_people:
             raise RuntimeError(f"Person already exists for identifier: {identifier}")
@@ -148,7 +148,7 @@ class PeopleService(ToolkitService):
         return created_people
 
     async def _search_explicit_sources(self, identifier: str) -> List[PersonInfo]:
-        """Search explicit sources (Google People API and Directory API) for the identifier (async)."""
+        """Search explicit sources (Google People API and Directory API) for the identifier."""
         all_explicit_infos = []
 
         # Google People API
@@ -168,14 +168,14 @@ class PeopleService(ToolkitService):
         return all_explicit_infos
 
     async def _search_implicit_sources(self, identifier: str) -> List[PersonInfo]:
-        """Search implicit sources (Gmail contacts) for the identifier (async)."""
+        """Search implicit sources (Gmail contacts) for the identifier."""
         # Gmail contacts
         return await self._extract_people_from_gmail_contacts(identifier)
 
     async def _filter_and_deduplicate_people(
         self, all_person_infos: List[PersonInfo], identifier: str
     ) -> Tuple[List[PersonInfo], List[PersonPage]]:
-        """Filter out non-real persons and remove duplicates based on email address (async)."""
+        """Filter out non-real persons and remove duplicates based on email address."""
         new_person_infos: List[PersonInfo] = []
         existing_people: List[PersonPage] = []
         seen_emails = set()
@@ -269,7 +269,7 @@ class PeopleService(ToolkitService):
     async def _extract_people_info_from_google_people(
         self, identifier: str
     ) -> List[PersonInfo]:
-        """Extract people information from Google People API (async)."""
+        """Extract people information from Google People API."""
         try:
             results = await self.api_client.search_contacts(identifier)
 
@@ -285,7 +285,7 @@ class PeopleService(ToolkitService):
             return []
 
     async def _extract_people_from_directory(self, identifier: str) -> List[PersonInfo]:
-        """Extract people from Directory using People API searchDirectoryPeople (async)."""
+        """Extract people from Directory using People API searchDirectoryPeople."""
         try:
             # Use People API's searchDirectoryPeople endpoint
             people_service = self.api_client._people
@@ -321,7 +321,7 @@ class PeopleService(ToolkitService):
     async def _extract_people_from_gmail_contacts(
         self, identifier: str
     ) -> List[PersonInfo]:
-        """Extract people from Gmail contacts by searching for identifier (async)."""
+        """Extract people from Gmail contacts by searching for identifier."""
         try:
             # If identifier is an email, search specifically for that email
             if self._is_email_address(identifier):

@@ -54,7 +54,7 @@ class GoogleDocsService(ToolkitService):
             return await self.handle_chunk_request(page_uri)
 
     async def handle_header_request(self, page_uri: PageURI) -> GDocHeader:
-        """Handle a Google Docs header page request - ingest if not exists (async)."""
+        """Handle a Google Docs header page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
 
@@ -64,7 +64,7 @@ class GoogleDocsService(ToolkitService):
         return header_page
 
     async def handle_chunk_request(self, page_uri: PageURI) -> GDocChunk:
-        """Handle a Google Docs chunk page request - ingest if not exists (async)."""
+        """Handle a Google Docs chunk page request - ingest if not exists."""
         # Note: Cache checking is now handled by ServerContext.get_page()
         # This method is only called when the page is not in cache or caching is disabled
 
@@ -93,7 +93,7 @@ class GoogleDocsService(ToolkitService):
         return cached_chunk
 
     async def _validate_gdoc_header(self, page: GDocHeader) -> bool:
-        """Validate that a GDocHeader page is still current by checking revision ID (async)."""
+        """Validate that a GDocHeader page is still current by checking revision ID."""
         try:
             # Get latest revision ID from API
             latest_revision_id = await self.api_client.get_latest_revision_id(
@@ -111,7 +111,7 @@ class GoogleDocsService(ToolkitService):
             return False
 
     async def _ingest_document(self, header_page_uri: PageURI) -> GDocHeader:
-        """Ingest a document by fetching content, chunking, and storing in page cache (async)."""
+        """Ingest a document by fetching content, chunking, and storing in page cache."""
         document_id = header_page_uri.id
         logger.info(f"Starting async ingestion for document: {document_id}")
 
@@ -301,7 +301,7 @@ class GoogleDocsService(ToolkitService):
         page_token: Optional[str] = None,
         page_size: int = 20,
     ) -> Tuple[List[PageURI], Optional[str]]:
-        """Generic document search method that delegates to API client (async)."""
+        """Generic document search method that delegates to API client."""
         try:
             # Delegate directly to API client
             files, next_page_token = await self.api_client.search_documents(
@@ -329,7 +329,7 @@ class GoogleDocsService(ToolkitService):
     async def search_chunks_in_document(
         self, doc_header_uri: str, query: str
     ) -> List[GDocChunk]:
-        """Search for chunks within a specific document using simple text matching (async)."""
+        """Search for chunks within a specific document using simple text matching."""
         # Parse the URI to extract document ID
         try:
             parsed_uri = PageURI.parse(doc_header_uri)
@@ -387,7 +387,7 @@ class GoogleDocsService(ToolkitService):
         cursor: Optional[str] = None,
         page_size: int = 10,
     ) -> PaginatedResponse[GDocHeader]:
-        """Search documents and return a paginated response (async)."""
+        """Search documents and return a paginated response."""
         # Get the page data using the cursor directly
         uris, next_page_token = await self.search_documents(
             search_params, cursor, page_size

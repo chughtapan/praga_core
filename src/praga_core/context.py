@@ -201,9 +201,10 @@ class ServerContext:
         self, results: List[PageReference]
     ) -> List[PageReference]:
         """Resolve references to pages by calling get_page."""
-        for ref in results:
-            ref.page = await self.get_page(ref.uri)
-            assert ref.page is not None
+        uris = [ref.uri for ref in results]
+        pages = await self.get_pages(uris)
+        for ref, page in zip(results, pages):
+            ref.page = page
         return results
 
     @property
