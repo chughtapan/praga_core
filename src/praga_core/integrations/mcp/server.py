@@ -53,7 +53,7 @@ def setup_mcp_tools(
     """
 
     # Get available page types for tool description
-    type_names = list(server_context._router._handlers.keys())
+    type_names = list(server_context._handlers.keys())
 
     @mcp.tool(description=get_search_tool_description(type_names))
     async def search_pages(

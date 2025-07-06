@@ -508,7 +508,7 @@ class TestStrictHandlerValidation:
                 uri=page_uri, title="Valid Decorator", content="Content"
             )
 
-        assert "valid_decorator" in context._router._handlers
+        assert "valid_decorator" in context._handlers
 
     @pytest.mark.asyncio
     async def test_decorator_with_forward_reference_annotation_succeeds(
@@ -540,7 +540,7 @@ class TestStrictHandlerValidation:
             context.route("invalid")(invalid_handler)
 
         # Verify handler was not registered
-        assert "invalid" not in context._router._handlers
+        assert "invalid" not in context._handlers
 
 
 class TestEnhancedCaching:
@@ -645,7 +645,7 @@ class TestHandlerSignatureValidation:
             )
 
         # Should not raise any exception
-        assert "valid_test" in context._router._handlers
+        assert "valid_test" in context._handlers
 
     @pytest.mark.asyncio
     async def test_missing_return_annotation_rejected(self, context) -> None:
@@ -696,7 +696,7 @@ class TestHandlerSignatureValidation:
             context.route("invalid_test")(invalid_handler)
 
         # The handler should not be registered
-        assert "invalid_test" not in context._router._handlers
+        assert "invalid_test" not in context._handlers
 
 
 class TestCachingIntegration:

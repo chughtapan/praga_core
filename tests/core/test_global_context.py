@@ -130,7 +130,7 @@ async def test_manual_context_setup():
         return TestPage(uri=page_uri, title=f"My {page_uri.id}", content="My content")
 
     # Handler should be registered
-    assert "mytype" in context._router._handlers
+    assert "mytype" in context._handlers
 
     # Can use services with the context
     service = MockService()
