@@ -28,20 +28,33 @@ P = TypeVar("P", bound=Page)
 class ServerContext:
     """Central server context that acts as single source of truth for caching and state."""
 
-    def __init__(self, root: str = "", cache_url: Optional[str] = None) -> None:
-        """Initialize server context.
+    def __init__(
+        self,
+        root: str = "",
+        cache_url: Optional[str] = None,
+        _page_cache: Optional[PageCache] = None,
+    ) -> None:
+        """Do not use directly. Use `await ServerContext.create(...)` instead."""
 
-        Args:
-            root: Root identifier for this context, used in PageURIs
-            cache_url: Optional database URL for PageCache. If None, uses sqlite in-memory database.
-        """
         self.root = root
         self._retriever: Optional[RetrieverAgentBase] = None
         self._services: Dict[str, Service] = {}
-        if cache_url is None:
-            cache_url = "sqlite:///:memory:"
-        self._page_cache = PageCache(cache_url)
+        if _page_cache is not None:
+            self._page_cache = _page_cache
+        else:
+            raise RuntimeError(
+                "Use `await ServerContext.create(...)` to instantiate ServerContext."
+            )
         self._router = PageRouter(self._page_cache)
+
+    @classmethod
+    async def create(
+        cls, root: str = "", cache_url: Optional[str] = None
+    ) -> "ServerContext":
+        if cache_url is None:
+            cache_url = "sqlite+aiosqlite:///:memory:"
+        page_cache = await PageCache.create(cache_url)
+        return cls(root, cache_url, _page_cache=page_cache)
 
     def route(self, path: str, cache: bool = True) -> Callable[[HandlerFn], HandlerFn]:
         """Decorator to register an async page handler.
@@ -106,7 +119,7 @@ class ServerContext:
         """Get all registered services."""
         return self._services.copy()
 
-    def create_page_uri(
+    async def create_page_uri(
         self,
         page_type: Type[Page],
         type_path: str,
@@ -128,7 +141,9 @@ class ServerContext:
             PageURI object with resolved version number
         """
         if version is None:
-            return self._router._create_page_uri(page_type, self.root, type_path, id)
+            return await self._router._create_page_uri(
+                page_type, self.root, type_path, id
+            )
         return PageURI(root=self.root, type=type_path, id=id, version=version)
 
     async def get_page(self, page_uri: str | PageURI) -> Page:

@@ -71,12 +71,6 @@ class PageRouter:
             self._handlers[path] = func
             self._cache_enabled[path] = cache
             # Register page type with cache if enabled
-            if cache and self._page_cache:
-                page_type = return_type
-                try:
-                    self._page_cache._storage._registry.ensure_registered(page_type)
-                except Exception as e:
-                    logger.debug(f"Error initializing cache for {path}: {e}")
             return func
 
         return decorator
@@ -138,7 +132,7 @@ class PageRouter:
     async def _call_handler_async(self, handler: HandlerFn, page_uri: PageURI) -> Page:
         """Call the async handler to generate a page, ensuring proper URI versioning."""
         if page_uri.version is None:
-            page_uri = self._create_page_uri(
+            page_uri = await self._create_page_uri(
                 self._get_handler_return_type(handler, page_uri.type),
                 page_uri.root,
                 page_uri.type,
@@ -153,21 +147,23 @@ class PageRouter:
         try:
             # Check if page is already in cache
             if not await self._page_cache.get(page.__class__, page_uri):
-                self._page_cache.store(page)
+                await self._page_cache.store(page)
                 logger.debug(f"Stored page in cache: {page_uri}")
         except Exception as e:
             logger.debug(f"Error storing page in cache for {page_uri}: {e}")
 
-    def _create_page_uri(
+    async def _create_page_uri(
         self, page_type: Type[Page], root: str, type_path: str, id: str
     ) -> PageURI:
         if not self.is_cache_enabled(type_path):
             version = 1
         else:
             try:
-                self._page_cache._storage._registry.ensure_registered(page_type)
+                await self._page_cache._storage._registry.ensure_registered(page_type)
                 prefix = f"{root}/{type_path}:{id}"
-                latest_version = self._page_cache.get_latest_version(page_type, prefix)
+                latest_version = await self._page_cache.get_latest_version(
+                    page_type, prefix
+                )
                 version = 1 if latest_version is None else (latest_version + 1)
             except Exception as e:
                 logger.debug(

@@ -18,7 +18,7 @@ logging.basicConfig(level=getattr(logging, get_current_config().log_level))
 logger = logging.getLogger(__name__)
 
 
-def setup_global_context() -> None:
+async def setup_global_context() -> None:
     """Set up global context and initialize all components."""
     logger.info("Setting up global context...")
 
@@ -26,7 +26,9 @@ def setup_global_context() -> None:
     config = get_current_config()
 
     # Create and set global context with SQL cache
-    context = ServerContext(root=config.server_root, cache_url=config.page_cache_url)
+    context = await ServerContext.create(
+        root=config.server_root, cache_url=config.page_cache_url
+    )
     set_global_context(context)
 
     # Create single Google API client
@@ -130,7 +132,7 @@ async def main() -> None:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Set up global context
-    setup_global_context()
+    await setup_global_context()
     await run_interactive_cli()
 
 

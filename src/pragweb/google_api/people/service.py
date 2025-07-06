@@ -586,11 +586,11 @@ class PeopleService(ToolkitService):
         """Store person information and create PersonPage."""
         person_id = self._generate_person_id(person_info.email)
 
-        uri = self.context.create_page_uri(PersonPage, "person", person_id)
+        uri = await self.context.create_page_uri(PersonPage, "person", person_id)
         person_page = PersonPage(uri=uri, **person_info.__dict__)
 
         # Store in page cache
-        self.page_cache.store(person_page)
+        await self.page_cache.store(person_page)
 
         logger.debug(f"Created and stored person page: {person_id}")
         return person_page

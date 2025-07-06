@@ -21,6 +21,7 @@ class TestGoogleDocsService:
         self.mock_context.services = {}  # Mock services dictionary
         self.mock_page_cache = Mock()
         self.mock_page_cache.get = AsyncMock()
+        self.mock_page_cache.store = AsyncMock()
         self.mock_context.page_cache = self.mock_page_cache
 
         # Mock the register_service method to actually register
@@ -126,9 +127,10 @@ class TestGoogleDocsService:
         mock_chunk.text = "Hello world!"
         mock_chunk.token_count = 3
         self.service.chunker.chunk = Mock(return_value=[mock_chunk])
-        self.mock_context.create_page_uri = Mock()
-        self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
-        self.mock_page_cache.store = Mock()
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=[header_uri, chunk_uri]
+        )
+        self.mock_page_cache.store = AsyncMock()
         result = await self.service._ingest_document(test_header_uri)
         self.mock_api_client.get_document.assert_awaited_once_with(test_doc_id)
         self.mock_api_client.get_file_metadata.assert_awaited_once_with(test_doc_id)
@@ -841,11 +843,12 @@ class TestGoogleDocsCacheInvalidation:
         self.service.chunker.chunk = Mock(return_value=[chunk])
 
         # Patch create_page_uri to return real PageURI objects in the correct order
-        self.mock_context.create_page_uri = Mock()
-        self.mock_context.create_page_uri.side_effect = [header_uri, chunk_uri]
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=[header_uri, chunk_uri]
+        )
 
         # Mock page cache
-        self.mock_page_cache.store = Mock()
+        self.mock_page_cache.store = AsyncMock()
 
         test_header_uri = PageURI(
             root="test-root", type="gdoc_header", id="doc123", version=1

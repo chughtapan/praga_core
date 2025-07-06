@@ -34,12 +34,11 @@ class TestGmailService:
         self.mock_context.register_service = mock_register_service
 
         # Mock create_page_uri to return predictable URIs
-        def mock_create_page_uri(page_type, type_path, id, version=None):
-            if version is None:
-                version = 1
-            return PageURI(root="test-root", type=type_path, id=id, version=version)
-
-        self.mock_context.create_page_uri = mock_create_page_uri
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=lambda page_type, type_path, id, version=None: PageURI(
+                root="test-root", type=type_path, id=id, version=version or 1
+            )
+        )
 
         set_global_context(self.mock_context)
 
@@ -893,6 +892,12 @@ class TestGmailToolkit:
         self.mock_context.services = {}
         self.mock_context.get_page = Mock()
         self.mock_context.get_pages = AsyncMock()
+        # Ensure create_page_uri is an AsyncMock for toolkit tests
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=lambda page_type, type_path, id, version=None: PageURI(
+                root="test-root", type=type_path, id=id, version=version or 1
+            )
+        )
         set_global_context(self.mock_context)
 
         # Create mock GoogleAPIClient and service

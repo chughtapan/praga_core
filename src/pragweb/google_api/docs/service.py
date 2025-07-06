@@ -1,5 +1,6 @@
 """Google Docs service for handling document data and page creation using Google Docs API."""
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -242,11 +243,13 @@ class GoogleDocsService(ToolkitService):
         )
 
         # Store header in page cache first
-        self.context.page_cache.store(header_page)
+        await self.context.page_cache.store(header_page)
 
-        # Now store chunks with header as parent for provenance tracking
-        for chunk_page in chunk_pages:
+        tasks = [
             self.context.page_cache.store(chunk_page, parent_uri=header_uri)
+            for chunk_page in chunk_pages
+        ]
+        await asyncio.gather(*tasks)
 
         logger.info(
             f"Successfully ingested document {document_id} with {chunk_count} chunks"

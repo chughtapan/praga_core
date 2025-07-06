@@ -1,5 +1,6 @@
 """Calendar service for handling Calendar API interactions and page creation."""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -103,15 +104,13 @@ class CalendarService(ToolkitService):
             logger.debug(
                 f"Calendar API returned {len(events)} events, next_token: {bool(next_page_token)}"
             )
-
-            # Convert to PageURIs
-            uris = [
+            tasks = [
                 self.context.create_page_uri(
                     CalendarEventPage, "calendar_event", event["id"]
                 )
                 for event in events
             ]
-
+            uris = await asyncio.gather(*tasks)
             return uris, next_page_token
 
         except Exception as e:

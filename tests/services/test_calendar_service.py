@@ -27,14 +27,11 @@ class TestCalendarService:
         self.mock_context.register_service = mock_register_service
 
         # Mock create_page_uri method to return real PageURI objects
-        def mock_create_page_uri(page_type, type_path, id_val, version=None):
-            # Default to version 1 like the real implementation
-            actual_version = 1 if version is None else version
-            return PageURI(
-                root="test-root", type=type_path, id=id_val, version=actual_version
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=lambda page_type, type_path, id_val, version=None: PageURI(
+                root="test-root", type=type_path, id=id_val, version=version or 1
             )
-
-        self.mock_context.create_page_uri = mock_create_page_uri
+        )
 
         set_global_context(self.mock_context)
 
@@ -317,14 +314,11 @@ class TestCalendarToolkit:
         self.mock_context.register_service = mock_register_service
 
         # Mock create_page_uri method to return real PageURI objects
-        def mock_create_page_uri(page_type, type_path, id_val, version=None):
-            # Default to version 1 like the real implementation
-            actual_version = 1 if version is None else version
-            return PageURI(
-                root="test-root", type=type_path, id=id_val, version=actual_version
+        self.mock_context.create_page_uri = AsyncMock(
+            side_effect=lambda page_type, type_path, id_val, version=None: PageURI(
+                root="test-root", type=type_path, id=id_val, version=version or 1
             )
-
-        self.mock_context.create_page_uri = mock_create_page_uri
+        )
 
         set_global_context(self.mock_context)
 

@@ -19,6 +19,9 @@ class TestPeopleService:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_page_cache = Mock()
+        self.mock_page_cache.get = AsyncMock()
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_page_cache.find = Mock()
         self.mock_context.page_cache = self.mock_page_cache
 
         def mock_register_service(name, service):
@@ -35,6 +38,8 @@ class TestPeopleService:
         self.mock_api_client._people = Mock()
 
         self.service = PeopleService(self.mock_api_client)
+
+        self.mock_context.create_page_uri = AsyncMock()
 
     def teardown_method(self):
         """Clean up test environment."""
@@ -424,20 +429,19 @@ class TestPeopleService:
             email="john@example.com",
             source="people_api",
         )
-
-        self.mock_page_cache.store = Mock()
-        self.mock_context.create_page_uri.return_value = PageURI(
-            root="test-root", type="person", id="person123", version=1
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_context.create_page_uri = AsyncMock(
+            return_value=PageURI(
+                root="test-root", type="person", id="person123", version=1
+            )
         )
-
         result = await self.service._store_and_create_page(person_info)
-
         assert isinstance(result, PersonPage)
         assert result.first_name == "John"
         assert result.last_name == "Doe"
         assert result.email == "john@example.com"
         assert result.source == "people_api"
-        self.mock_page_cache.store.assert_called_once_with(result)
+        self.mock_page_cache.store.assert_awaited_once_with(result)
 
     @pytest.mark.asyncio
     async def test_toolkit_get_person_records(self):
@@ -478,11 +482,11 @@ class TestPeopleService:
 
     @pytest.mark.asyncio
     async def test_real_async_query_path(self):
-        """Test the real async query path for search_existing_records (integration)."""
+        """Test the real async query path for search_existing_records (integration, async DB)."""
+        import os
         import tempfile
 
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
         from praga_core.page_cache.core import QueryBuilder
         from praga_core.page_cache.query import PageQuery
@@ -491,30 +495,38 @@ class TestPeopleService:
         from praga_core.page_cache.validator import PageValidator
 
         temp_file = tempfile.NamedTemporaryFile(delete=False)
-        engine = create_engine(f"sqlite:///{temp_file.name}")
-        session_factory = sessionmaker(bind=engine)
-        registry = PageRegistry(engine)
-        storage = PageStorage(session_factory, registry)
-        validator = PageValidator()
-        query_engine = PageQuery(session_factory, registry)
-        registry.ensure_registered(PersonPage)
-        person = PersonPage(
-            uri=PageURI(root="test", type="person", id="p1", version=1),
-            first_name="John",
-            last_name="Doe",
-            email="john@example.com",
-        )
-        storage.store(person)
-        real_cache = type(
-            "FakeCache",
-            (),
-            {"find": lambda _, t: QueryBuilder(t, query_engine, validator, storage)},
-        )()
-        self.service._page_cache = real_cache
-        self.mock_context.page_cache = real_cache
-        result = await self.service.search_existing_records("john@example.com")
-        assert len(result) == 1
-        assert result[0].email == "john@example.com"
+        try:
+            db_url = f"sqlite+aiosqlite:///{temp_file.name}"
+            engine = create_async_engine(db_url)
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            registry = PageRegistry(engine)
+            storage = PageStorage(session_factory, registry)
+            validator = PageValidator()
+            query_engine = PageQuery(session_factory, registry)
+            # Register table (async)
+            await registry.ensure_registered(PersonPage)
+            person = PersonPage(
+                uri=PageURI(root="test", type="person", id="p1", version=1),
+                first_name="John",
+                last_name="Doe",
+                email="john@example.com",
+            )
+            await storage.store(person)
+
+            # Minimal fake cache that returns a real QueryBuilder
+            class FakeCache:
+                def find(self_inner, t):
+                    return QueryBuilder(t, query_engine, validator, storage)
+
+            real_cache = FakeCache()
+            self.service._page_cache = real_cache
+            self.mock_context.page_cache = real_cache
+            result = await self.service.search_existing_records("john@example.com")
+            assert len(result) == 1
+            assert result[0].email == "john@example.com"
+        finally:
+            temp_file.close()
+            os.unlink(temp_file.name)
 
 
 class TestPeopleServiceRefactored:
@@ -526,6 +538,9 @@ class TestPeopleServiceRefactored:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}
         self.mock_page_cache = Mock()
+        self.mock_page_cache.get = AsyncMock()
+        self.mock_page_cache.store = AsyncMock()
+        self.mock_page_cache.find = Mock()
         self.mock_context.page_cache = self.mock_page_cache
 
         def mock_register_service(name, service):
@@ -537,6 +552,8 @@ class TestPeopleServiceRefactored:
         # Create mock GoogleAPIClient
         self.mock_api_client = Mock()
         self.service = PeopleService(self.mock_api_client)
+
+        self.mock_context.create_page_uri = AsyncMock()
 
     def teardown_method(self):
         """Clean up test environment."""

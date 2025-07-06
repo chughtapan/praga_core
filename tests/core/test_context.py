@@ -11,7 +11,7 @@ from pydantic import Field
 
 from praga_core.context import ServerContext
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import Page, PageReference, PageURI, SearchResponse
+from praga_core.types import Page, PageReference, PageURI, SearchResponse, TextPage
 
 
 class DocumentPage(Page):
@@ -49,9 +49,11 @@ class MockRetrieverAgent(RetrieverAgentBase):
 
 # Test fixtures
 @pytest.fixture
-def context() -> ServerContext:
+async def context() -> ServerContext:
     """Provide a fresh ServerContext for each test."""
-    return ServerContext(root="test")
+    return await ServerContext.create(
+        root="test", cache_url="sqlite+aiosqlite:///:memory:"
+    )
 
 
 @pytest.fixture
@@ -200,38 +202,28 @@ class TestPageURI:
 class TestVersionFunctionality:
     """Test version functionality in context."""
 
-    def test_create_page_uri_defaults_to_version_1(
+    @pytest.mark.asyncio
+    async def test_create_page_uri_defaults_to_version_1(
         self, context: ServerContext
     ) -> None:
-        """Test that create_page_uri resolves None version to version 1 when no existing versions."""
-        # We need to use a real page class for this test
-        from praga_core.types import TextPage
-
-        uri = context.create_page_uri(TextPage, "text", "test123")
+        uri = await context.create_page_uri(TextPage, "text", "test123")
         assert uri.version == 1
 
-    def test_create_page_uri_explicit_version_overrides_default(
+    @pytest.mark.asyncio
+    async def test_create_page_uri_explicit_version_overrides_default(
         self, context: ServerContext
     ) -> None:
-        """Test that explicit version parameter overrides the default behavior."""
-        from praga_core.types import TextPage
-
-        # Explicit version
-        uri = context.create_page_uri(TextPage, "text", "test123", version=5)
+        uri = await context.create_page_uri(TextPage, "text", "test123", version=5)
         assert uri.version == 5
-
-        # Explicit None version (latest)
-        uri2 = context.create_page_uri(TextPage, "text", "test123", version=None)
-        assert (
-            uri2.version == 1
-        )  # Should resolve to version 1 when no existing versions
+        uri2 = await context.create_page_uri(TextPage, "text", "test123", version=None)
+        assert uri2.version == 1
 
 
 class TestServerContextInitialization:
     """Test ServerContext initialization."""
 
-    def test_initialization(self, context: ServerContext) -> None:
-        """Test ServerContext initialization."""
+    @pytest.mark.asyncio
+    async def test_initialization(self, context) -> None:
         assert context.retriever is None
         assert context.page_cache is not None
 
@@ -239,20 +231,17 @@ class TestServerContextInitialization:
 class TestPageHandlerRegistration:
     """Test page handler registration functionality."""
 
-    def test_register_handler_programmatically(self, context: ServerContext) -> None:
-        """Test programmatic handler registration."""
+    @pytest.mark.asyncio
+    async def test_register_handler_programmatically(self, context) -> None:
         context.route("document")(document_page_handler)
 
-        # No error means success - handler is stored internally
-
-    def test_register_multiple_handlers(self, context: ServerContext) -> None:
-        """Test registering handlers for multiple page types."""
+    @pytest.mark.asyncio
+    async def test_register_multiple_handlers(self, context) -> None:
         context.route("document")(document_page_handler)
         context.route("alternate")(alternate_page_handler)
-        # No error means success
 
-    def test_register_handler_duplicate_error(self, context: ServerContext) -> None:
-        """Test error when registering duplicate handler."""
+    @pytest.mark.asyncio
+    async def test_register_handler_duplicate_error(self, context) -> None:
         context.route("document")(document_page_handler)
         with pytest.raises(RuntimeError, match="already registered"):
             context.route("document")(document_page_handler)
@@ -262,8 +251,7 @@ class TestGetPage:
     """Test get_page functionality."""
 
     @pytest.mark.asyncio
-    async def test_get_page_create_new(self, context: ServerContext) -> None:
-        """Test creating new page via handler."""
+    async def test_get_page_create_new(self, context) -> None:
         context.route("document")(document_page_handler)
 
         uri = PageURI(root="test", type="document", id="new_page", version=1)
@@ -273,10 +261,7 @@ class TestGetPage:
         assert page.title == "Test Page new_page"
 
     @pytest.mark.asyncio
-    async def test_get_page_with_uri_from_reference(
-        self, context: ServerContext
-    ) -> None:
-        """Test getting page using URI from PageReference."""
+    async def test_get_page_with_uri_from_reference(self, context) -> None:
         context.route("document")(document_page_handler)
 
         reference = PageReference(
@@ -288,16 +273,12 @@ class TestGetPage:
         assert page.title == "Test Page ref_page"
 
     @pytest.mark.asyncio
-    async def test_get_page_invalid_uri_error(self, context: ServerContext) -> None:
-        """Test error when getting page with invalid URI string."""
+    async def test_get_page_invalid_uri_error(self, context) -> None:
         with pytest.raises(ValueError):
             await context.get_page("invalid-uri-format")
 
     @pytest.mark.asyncio
-    async def test_get_page_unregistered_type_error(
-        self, context: ServerContext
-    ) -> None:
-        """Test error when getting page for unregistered type."""
+    async def test_get_page_unregistered_type_error(self, context) -> None:
         uri = PageURI(root="test", type="unregistered", id="123", version=1)
         with pytest.raises(
             RuntimeError, match="No handler registered for type: unregistered"
@@ -308,15 +289,15 @@ class TestGetPage:
 class TestRetrieverProperty:
     """Test retriever property functionality."""
 
-    def test_retriever_setter_getter(
-        self, context: ServerContext, mock_retriever: MockRetrieverAgent
+    @pytest.mark.asyncio
+    async def test_retriever_setter_getter(
+        self, context, mock_retriever: MockRetrieverAgent
     ) -> None:
-        """Test setting and getting retriever."""
         context.retriever = mock_retriever
         assert context.retriever is mock_retriever
 
-    def test_retriever_set_twice_error(self, context: ServerContext) -> None:
-        """Test error when setting retriever twice."""
+    @pytest.mark.asyncio
+    async def test_retriever_set_twice_error(self, context) -> None:
         mock1 = MockRetrieverAgent()
         mock2 = MockRetrieverAgent()
 
@@ -330,7 +311,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_context_retriever(
-        self, context: ServerContext, sample_page_references: List[PageReference]
+        self, context, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using context's retriever."""
         context.route("document")(document_page_handler)
@@ -351,7 +332,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_parameter_retriever(
-        self, context: ServerContext, sample_page_references: List[PageReference]
+        self, context, sample_page_references: List[PageReference]
     ) -> None:
         """Test search using retriever parameter."""
         context.route("document")(document_page_handler)
@@ -365,14 +346,13 @@ class TestSearch:
         assert mock_retriever.search_calls == ["test query"]
 
     @pytest.mark.asyncio
-    async def test_search_no_retriever_error(self, context: ServerContext) -> None:
-        """Test error when no retriever is available."""
+    async def test_search_no_retriever_error(self, context) -> None:
         with pytest.raises(RuntimeError, match="No RetrieverAgent available"):
             await context.search("test query")
 
     @pytest.mark.asyncio
     async def test_search_without_resolve_references(
-        self, context: ServerContext, sample_page_references: List[PageReference]
+        self, context, sample_page_references: List[PageReference]
     ) -> None:
         """Test search without resolving references."""
         mock_retriever = MockRetrieverAgent(sample_page_references)
@@ -388,7 +368,7 @@ class TestSearch:
 
     @pytest.mark.asyncio
     async def test_search_parameter_retriever_overrides_context(
-        self, context: ServerContext, sample_page_references: List[PageReference]
+        self, context, sample_page_references: List[PageReference]
     ) -> None:
         """Test that parameter retriever overrides context retriever."""
         context.route("document")(document_page_handler)
@@ -412,7 +392,7 @@ class TestReferenceResolution:
 
     @pytest.mark.asyncio
     async def test_resolve_references(
-        self, context: ServerContext, sample_page_references: List[PageReference]
+        self, context, sample_page_references: List[PageReference]
     ) -> None:
         """Test resolving page references."""
         context.route("document")(document_page_handler)
@@ -429,9 +409,7 @@ class TestIntegration:
     """Test integration scenarios."""
 
     @pytest.mark.asyncio
-    async def test_full_workflow_with_decorator(self, context: ServerContext) -> None:
-        """Test full workflow using decorator registration."""
-
+    async def test_full_workflow_with_decorator(self, context) -> None:
         @context.route("test")
         async def test_handler(page_uri: PageURI) -> DocumentPage:
             return DocumentPage(
@@ -446,8 +424,7 @@ class TestIntegration:
         assert page.title == "Workflow Page"
 
     @pytest.mark.asyncio
-    async def test_mixed_page_types_workflow(self, context: ServerContext) -> None:
-        """Test workflow with multiple page types."""
+    async def test_mixed_page_types_workflow(self, context) -> None:
         context.route("document")(document_page_handler)
         context.route("alternate")(alternate_page_handler)
 
@@ -479,9 +456,7 @@ class TestValidatorIntegration:
         revision: str
 
     @pytest.mark.asyncio
-    async def test_get_page_validates_with_registered_validator(
-        self, context: ServerContext
-    ) -> None:
+    async def test_get_page_validates_with_registered_validator(self, context) -> None:
         """Test that getting a page properly uses the registered validator."""
 
         @context.route("gdoc")
@@ -523,9 +498,8 @@ class TestStrictHandlerValidation:
         def __init__(self, **data: Any) -> None:
             super().__init__(**data)
 
-    def test_decorator_with_proper_annotation_succeeds(
-        self, context: ServerContext
-    ) -> None:
+    @pytest.mark.asyncio
+    async def test_decorator_with_proper_annotation_succeeds(self, context) -> None:
         """Test that the decorator also enforces proper annotations."""
 
         @context.route("valid_decorator")
@@ -536,11 +510,9 @@ class TestStrictHandlerValidation:
 
         assert "valid_decorator" in context._router._handlers
 
-    def test_decorator_with_invalid_annotation_fails(
-        self, context: ServerContext
-    ) -> None:
+    @pytest.mark.asyncio
+    async def test_decorator_with_invalid_annotation_fails(self, context) -> None:
         """Test that the decorator rejects invalid annotations."""
-
         with pytest.raises(RuntimeError, match="has a string return type annotation"):
 
             @context.route("invalid_decorator")
@@ -551,11 +523,11 @@ class TestStrictHandlerValidation:
                     uri=page_uri, title="Invalid", content="Content"
                 )
 
-    def test_validation_happens_at_registration_not_runtime(
-        self, context: ServerContext
+    @pytest.mark.asyncio
+    async def test_validation_happens_at_registration_not_runtime(
+        self, context
     ) -> None:
         """Test that validation happens at registration time, not when get_page is called."""
-
         # This should fail immediately at registration
         with pytest.raises(RuntimeError, match="must have a return type annotation"):
 
@@ -584,8 +556,7 @@ class TestEnhancedCaching:
             self._metadata.token_count = len(self.content) // 4
 
     @pytest.mark.asyncio
-    async def test_caching_enabled_by_default(self, context: ServerContext) -> None:
-        """Test that caching is enabled by default and works correctly."""
+    async def test_caching_enabled_by_default(self, context) -> None:
         call_count = 0
 
         async def handle_cached(page_uri: PageURI) -> TestEnhancedCaching.CacheTestPage:
@@ -607,10 +578,7 @@ class TestEnhancedCaching:
         assert page2.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_cache_disabled_calls_handler_every_time(
-        self, context: ServerContext
-    ) -> None:
-        """Test that disabling cache calls handler every time."""
+    async def test_cache_disabled_calls_handler_every_time(self, context) -> None:
         call_count = 0
 
         async def handle_uncached(
@@ -633,9 +601,7 @@ class TestEnhancedCaching:
         assert page2.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_cache_stores_after_handler_execution(
-        self, context: ServerContext
-    ) -> None:
+    async def test_cache_stores_after_handler_execution(self, context) -> None:
         """Test that pages are stored in cache after handler execution."""
 
         @context.route("storage_test", cache=True)
@@ -667,9 +633,8 @@ class TestHandlerSignatureValidation:
 
         data: str
 
-    def test_valid_handler_signature_accepted(self, context: ServerContext) -> None:
-        """Test that valid handler signatures are accepted."""
-
+    @pytest.mark.asyncio
+    async def test_valid_handler_signature_accepted(self, context) -> None:
         @context.route("valid_test")
         def valid_handler(
             page_uri: PageURI,
@@ -681,9 +646,8 @@ class TestHandlerSignatureValidation:
         # Should not raise any exception
         assert "valid_test" in context._router._handlers
 
-    def test_missing_return_annotation_rejected(self, context: ServerContext) -> None:
-        """Test that handlers without return annotations are rejected."""
-
+    @pytest.mark.asyncio
+    async def test_missing_return_annotation_rejected(self, context) -> None:
         def invalid_handler(page_uri: PageURI):  # No return annotation
             return TestHandlerSignatureValidation.ValidTestPage(
                 uri=page_uri, data="test"
@@ -692,9 +656,8 @@ class TestHandlerSignatureValidation:
         with pytest.raises(RuntimeError, match="must have a return type annotation"):
             context.route("invalid_test")(invalid_handler)
 
-    def test_string_return_annotation_rejected(self, context: ServerContext) -> None:
-        """Test that string forward reference annotations are rejected."""
-
+    @pytest.mark.asyncio
+    async def test_string_return_annotation_rejected(self, context) -> None:
         def invalid_handler(
             page_uri: PageURI,
         ) -> "TestHandlerSignatureValidation.ValidTestPage":
@@ -705,9 +668,8 @@ class TestHandlerSignatureValidation:
         with pytest.raises(RuntimeError, match="has a string return type annotation"):
             context.route("invalid_test")(invalid_handler)
 
-    def test_non_class_return_annotation_rejected(self, context: ServerContext) -> None:
-        """Test that non-class return annotations are rejected."""
-
+    @pytest.mark.asyncio
+    async def test_non_class_return_annotation_rejected(self, context) -> None:
         def invalid_handler(page_uri: PageURI) -> str:  # str is not a Page subclass
             return "not a page"
 
@@ -716,9 +678,8 @@ class TestHandlerSignatureValidation:
         ):
             context.route("invalid_test")(invalid_handler)
 
-    def test_non_page_class_return_annotation_rejected(
-        self, context: ServerContext
-    ) -> None:
+    @pytest.mark.asyncio
+    async def test_non_page_class_return_annotation_rejected(self, context) -> None:
         """Test that non-Page class return annotations are rejected."""
 
         class NotAPage:
@@ -732,9 +693,8 @@ class TestHandlerSignatureValidation:
         ):
             context.route("invalid_test")(invalid_handler)
 
-    def test_handler_validation_happens_at_registration(
-        self, context: ServerContext
-    ) -> None:
+    @pytest.mark.asyncio
+    async def test_handler_validation_happens_at_registration(self, context) -> None:
         """Test that handler validation happens at registration time, not usage time."""
 
         def invalid_handler(page_uri: PageURI) -> str:
@@ -760,8 +720,7 @@ class TestCachingIntegration:
         timestamp: str
 
     @pytest.mark.asyncio
-    async def test_caching_with_invalidator(self, context: ServerContext) -> None:
-        """Test that caching works correctly with invalidators."""
+    async def test_caching_with_invalidator(self, context) -> None:
         call_count = 0
 
         @context.route("integration_test", cache=True)
