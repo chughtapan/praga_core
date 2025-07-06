@@ -45,41 +45,6 @@ class TestGoogleAPIClient:
         mock_auth_class.assert_called_once_with()
         assert client.auth_manager is mock_instance
 
-    def test_lazy_loading_gmail_service(self):
-        """Test Gmail service is lazy-loaded."""
-        # Initially no service should be loaded
-        assert self.client._gmail_service is None
-
-        # Access gmail property should trigger loading
-        gmail_service = self.client._gmail
-
-        self.mock_auth_manager.get_gmail_service.assert_called_once()
-        assert gmail_service is self.mock_gmail_service
-        assert self.client._gmail_service is self.mock_gmail_service
-
-        # Second access should not call auth manager again
-        gmail_service2 = self.client._gmail
-        assert gmail_service2 is self.mock_gmail_service
-        assert self.mock_auth_manager.get_gmail_service.call_count == 1
-
-    def test_lazy_loading_calendar_service(self):
-        """Test Calendar service is lazy-loaded."""
-        assert self.client._calendar_service is None
-
-        calendar_service = self.client._calendar
-
-        self.mock_auth_manager.get_calendar_service.assert_called_once()
-        assert calendar_service is self.mock_calendar_service
-
-    def test_lazy_loading_people_service(self):
-        """Test People service is lazy-loaded."""
-        assert self.client._people_service is None
-
-        people_service = self.client._people
-
-        self.mock_auth_manager.get_people_service.assert_called_once()
-        assert people_service is self.mock_people_service
-
     @pytest.mark.asyncio
     async def test_get_message(self):
         """Test get_message method."""

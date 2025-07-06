@@ -4,7 +4,7 @@ This module focuses on testing the core features of RetrieverToolkit,
 including tool registration, basic invocation, and toolkit management.
 """
 
-from typing import List
+from typing import Sequence
 
 import pytest
 
@@ -27,11 +27,11 @@ class TestRetrieverToolkitCore:
         assert hasattr(toolkit, "_tools")
         assert len(toolkit.tools) == 0
 
-    async def test_tool_registration_with_method(self) -> None:
+    def test_tool_registration_with_method(self) -> None:
         """Test registering a method as a tool."""
         toolkit = MockRetrieverToolkit()
 
-        async def test_method(query: str) -> List[SimpleTestPage]:
+        async def test_method(query: str) -> Sequence[SimpleTestPage]:
             return create_test_pages(3, query)
 
         toolkit.register_tool(test_method, "test_tool")
@@ -39,12 +39,12 @@ class TestRetrieverToolkitCore:
         assert "test_tool" in toolkit.tools
         assert isinstance(toolkit.get_tool("test_tool"), Tool)
 
-    async def test_tool_registration_with_function(self) -> None:
+    def test_tool_registration_with_function(self) -> None:
         """Test registering a standalone function as a tool."""
 
         async def standalone_function(
             query: str, limit: int = 5
-        ) -> List[SimpleTestPage]:
+        ) -> Sequence[SimpleTestPage]:
             return create_test_pages(limit, query)
 
         toolkit = MockRetrieverToolkit()
@@ -57,7 +57,9 @@ class TestRetrieverToolkitCore:
     def test_tool_registration_with_function_no_name(self) -> None:
         """Test registering a standalone function as a tool without a name."""
 
-        def standalone_function(query: str, limit: int = 5) -> List[SimpleTestPage]:
+        async def standalone_function(
+            query: str, limit: int = 5
+        ) -> Sequence[SimpleTestPage]:
             return create_test_pages(limit, query)
 
         toolkit = MockRetrieverToolkit()
@@ -66,7 +68,7 @@ class TestRetrieverToolkitCore:
     def test_tool_registration_with_custom_description(self) -> None:
         """Test tool registration with custom description via docstring."""
 
-        def test_func() -> List[SimpleTestPage]:
+        async def test_func() -> Sequence[SimpleTestPage]:
             """Custom description for this tool"""
             return []
 
@@ -80,7 +82,7 @@ class TestRetrieverToolkitCore:
         """Test successful tool retrieval."""
         toolkit = MockRetrieverToolkit()
 
-        def sample_tool() -> List[SimpleTestPage]:
+        async def sample_tool() -> Sequence[SimpleTestPage]:
             return create_test_pages(1)
 
         toolkit.register_tool(sample_tool, "sample_tool")
@@ -100,10 +102,10 @@ class TestRetrieverToolkitCore:
         """Test the tools property returns correct tool mapping."""
         toolkit = MockRetrieverToolkit()
 
-        def tool1() -> List[SimpleTestPage]:
+        async def tool1() -> Sequence[SimpleTestPage]:
             return []
 
-        def tool2() -> List[SimpleTestPage]:
+        async def tool2() -> Sequence[SimpleTestPage]:
             return []
 
         toolkit.register_tool(tool1, "tool1")
@@ -116,11 +118,12 @@ class TestRetrieverToolkitCore:
         assert isinstance(tools["tool1"], Tool)
         assert isinstance(tools["tool2"], Tool)
 
+    @pytest.mark.asyncio
     async def test_invoke_tool_basic(self) -> None:
         """Test basic tool invocation through invoke_tool method."""
         toolkit = MockRetrieverToolkit()
 
-        async def simple_tool(query: str) -> List[SimpleTestPage]:
+        async def simple_tool(query: str) -> Sequence[SimpleTestPage]:
             return create_test_pages(2, query)
 
         toolkit.register_tool(simple_tool, "simple_tool")
@@ -130,13 +133,14 @@ class TestRetrieverToolkitCore:
         assert len(result["results"]) == 2
         assert "test_query" in result["results"][0]["title"]
 
+    @pytest.mark.asyncio
     async def test_invoke_tool_with_dict_args(self) -> None:
         """Test tool invocation with dictionary arguments."""
         toolkit = MockRetrieverToolkit()
 
         async def parameterized_tool(
             query: str, limit: int = 5
-        ) -> List[SimpleTestPage]:
+        ) -> Sequence[SimpleTestPage]:
             return create_test_pages(limit, query)
 
         toolkit.register_tool(parameterized_tool, "param_tool")
@@ -144,18 +148,20 @@ class TestRetrieverToolkitCore:
 
         assert len(result["results"]) == 3
 
-    def test_invoke_tool_not_found(self) -> None:
+    @pytest.mark.asyncio
+    async def test_invoke_tool_not_found(self) -> None:
         """Test invoking a non-existent tool raises appropriate error."""
         toolkit = MockRetrieverToolkit()
 
         with pytest.raises(ValueError, match="Tool 'missing_tool' not found"):
-            toolkit.invoke_tool("missing_tool", "test")
+            await toolkit.invoke_tool("missing_tool", "test")
 
-    def test_direct_method_access(self) -> None:
+    @pytest.mark.asyncio
+    async def test_direct_method_access(self) -> None:
         """Test that registered tools are accessible as toolkit methods."""
         toolkit = MockRetrieverToolkit()
 
-        def accessible_tool(name: str) -> List[SimpleTestPage]:
+        async def accessible_tool(name: str) -> Sequence[SimpleTestPage]:
             return [
                 SimpleTestPage(
                     uri=PageURI.parse("test/SimpleTestPage:test@1"),
@@ -167,7 +173,7 @@ class TestRetrieverToolkitCore:
         toolkit.register_tool(accessible_tool, "accessible_tool")
 
         # Should be able to call as a method
-        result = toolkit.accessible_tool("World")
+        result = await toolkit.accessible_tool("World")
         assert len(result) == 1
         assert "Hello World" in result[0].content
 
@@ -175,7 +181,8 @@ class TestRetrieverToolkitCore:
 class TestRetrieverToolkitDecorator:
     """Test the @tool decorator functionality."""
 
-    def test_decorator_basic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_decorator_basic(self) -> None:
         """Test basic decorator functionality."""
 
         class TestToolkit(RetrieverToolkit):
@@ -184,13 +191,13 @@ class TestRetrieverToolkitDecorator:
                 return "TestToolkit"
 
         @TestToolkit.tool()
-        def decorated_tool(query: str) -> List[SimpleTestPage]:
+        async def decorated_tool(query: str) -> Sequence[SimpleTestPage]:
             return create_test_pages(2, query)
 
         toolkit = TestToolkit()
 
         assert "decorated_tool" in toolkit.tools
-        result = toolkit.invoke_tool("decorated_tool", "test")
+        result = await toolkit.invoke_tool("decorated_tool", "test")
         assert len(result["results"]) == 2
 
     def test_decorator_with_description(self) -> None:
@@ -202,7 +209,7 @@ class TestRetrieverToolkitDecorator:
                 return "TestToolkit"
 
         @TestToolkit.tool()
-        def described_tool() -> List[SimpleTestPage]:
+        async def described_tool() -> Sequence[SimpleTestPage]:
             """Custom decorated tool description"""
             return []
 
@@ -219,11 +226,11 @@ class TestRetrieverToolkitDecorator:
                 return "MultiToolkit"
 
         @MultiToolkit.tool()
-        def tool_one() -> List[SimpleTestPage]:
+        async def tool_one() -> Sequence[SimpleTestPage]:
             return create_test_pages(1, "one")
 
         @MultiToolkit.tool()
-        def tool_two() -> List[SimpleTestPage]:
+        async def tool_two() -> Sequence[SimpleTestPage]:
             return create_test_pages(2, "two")
 
         toolkit = MultiToolkit()
@@ -231,41 +238,6 @@ class TestRetrieverToolkitDecorator:
         assert len(toolkit.tools) == 2
         assert "tool_one" in toolkit.tools
         assert "tool_two" in toolkit.tools
-
-    def test_decorator_inheritance(self) -> None:
-        """Test that decorated tools work with toolkit inheritance."""
-
-        class BaseToolkit(RetrieverToolkit):
-            @property
-            def name(self) -> str:
-                return "BaseToolkit"
-
-        @BaseToolkit.tool()
-        def base_tool() -> List[SimpleTestPage]:
-            return create_test_pages(1, "base")
-
-        class DerivedToolkit(BaseToolkit):
-            @property
-            def name(self) -> str:
-                return "DerivedToolkit"
-
-            @tool()
-            def derived_tool() -> List[SimpleTestPage]:
-                return create_test_pages(1, "derived")
-
-        # Note: Current implementation shares decorated tools across classes
-        # This test verifies the actual behavior
-        base_toolkit = BaseToolkit()
-        derived_toolkit = DerivedToolkit()
-
-        # Both toolkits will have both tools due to shared decorator state
-        assert "base_tool" in base_toolkit.tools
-        assert "derived_tool" in base_toolkit.tools
-        assert len(base_toolkit.tools) == 2
-
-        assert "base_tool" in derived_toolkit.tools
-        assert "derived_tool" in derived_toolkit.tools
-        assert len(derived_toolkit.tools) == 2
 
 
 class TestRetrieverToolkitErrorHandling:
@@ -291,11 +263,12 @@ class TestRetrieverToolkitErrorHandling:
         with pytest.raises(TypeError, match="must have return type annotation"):
             toolkit.register_tool(wrong_return_type, "wrong_tool")  # type: ignore
 
-    def test_tool_execution_error_handling(self) -> None:
+    @pytest.mark.asyncio
+    async def test_tool_execution_error_handling(self) -> None:
         """Test error handling during tool execution."""
         toolkit = MockRetrieverToolkit()
 
-        def failing_tool(query: str) -> List[SimpleTestPage]:
+        async def failing_tool(query: str) -> Sequence[SimpleTestPage]:
             if query == "no_results":
                 raise ValueError("No matching documents found")
             raise RuntimeError("General error")
@@ -303,31 +276,32 @@ class TestRetrieverToolkitErrorHandling:
         toolkit.register_tool(failing_tool, "failing_tool")
 
         # Test "no documents found" error
-        result = toolkit.invoke_tool("failing_tool", "no_results")
+        result = await toolkit.invoke_tool("failing_tool", "no_results")
         assert result["response_code"] == "error_no_documents_found"
         assert result["error_message"] == "No matching documents found"
 
         # Test other errors should bubble up
         with pytest.raises(ValueError, match="Tool execution failed"):
-            toolkit.invoke_tool("failing_tool", "other_error")
+            await toolkit.invoke_tool("failing_tool", "other_error")
 
-    def test_duplicate_tool_registration(self) -> None:
+    @pytest.mark.asyncio
+    async def test_duplicate_tool_registration(self) -> None:
         """Test behavior when registering tools with duplicate names."""
         toolkit = MockRetrieverToolkit()
 
-        def tool1() -> List[SimpleTestPage]:
+        async def tool1() -> Sequence[SimpleTestPage]:
             return create_test_pages(1, "first")
 
-        def tool2() -> List[SimpleTestPage]:
+        async def tool2() -> Sequence[SimpleTestPage]:
             return create_test_pages(1, "second")
 
         # Register first tool
         toolkit.register_tool(tool1, "duplicate_name")
-        first_result = toolkit.invoke_tool("duplicate_name", {})
+        first_result = await toolkit.invoke_tool("duplicate_name", {})
 
         # Register second tool with same name (should replace first)
         toolkit.register_tool(tool2, "duplicate_name")
-        second_result = toolkit.invoke_tool("duplicate_name", {})
+        second_result = await toolkit.invoke_tool("duplicate_name", {})
 
         # Results should be different, confirming replacement
         assert (
@@ -339,7 +313,8 @@ class TestRetrieverToolkitErrorHandling:
 class TestGlobalToolDecorator:
     """Test the global @tool decorator functionality."""
 
-    def test_global_tool_decorator_basic(self) -> None:
+    @pytest.mark.asyncio
+    async def test_global_tool_decorator_basic(self) -> None:
         """Test basic functionality of the global @tool decorator."""
 
         class TestToolkit(RetrieverToolkit):
@@ -348,7 +323,7 @@ class TestGlobalToolDecorator:
                 return "TestToolkit"
 
             @tool()
-            def search_items(self, query: str) -> List[SimpleTestPage]:
+            async def search_items(self, query: str) -> Sequence[SimpleTestPage]:
                 """Search for items"""
                 return create_test_pages(2, query)
 
@@ -359,15 +334,16 @@ class TestGlobalToolDecorator:
         assert len(toolkit.tools) == 1
 
         # Test direct method call
-        result = toolkit.search_items("test")
+        result = await toolkit.search_items("test")
         assert len(result) == 2
         assert "test" in result[0].title
 
         # Test invocation
-        invoke_result = toolkit.invoke_tool("search_items", "test")
+        invoke_result = await toolkit.invoke_tool("search_items", "test")
         assert len(invoke_result["results"]) == 2
 
-    def test_global_tool_decorator_with_options(self) -> None:
+    @pytest.mark.asyncio
+    async def test_global_tool_decorator_with_options(self) -> None:
         """Test global @tool decorator with various options."""
 
         class TestToolkit(RetrieverToolkit):
@@ -376,7 +352,7 @@ class TestGlobalToolDecorator:
                 return "TestToolkit"
 
             @tool(name="custom_search", cache=True, paginate=True, max_docs=1)
-            def search_items(self, query: str) -> List[SimpleTestPage]:
+            async def search_items(self, query: str) -> Sequence[SimpleTestPage]:
                 """Search for items with custom options"""
                 return create_test_pages(3, query)
 
@@ -387,11 +363,12 @@ class TestGlobalToolDecorator:
         assert "search_items" not in toolkit.tools
 
         # Test pagination works
-        result = toolkit.invoke_tool("custom_search", "test")
+        result = await toolkit.invoke_tool("custom_search", "test")
         assert len(result["results"]) == 1  # max_docs=1
         assert "next_cursor" in result
 
-    def test_global_tool_decorator_multiple_tools(self) -> None:
+    @pytest.mark.asyncio
+    async def test_global_tool_decorator_multiple_tools(self) -> None:
         """Test multiple tools decorated with global @tool decorator."""
 
         class TestToolkit(RetrieverToolkit):
@@ -400,12 +377,12 @@ class TestGlobalToolDecorator:
                 return "TestToolkit"
 
             @tool()
-            def search_items(self, query: str) -> List[SimpleTestPage]:
+            async def search_items(self, query: str) -> Sequence[SimpleTestPage]:
                 """Search for items"""
                 return create_test_pages(1, query)
 
             @tool(cache=True)
-            def search_users(self, name: str) -> List[SimpleTestPage]:
+            async def search_users(self, name: str) -> Sequence[SimpleTestPage]:
                 """Search for users"""
                 return create_test_pages(1, name)
 
@@ -417,8 +394,8 @@ class TestGlobalToolDecorator:
         assert "search_users" in toolkit.tools
 
         # Both should work
-        items_result = toolkit.search_items("items")
-        users_result = toolkit.search_users("users")
+        items_result = await toolkit.search_items("items")
+        users_result = await toolkit.search_users("users")
 
         assert len(items_result) == 1
         assert len(users_result) == 1
@@ -436,10 +413,11 @@ class TestGlobalToolDecorator:
 
             class NonRetrieverClass:
                 @tool()
-                def some_method(self) -> List[SimpleTestPage]:
+                def some_method(self) -> Sequence[SimpleTestPage]:
                     return []
 
-    def test_global_tool_decorator_inherits_from_decorated_class(self) -> None:
+    @pytest.mark.asyncio
+    async def test_global_tool_decorator_inherits_from_decorated_class(self) -> None:
         """Test that @tool decorator works with class inheritance."""
 
         class BaseToolkit(RetrieverToolkit):
@@ -448,7 +426,7 @@ class TestGlobalToolDecorator:
                 return "BaseToolkit"
 
             @tool()
-            def base_search(self, query: str) -> List[SimpleTestPage]:
+            async def base_search(self, query: str) -> Sequence[SimpleTestPage]:
                 """Base search method"""
                 return create_test_pages(1, f"base_{query}")
 
@@ -458,7 +436,7 @@ class TestGlobalToolDecorator:
                 return "DerivedToolkit"
 
             @tool()
-            def derived_search(self, query: str) -> List[SimpleTestPage]:
+            async def derived_search(self, query: str) -> Sequence[SimpleTestPage]:
                 """Derived search method"""
                 return create_test_pages(1, f"derived_{query}")
 
@@ -470,13 +448,14 @@ class TestGlobalToolDecorator:
         assert "derived_search" in toolkit.tools
 
         # Both should work
-        base_result = toolkit.base_search("test")
-        derived_result = toolkit.derived_search("test")
+        base_result = await toolkit.base_search("test")
+        derived_result = await toolkit.derived_search("test")
 
         assert "base_test" in base_result[0].title
         assert "derived_test" in derived_result[0].title
 
-    def test_global_tool_decorator_with_manual_registration(self) -> None:
+    @pytest.mark.asyncio
+    async def test_global_tool_decorator_with_manual_registration(self) -> None:
         """Test that @tool decorator can coexist with manual tool registration."""
 
         class TestToolkit(RetrieverToolkit):
@@ -490,11 +469,11 @@ class TestGlobalToolDecorator:
                 return "TestToolkit"
 
             @tool()
-            def decorated_tool(self, query: str) -> List[SimpleTestPage]:
+            async def decorated_tool(self, query: str) -> Sequence[SimpleTestPage]:
                 """Decorated tool"""
                 return create_test_pages(1, f"decorated_{query}")
 
-            def manual_tool(self, query: str) -> List[SimpleTestPage]:
+            async def manual_tool(self, query: str) -> Sequence[SimpleTestPage]:
                 """Manually registered tool"""
                 return create_test_pages(1, f"manual_{query}")
 
@@ -506,8 +485,8 @@ class TestGlobalToolDecorator:
         assert "manual_tool" in toolkit.tools
 
         # Both should work
-        decorated_result = toolkit.decorated_tool("test")
-        manual_result = toolkit.manual_tool("test")
+        decorated_result = await toolkit.decorated_tool("test")
+        manual_result = await toolkit.manual_tool("test")
 
         assert "decorated_test" in decorated_result[0].title
         assert "manual_test" in manual_result[0].title

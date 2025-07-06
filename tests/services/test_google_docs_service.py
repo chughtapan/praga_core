@@ -20,6 +20,7 @@ class TestGoogleDocsService:
         self.mock_context.root = "test-root"
         self.mock_context.services = {}  # Mock services dictionary
         self.mock_page_cache = Mock()
+        self.mock_page_cache.get = AsyncMock()
         self.mock_context.page_cache = self.mock_page_cache
 
         # Mock the register_service method to actually register
@@ -78,8 +79,8 @@ class TestGoogleDocsService:
     @pytest.mark.asyncio
     async def test_handle_chunk_request_not_found(self):
         """Test handle_chunk_request raises error when chunk not found."""
-        self.mock_page_cache.get.return_value = None
-        with patch.object(self.service, "_ingest_document"):
+        self.mock_page_cache.get = AsyncMock(return_value=None)
+        with patch.object(self.service, "_ingest_document", new=AsyncMock()):
             with pytest.raises(
                 ValueError, match="Chunk doc123\\(0\\) not found after ingestion"
             ):
@@ -324,7 +325,7 @@ class TestGoogleDocsService:
         # Mock the new fluent interface: find().where().all()
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        mock_query.all.return_value = [mock_chunk1, mock_chunk2, mock_chunk3]
+        mock_query.all = AsyncMock(return_value=[mock_chunk1, mock_chunk2, mock_chunk3])
         self.mock_page_cache.find.return_value = mock_query
 
         # Mock handle_header_request to ensure document is ingested
@@ -347,7 +348,7 @@ class TestGoogleDocsService:
         # Mock the new fluent interface: find().where().all()
         mock_query = Mock()
         mock_query.where.return_value = mock_query
-        mock_query.all.return_value = []
+        mock_query.all = AsyncMock(return_value=[])
         self.mock_page_cache.find.return_value = mock_query
 
         with patch.object(self.service, "handle_header_request", new=AsyncMock()):
@@ -677,14 +678,15 @@ class TestGoogleDocsToolkit:
     async def test_find_chunks_in_document(self):
         """Test find_chunks_in_document tool."""
         mock_chunks = [Mock(spec=GDocChunk), Mock(spec=GDocChunk)]
+        from unittest.mock import AsyncMock
 
         with patch.object(
-            self.service, "search_chunks_in_document", return_value=mock_chunks
+            self.service,
+            "search_chunks_in_document",
+            new=AsyncMock(return_value=mock_chunks),
         ) as mock_search:
             result = await self.toolkit.find_chunks_in_document("uri", "query")
-
             mock_search.assert_called_once_with("uri", "query")
-
         assert result.results == mock_chunks
         assert result.next_cursor is None
 

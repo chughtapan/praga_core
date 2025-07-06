@@ -41,7 +41,7 @@ class MockRetrieverAgent(RetrieverAgentBase):
         self.search_results = search_results or []
         self.search_calls: List[str] = []
 
-    def search(self, instruction: str) -> List[PageReference]:
+    async def search(self, instruction: str) -> List[PageReference]:
         """Mock search implementation."""
         self.search_calls.append(instruction)
         return self.search_results

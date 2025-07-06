@@ -356,53 +356,36 @@ def _create_method_stub(fn: ToolFunction) -> ToolFunction:
 
 def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
     """
-    Check if a function returns Awaitable[Sequence[Page]] or Awaitable[PaginatedResponse[Page]].
+    Check if a function returns Awaitable[Sequence[Page]] or its subclass.
+    Accepts any type that implements collections.abc.Sequence.
     """
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
+        # print(return_annotation)
 
         if return_annotation is None:
             return False
 
-        # Get the outer type (should be Awaitable)
+        # Determine the actual return type (unwrap Awaitable if present)
         origin_type = get_origin(return_annotation)
-        if origin_type is not Awaitable:
-            return False
+        if origin_type is Awaitable:
+            # e.g., Awaitable[Sequence[Page]]
+            inner_type = get_args(return_annotation)[0]
+        else:
+            # e.g., Sequence[Page]
+            inner_type = return_annotation
 
-        # Get the inner type (should be Sequence[Page] or PaginatedResponse[Page])
-        inner_type = get_args(return_annotation)[0]
-        inner_origin = get_origin(inner_type)
+        inner_origin = get_origin(inner_type) or inner_type
 
-        # Handle non-generic PaginatedResponse (legacy)
-        if inner_type is PaginatedResponse:
-            return True
-
-        # Handle generic PaginatedResponse[T] where T is bound to Page
-        if inner_origin is PaginatedResponse:
+        # Accept any type that implements collections.abc.Sequence
+        if isinstance(inner_origin, type) and issubclass(inner_origin, ABCSequence):
             type_args = get_args(inner_type)
             if len(type_args) == 1:
                 Page_type = type_args[0]
                 # Check if it's Page or a subclass of Page
                 if Page_type is Page:
                     return True
-                # Check if it's a subclass of Page
-                if isinstance(Page_type, type) and issubclass(Page_type, Page):
-                    return True
-            return False
-
-        # Handle both typing.Sequence and collections.abc.Sequence
-        # Import List here to ensure we have the right reference
-        from typing import List as TypingList
-
-        if inner_origin in (Sequence, ABCSequence, list, TypingList):
-            type_args = get_args(inner_type)
-            if len(type_args) == 1:
-                Page_type = type_args[0]
-                # Check if it's Page or a subclass of Page
-                if Page_type is Page:
-                    return True
-                # Check if it's a subclass of Page
                 if isinstance(Page_type, type) and issubclass(Page_type, Page):
                     return True
 
@@ -412,26 +395,22 @@ def _is_page_sequence_type(tool_function: ToolFunction) -> bool:
 
 
 def _returns_paginated_response(tool_function: ToolFunction) -> bool:
-    """Check if a function returns Awaitable[PaginatedResponse] (generic or non-generic)."""
+    """Check if a function returns Awaitable[PaginatedResponse]."""
     try:
         type_hints = get_type_hints(tool_function)
         return_annotation = type_hints.get("return", None)
-
         if return_annotation is None:
             return False
 
         # Get the outer type (should be Awaitable)
-        origin_type = get_origin(return_annotation)
-        if origin_type is not Awaitable:
-            return False
+        origin = get_origin(return_annotation)
+        if origin is Awaitable:
+            # Unwrap Awaitable
+            inner_type = get_args(return_annotation)[0]
+        else:
+            inner_type = return_annotation
 
-        # Get the inner type
-        inner_type = get_args(return_annotation)[0]
         inner_origin = get_origin(inner_type)
-
-        # Handle non-generic PaginatedResponse
-        if inner_type is PaginatedResponse:
-            return True
 
         # Handle generic PaginatedResponse[T]
         if inner_origin is PaginatedResponse:
