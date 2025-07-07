@@ -7,8 +7,8 @@ import pytest
 from fastmcp import Context
 
 from praga_core import ServerContext
-from praga_core.context import Page, PageURI
 from praga_core.integrations.mcp import create_mcp_server
+from praga_core.types import Page, PageURI
 
 
 class MCPTestPage(Page):

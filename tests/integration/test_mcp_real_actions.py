@@ -6,20 +6,20 @@ from unittest.mock import AsyncMock
 import pytest
 
 from praga_core import ServerContext
-from praga_core.context import Page, PageURI
 from praga_core.integrations.mcp import create_mcp_server
+from praga_core.types import Page, PageURI
 
 
-class TestEmailPage(Page):
-    """Test email page for MCP integration."""
+class SampleEmailPage(Page):
+    """Sample email page for MCP integration."""
 
     subject: str
     from_addr: str
     content: str
 
 
-class TestPersonPage(Page):
-    """Test person page for MCP integration."""
+class SamplePersonPage(Page):
+    """Sample person page for MCP integration."""
 
     name: str
     email: str
@@ -36,18 +36,18 @@ class TestMCPRealActions:
         )
 
         # Register test page handlers
-        @context.route("TestEmailPage")
-        async def get_test_email(page_uri: PageURI) -> TestEmailPage:
-            return TestEmailPage(
+        @context.route("SampleEmailPage")
+        async def get_test_email(page_uri: PageURI) -> SampleEmailPage:
+            return SampleEmailPage(
                 uri=page_uri,
                 subject=f"Email {page_uri.id}",
                 from_addr=f"sender{page_uri.id}@example.com",
                 content=f"Email content {page_uri.id}",
             )
 
-        @context.route("TestPersonPage")
-        async def get_test_person(page_uri: PageURI) -> TestPersonPage:
-            return TestPersonPage(
+        @context.route("SamplePersonPage")
+        async def get_test_person(page_uri: PageURI) -> SamplePersonPage:
+            return SamplePersonPage(
                 uri=page_uri,
                 name=f"Person {page_uri.id}",
                 email=f"person{page_uri.id}@example.com",
@@ -56,9 +56,9 @@ class TestMCPRealActions:
         # Register realistic actions similar to Gmail actions
         @context.action()
         async def send_email(
-            person: TestPersonPage,
-            additional_recipients: list[TestPersonPage] = None,
-            cc_list: list[TestPersonPage] = None,
+            person: SamplePersonPage,
+            additional_recipients: list[SamplePersonPage] = None,
+            cc_list: list[SamplePersonPage] = None,
             subject: str = "",
             message: str = "",
         ) -> bool:
@@ -67,16 +67,16 @@ class TestMCPRealActions:
 
         @context.action()
         async def reply_to_email(
-            email: TestEmailPage,
-            recipients: list[TestPersonPage] = None,
-            cc_list: list[TestPersonPage] = None,
+            email: SampleEmailPage,
+            recipients: list[SamplePersonPage] = None,
+            cc_list: list[SamplePersonPage] = None,
             message: str = "",
         ) -> bool:
             """Reply to an email."""
             return True
 
         @context.action()
-        async def mark_email_read(email: TestEmailPage) -> bool:
+        async def mark_email_read(email: SampleEmailPage) -> bool:
             """Mark an email as read."""
             return True
 
@@ -120,12 +120,12 @@ class TestMCPRealActions:
 
         # Execute the tool with explicit parameters
         result = await send_tool.fn(
-            person="TestPersonPage:recipient1",
+            person="SamplePersonPage:recipient1",
             additional_recipients=[
-                "TestPersonPage:recipient2",
-                "TestPersonPage:recipient3",
+                "SamplePersonPage:recipient2",
+                "SamplePersonPage:recipient3",
             ],
-            cc_list=["TestPersonPage:cc1"],
+            cc_list=["SamplePersonPage:cc1"],
             subject="Test Email Subject",
             message="This is a test email message",
         )
@@ -136,12 +136,12 @@ class TestMCPRealActions:
 
         # Verify the action was called correctly
         expected_action_input = {
-            "person": "TestPersonPage:recipient1",
+            "person": "SamplePersonPage:recipient1",
             "additional_recipients": [
-                "TestPersonPage:recipient2",
-                "TestPersonPage:recipient3",
+                "SamplePersonPage:recipient2",
+                "SamplePersonPage:recipient3",
             ],
-            "cc_list": ["TestPersonPage:cc1"],
+            "cc_list": ["SamplePersonPage:cc1"],
             "subject": "Test Email Subject",
             "message": "This is a test email message",
         }
@@ -162,9 +162,9 @@ class TestMCPRealActions:
 
         # Execute the tool with explicit parameters
         result = await reply_tool.fn(
-            email="TestEmailPage:email123",
-            recipients=["TestPersonPage:person1", "TestPersonPage:person2"],
-            cc_list=["TestPersonPage:cc1"],
+            email="SampleEmailPage:email123",
+            recipients=["SamplePersonPage:person1", "SamplePersonPage:person2"],
+            cc_list=["SamplePersonPage:cc1"],
             message="This is a reply message",
         )
 
@@ -174,9 +174,9 @@ class TestMCPRealActions:
 
         # Verify the action was called correctly
         expected_action_input = {
-            "email": "TestEmailPage:email123",
-            "recipients": ["TestPersonPage:person1", "TestPersonPage:person2"],
-            "cc_list": ["TestPersonPage:cc1"],
+            "email": "SampleEmailPage:email123",
+            "recipients": ["SamplePersonPage:person1", "SamplePersonPage:person2"],
+            "cc_list": ["SamplePersonPage:cc1"],
             "message": "This is a reply message",
         }
         context_with_actions.invoke_action.assert_called_once_with(
@@ -196,7 +196,7 @@ class TestMCPRealActions:
 
         # Execute the tool with explicit parameters
         result = await mark_read_tool.fn(
-            email="TestEmailPage:email456",
+            email="SampleEmailPage:email456",
         )
 
         # Verify the result
@@ -205,7 +205,7 @@ class TestMCPRealActions:
 
         # Verify the action was called correctly
         expected_action_input = {
-            "email": "TestEmailPage:email456",
+            "email": "SampleEmailPage:email456",
         }
         context_with_actions.invoke_action.assert_called_once_with(
             "mark_email_read", expected_action_input
@@ -272,7 +272,7 @@ class TestMCPRealActions:
 
         # Execute the tool with explicit parameters
         result = await send_tool.fn(
-            person="TestPersonPage:invalid_person",
+            person="SamplePersonPage:invalid_person",
             subject="Test Subject",
             message="Test message",
         )
