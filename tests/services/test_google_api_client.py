@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from pragweb.google_api.auth import GoogleAuthManager
+from pragweb.google_api.auth import _SCOPES, GoogleAuthManager
 from pragweb.google_api.client import GoogleAPIClient
 
 
@@ -312,3 +312,99 @@ class TestGoogleAPIClientErrorHandling:
 
         with pytest.raises(Exception, match="Thread API Error"):
             await self.client.get_thread("thread456")
+
+
+class TestGoogleAuthManagerIntegration:
+    """Integration tests for GoogleAuthManager with scope validation."""
+
+    def setup_method(self):
+        """Setup before each test."""
+        # Reset singleton instance
+        GoogleAuthManager._instance = None
+        GoogleAuthManager._initialized = False
+
+    @patch("pragweb.google_api.auth.get_current_config")
+    @patch("pragweb.google_api.auth.get_secrets_manager")
+    @patch("pragweb.google_api.auth.InstalledAppFlow")
+    def test_auth_manager_forces_reauth_on_scope_mismatch(
+        self, mock_flow_class, mock_get_secrets, mock_get_config
+    ):
+        """Test that auth manager forces reauth when scopes don't match."""
+        mock_config = Mock()
+        mock_config.google_credentials_file = "test_creds.json"
+        mock_config.secrets_database_url = "test_url"
+        mock_get_config.return_value = mock_config
+
+        mock_secrets = Mock()
+        # Mock token data with insufficient scopes (only first 2 scopes)
+        mock_token_data = {
+            "access_token": "test_access_token",
+            "refresh_token": "test_refresh_token",
+            "scopes": _SCOPES[:2],  # Insufficient scopes
+            "extra_data": {
+                "client_id": "test_client_id",
+                "client_secret": "test_client_secret",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            },
+        }
+        mock_secrets.get_oauth_token.return_value = mock_token_data
+        mock_get_secrets.return_value = mock_secrets
+
+        # Mock the OAuth flow
+        mock_flow = Mock()
+        mock_new_creds = Mock()
+        mock_new_creds.token = "new_access_token"
+        mock_new_creds.refresh_token = "new_refresh_token"
+        mock_new_creds.scopes = _SCOPES
+        mock_flow.run_local_server.return_value = mock_new_creds
+        mock_flow_class.from_client_secrets_file.return_value = mock_flow
+
+        # Create auth manager - should trigger reauth due to scope mismatch
+        GoogleAuthManager()
+
+        # Verify that new OAuth flow was initiated
+        mock_flow_class.from_client_secrets_file.assert_called_once_with(
+            "test_creds.json", _SCOPES
+        )
+        mock_flow.run_local_server.assert_called_once_with(port=0)
+        mock_secrets.store_oauth_token.assert_called_once()
+
+    @patch("pragweb.google_api.auth.get_current_config")
+    @patch("pragweb.google_api.auth.get_secrets_manager")
+    def test_auth_manager_uses_existing_creds_when_scopes_match(
+        self, mock_get_secrets, mock_get_config
+    ):
+        """Test that auth manager uses existing credentials when scopes match."""
+        mock_config = Mock()
+        mock_config.google_credentials_file = "test_creds.json"
+        mock_config.secrets_database_url = "test_url"
+        mock_get_config.return_value = mock_config
+
+        mock_secrets = Mock()
+        # Mock token data with matching scopes
+        mock_token_data = {
+            "access_token": "test_access_token",
+            "refresh_token": "test_refresh_token",
+            "scopes": _SCOPES,  # All required scopes
+            "extra_data": {
+                "client_id": "test_client_id",
+                "client_secret": "test_client_secret",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            },
+        }
+        mock_secrets.get_oauth_token.return_value = mock_token_data
+        mock_get_secrets.return_value = mock_secrets
+
+        # Mock the credentials to appear valid
+        with patch("pragweb.google_api.auth.Credentials") as mock_creds_class:
+            mock_creds = Mock()
+            mock_creds.valid = True
+            mock_creds_class.return_value = mock_creds
+
+            # Create auth manager - should use existing credentials
+            GoogleAuthManager()
+
+            # Verify credentials were loaded but no new OAuth flow was initiated
+            mock_secrets.get_oauth_token.assert_called_once_with("google")
+            # store_oauth_token should not be called since we're using existing creds
+            mock_secrets.store_oauth_token.assert_not_called()

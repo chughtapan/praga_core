@@ -71,6 +71,57 @@ class GoogleAPIClient:
 
         return messages, next_token
 
+    async def send_message(
+        self,
+        to: List[str],
+        subject: str,
+        body: str,
+        cc: Optional[List[str]] = None,
+        thread_id: Optional[str] = None,
+        references: Optional[str] = None,
+        in_reply_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Send an email message."""
+        import base64
+        from email.message import EmailMessage
+
+        # Create message
+        message = EmailMessage()
+        message["To"] = ", ".join(to)
+        message["Subject"] = subject
+
+        if cc:
+            message["Cc"] = ", ".join(cc)
+
+        # Add threading headers for replies
+        if references:
+            message["References"] = references
+        if in_reply_to:
+            message["In-Reply-To"] = in_reply_to
+
+        message.set_content(body)
+
+        # Encode message
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+        # Prepare request body
+        send_body = {"raw": raw_message}
+        if thread_id:
+            send_body["threadId"] = thread_id
+
+        # Send message
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._gmail.users()
+                .messages()
+                .send(userId="me", body=send_body)
+                .execute()
+            ),
+        )
+        return result  # type: ignore
+
     # Calendar Methods
     async def get_event(
         self, event_id: str, calendar_id: str = "primary"
