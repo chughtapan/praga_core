@@ -22,7 +22,7 @@ jobs:
       - name: Activate venv and install project
         run: |
           source .venv/bin/activate
-          uv pip install -e . && uv pip install -r requirements-pragweb.txt
+          uv pip install -e .
 
       - name: Run tests
         run: uv run pytest
