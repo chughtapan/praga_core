@@ -1,9 +1,10 @@
 """Description templates for MCP tools and resources."""
 
 import inspect
-from typing import List
+from typing import Any, List, Union, get_args, get_origin, get_type_hints
 
 from praga_core.action_executor import ActionFunction
+from praga_core.types import Page
 
 
 def get_search_tool_description(type_names: List[str]) -> str:
@@ -46,27 +47,33 @@ def get_action_tool_description(action_name: str, action_func: ActionFunction) -
     sig = inspect.signature(action_func)
     doc = inspect.getdoc(action_func) or "Perform an action on a page."
 
-    # Extract parameters (excluding the first Page parameter)
-    params = list(sig.parameters.items())[
-        1:
-    ]  # Skip first parameter which should be Page
+    # Get type hints for proper parameter descriptions
+    try:
+        type_hints = get_type_hints(action_func)
+    except Exception:
+        type_hints = {}
 
     param_descriptions = []
-    for param_name, param in params:
-        param_type = (
-            param.annotation if param.annotation != inspect.Parameter.empty else "Any"
-        )
+    for param_name, param in sig.parameters.items():
+        # Get the type annotation - transform Page types to PageURI
+        param_type = type_hints.get(param_name, param.annotation)
+        if param_type == inspect.Parameter.empty:
+            param_type = "Any"
+
+        # Transform Page types to PageURI types for description
+        transformed_type = _convert_page_type_to_uri_type_for_description(param_type)
+
         default_text = (
             f" (default: {param.default})"
             if param.default != inspect.Parameter.empty
             else ""
         )
-        param_descriptions.append(f"- {param_name}: {param_type}{default_text}")
+        param_descriptions.append(f"- {param_name}: {transformed_type}{default_text}")
 
     param_text = (
         "\n".join(param_descriptions)
         if param_descriptions
-        else "No additional parameters required."
+        else "No parameters required."
     )
 
     return f"""Action: {action_name}
@@ -83,3 +90,61 @@ Example usage:
 - The action will be executed on the specified page
 - Returns {{"success": true}} on success or {{"success": false, "error": "..."}} on failure
 """
+
+
+def _convert_page_type_to_uri_type_for_description(param_type: Any) -> str:
+    """Convert Page-related type annotations to PageURI equivalents for descriptions."""
+    # Handle direct Page type
+    if _is_page_type(param_type):
+        return "PageURI"
+
+    # Handle generic types like List[Page], Optional[Page], etc.
+    origin = get_origin(param_type)
+    args = get_args(param_type)
+
+    if origin in (list, List):
+        if args and _is_page_type(args[0]):
+            return "List[PageURI]"
+        elif args:
+            # Handle List[SomePageType]
+            inner_type = _convert_page_type_to_uri_type_for_description(args[0])
+            return f"List[{inner_type}]"
+        else:
+            return "List"
+
+    if _is_optional_page_type(param_type):
+        return "Optional[PageURI]"
+
+    # Handle Optional[List[Page]] and similar complex types
+    if origin is Union:
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if len(non_none_types) == 1:
+            inner_desc = _convert_page_type_to_uri_type_for_description(
+                non_none_types[0]
+            )
+            return f"Optional[{inner_desc}]"
+
+    # For non-Page types, return string representation
+    if hasattr(param_type, "__name__"):
+        return str(param_type.__name__)
+    else:
+        return str(param_type)
+
+
+def _is_page_type(param_type: Any) -> bool:
+    """Check if a type is Page or a subclass of Page."""
+    return param_type is Page or (
+        isinstance(param_type, type) and issubclass(param_type, Page)
+    )
+
+
+def _is_optional_page_type(param_type: Any) -> bool:
+    """Check if a type is Optional[Page] or similar union with None."""
+    origin = get_origin(param_type)
+    args = get_args(param_type)
+
+    if origin is Union and len(args) == 2 and type(None) in args:
+        non_none_type = args[0] if args[1] is type(None) else args[1]
+        return _is_page_type(non_none_type)
+
+    return False
