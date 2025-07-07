@@ -8,6 +8,24 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    # Core framework dependencies
+    "pydantic>=2.11.5",
+    "sqlalchemy[mypy]>=2.0.41",
+    "aiosqlite>=0.21.0",
+    "greenlet>=3.2.3",
+    "fastmcp>=2.8.1",
+    # Service dependencies (Google APIs, OpenAI, etc.)
+    "openai>=1.0.0",
+    "google-api-python-client>=2.0.0",
+    "google-auth-httplib2>=0.1.0",
+    "google-auth-oauthlib>=0.5.0",
+    "python-dateutil>=2.8.0",
+    "tqdm>=4.65.0",
+    "python-dotenv>=1.1.0",
+    "bs4==0.0.2",
+    "chonkie>=1.0.0",
+    "tokenizers>=0.21",
+    # Development dependencies
     "mypy>=1.5.1",
     "flake8-pyproject==1.2.3",
     "flake8>=6.1.0",
@@ -17,13 +35,7 @@ dependencies = [
     "pre-commit==3.5.0",
     "pyproject-autoflake>=1.0.2",
     "pytest>=8.4.0",
-    "pydantic>=2.11.5",
-    "openai>=1.0.0",
-    "fastmcp>=2.8.1",
-    "sqlalchemy[mypy]>=2.0.41",
     "pytest-asyncio>=1.0.0",
-    "aiosqlite>=0.21.0",
-    "greenlet>=3.2.3",
 ]
 
 [build-system]
