@@ -1,8 +1,17 @@
 """Main MCP server implementation for Praga Core."""
 
+import inspect
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import (
+    Any,
+    List,
+    Optional,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from fastmcp import Context, FastMCP
 
@@ -13,6 +22,7 @@ from praga_core.integrations.mcp.descriptions import (
     get_pages_tool_description,
     get_search_tool_description,
 )
+from praga_core.types import Page, PageURI
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -189,46 +199,181 @@ def setup_action_tools(
     actions = server_context.actions
 
     for action_name, action_func in actions.items():
-        # Create a tool for each action with proper closure
-        def create_action_tool(name: str, func: ActionFunction) -> None:
-            # Generate description for this specific action
-            description = get_action_tool_description(name, func)
+        # Create a unique tool for each action
+        _create_individual_action_tool(mcp, server_context, action_name, action_func)
 
-            @mcp.tool(description=description)
-            async def action_tool(
-                action_input: Dict[str, Any], ctx: Optional[Context] = None
-            ) -> str:
-                """Execute an action on a page.
 
-                Args:
-                    action_input: Dictionary containing the action parameters
-                    ctx: MCP context for logging
+def _create_individual_action_tool(
+    mcp: FastMCP,  # type: ignore[type-arg]
+    server_context: ServerContext,
+    action_name: str,
+    action_func: ActionFunction,
+) -> None:
+    """Create an individual MCP tool for a specific action.
 
-                Returns:
-                    JSON string containing action result with success status
-                """
-                try:
-                    if ctx:
-                        await ctx.info(f"Executing action: {name}")
-                        await ctx.info(f"Action input: {action_input}")
+    Args:
+        mcp: FastMCP server instance
+        server_context: ServerContext with registered actions
+        action_name: Name of the action
+        action_func: Action function
+    """
+    # Generate description for this specific action
+    description = get_action_tool_description(action_name, action_func)
 
-                    # Invoke the action through the server context
-                    result = await server_context.invoke_action(name, action_input)
+    # Get the transformed signature (Page -> PageURI) from the action function
+    sig = inspect.signature(action_func)
 
-                    if ctx:
-                        await ctx.info(f"Action result: {result}")
+    # Create parameter list for the dynamic function
+    param_names = list(sig.parameters.keys())
 
-                    return json.dumps(result, indent=2)
+    # Create a dynamic function with proper parameter signature
+    async def dynamic_action_tool(
+        *args: Any, ctx: Optional[Context] = None, **kwargs: Any
+    ) -> str:
+        """Execute an action on a page.
 
-                except Exception as e:
-                    error_msg = f"Action '{name}' failed: {str(e)}"
-                    if ctx:
-                        await ctx.error(error_msg)
+        Args:
+            *args: Positional arguments based on action signature
+            ctx: MCP context for logging
+            **kwargs: Keyword arguments based on action signature
 
-                    return json.dumps({"success": False, "error": str(e)}, indent=2)
+        Returns:
+            JSON string containing action result with success status
+        """
+        try:
+            # Build action_input dict from args and kwargs
+            action_input = {}
 
-            # The @mcp.tool decorator handles tool registration
-            action_tool
+            # Map positional args to parameter names
+            for i, arg in enumerate(args):
+                if i < len(param_names):
+                    action_input[param_names[i]] = arg
 
-        # Create and register the tool - the @mcp.tool decorator registers it
-        create_action_tool(action_name, action_func)
+            # Add keyword arguments
+            action_input.update(kwargs)
+
+            if ctx:
+                await ctx.info(f"Executing action: {action_name}")
+                await ctx.info(f"Action input: {action_input}")
+
+            # Invoke the action through the server context
+            result = await server_context.invoke_action(action_name, action_input)
+
+            if ctx:
+                await ctx.info(f"Action result: {result}")
+
+            return json.dumps(result, indent=2)
+
+        except Exception as e:
+            error_msg = f"Action '{action_name}' failed: {str(e)}"
+            if ctx:
+                await ctx.error(error_msg)
+
+            return json.dumps({"success": False, "error": str(e)}, indent=2)
+
+    # Set the proper signature on the dynamic function
+    _set_dynamic_function_signature(dynamic_action_tool, action_func, action_name)
+
+    # Register the tool with the MCP server
+    mcp.tool(description=description)(dynamic_action_tool)
+
+
+def _set_dynamic_function_signature(
+    dynamic_func: Any,
+    original_func: ActionFunction,
+    action_name: str,
+) -> None:
+    """Set the proper signature on a dynamic function based on the original action function.
+
+    This transforms Page types to PageURI types and creates explicit parameters.
+    """
+    try:
+        # Get original signature and type hints
+        original_sig = inspect.signature(original_func)
+        original_type_hints = get_type_hints(original_func)
+
+        # Create new parameters with transformed types
+        new_params = []
+        for param_name, param in original_sig.parameters.items():
+            # Get the type annotation
+            param_type = original_type_hints.get(param_name, param.annotation)
+
+            # Transform Page types to PageURI types
+            transformed_type = _convert_page_type_to_uri_type(param_type)
+
+            # Create new parameter with transformed type
+            new_param = param.replace(annotation=transformed_type)
+            new_params.append(new_param)
+
+        # Add the ctx parameter for MCP context
+        ctx_param = inspect.Parameter(
+            "ctx",
+            inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=Optional[Context],
+        )
+        new_params.append(ctx_param)
+
+        # Create new signature
+        new_sig = inspect.Signature(
+            parameters=new_params, return_annotation=str  # MCP tools return strings
+        )
+
+        # Set the signature and name on the dynamic function
+        dynamic_func.__signature__ = new_sig
+        dynamic_func.__name__ = f"{action_name}_tool"
+        dynamic_func.__qualname__ = f"{action_name}_tool"
+
+        # Set type annotations for better introspection
+        dynamic_func.__annotations__ = {
+            param.name: param.annotation for param in new_params
+        }
+        dynamic_func.__annotations__["return"] = str
+
+    except Exception as e:
+        logger.warning(f"Failed to set signature for action {action_name}: {e}")
+        # Fallback to basic naming
+        dynamic_func.__name__ = f"{action_name}_tool"
+        dynamic_func.__qualname__ = f"{action_name}_tool"
+
+
+def _convert_page_type_to_uri_type(param_type: Any) -> Any:
+    """Convert Page-related type annotations to PageURI equivalents.
+
+    This is similar to the logic in ActionExecutorMixin but adapted for MCP.
+    """
+    # Direct Page type -> PageURI
+    if _is_page_type(param_type):
+        return PageURI
+
+    # Handle generic types like List[Page], Optional[Page], etc.
+    origin = get_origin(param_type)
+    args = get_args(param_type)
+
+    if origin in (list, List) and args and _is_page_type(args[0]):
+        return List[PageURI]
+
+    if _is_optional_page_type(param_type):
+        return Union[PageURI, None]
+
+    # For non-Page types, return unchanged
+    return param_type
+
+
+def _is_page_type(param_type: Any) -> bool:
+    """Check if a type is Page or a subclass of Page."""
+    return param_type is Page or (
+        isinstance(param_type, type) and issubclass(param_type, Page)
+    )
+
+
+def _is_optional_page_type(param_type: Any) -> bool:
+    """Check if a type is Optional[Page] or similar union with None."""
+    origin = get_origin(param_type)
+    args = get_args(param_type)
+
+    if origin is Union and len(args) == 2 and type(None) in args:
+        non_none_type = args[0] if args[1] is type(None) else args[1]
+        return _is_page_type(non_none_type)
+
+    return False

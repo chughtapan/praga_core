@@ -10,6 +10,8 @@ from praga_core.types import PageURI
 from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
+from ..people.page import PersonPage
+from ..people.service import PeopleService
 from ..utils import resolve_person_identifier
 from .page import EmailPage, EmailSummary, EmailThreadPage
 from .utils import GmailParser
@@ -39,6 +41,55 @@ class GmailService(ToolkitService):
         @self.context.route("email_thread", cache=False)
         async def handle_thread(page_uri: PageURI) -> EmailThreadPage:
             return await self.create_thread_page(page_uri)
+
+        # Register email actions
+        @ctx.action()
+        async def reply_to_email_thread(
+            thread: EmailThreadPage,
+            email: Optional[EmailPage] = None,
+            recipients: Optional[List[PersonPage]] = None,
+            cc_list: Optional[List[PersonPage]] = None,
+            message: str = "",
+        ) -> bool:
+            """Reply to an email thread.
+
+            Args:
+                thread: The email thread to reply to
+                email: Optional specific email in the thread to reply to (defaults to latest)
+                recipients: Optional list of recipients (defaults to thread participants)
+                cc_list: Optional list of CC recipients
+                message: The reply message content
+
+            Returns:
+                True if the reply was sent successfully
+            """
+            return await self._reply_to_thread_internal(
+                thread, email, recipients, cc_list, message
+            )
+
+        @ctx.action()
+        async def send_email(
+            person: PersonPage,
+            additional_recipients: Optional[List[PersonPage]] = None,
+            cc_list: Optional[List[PersonPage]] = None,
+            subject: str = "",
+            message: str = "",
+        ) -> bool:
+            """Send a new email.
+
+            Args:
+                person: Primary recipient
+                additional_recipients: Additional recipients
+                cc_list: CC recipients
+                subject: Email subject
+                message: Email message content
+
+            Returns:
+                True if the email was sent successfully
+            """
+            return await self._send_email_internal(
+                person, additional_recipients, cc_list, subject, message
+            )
 
     def _parse_message_content(self, message: dict[str, Any]) -> dict[str, Any]:
         """Parse common email content from a Gmail message.
@@ -298,6 +349,109 @@ class GmailService(ToolkitService):
     def toolkit(self) -> "GmailService":
         """Get the Gmail toolkit for this service (returns self since this is now integrated)."""
         return self
+
+    async def _reply_to_thread_internal(
+        self,
+        thread: EmailThreadPage,
+        email: Optional[EmailPage],
+        recipients: Optional[List[PersonPage]],
+        cc_list: Optional[List[PersonPage]],
+        message: str,
+    ) -> bool:
+        """Internal method to handle thread reply logic."""
+        try:
+            # If no specific email provided, reply to the latest email in thread
+            if email is None and thread.emails:
+                # Get the latest email URI from thread
+                latest_email_uri = thread.emails[-1].uri
+                # Fetch the full email page
+                page = await self.context.get_page(latest_email_uri)
+                if not isinstance(page, EmailPage):
+                    logger.error(f"Failed to get email page for {latest_email_uri}")
+                    return False
+                email = page
+
+            if email is None:
+                logger.error("No email to reply to in thread")
+                return False
+
+            # Determine recipients if not provided
+            if recipients is None:
+                # Default to replying to the sender of the email being replied to
+                sender_email = email.sender
+                # Try to find person page for sender
+                try:
+                    people_service = self.context.get_service("people")
+                    if isinstance(people_service, PeopleService):
+                        sender_people = await people_service.search_existing_records(
+                            sender_email
+                        )
+                    else:
+                        logger.warning("People service is not a PeopleService instance")
+                        sender_people = []
+                except Exception as e:
+                    logger.warning(f"Could not find people service or sender: {e}")
+                    sender_people = []
+                recipients = sender_people[:1] if sender_people else []
+
+            # Convert PersonPage objects to email addresses
+            to_emails = [person.email for person in (recipients or [])]
+            cc_emails = [person.email for person in (cc_list or [])]
+
+            # Prepare the reply
+            subject = email.subject
+            if not subject.lower().startswith("re:"):
+                subject = f"Re: {subject}"
+
+            # Send the reply using Gmail API
+            await self.api_client.send_message(
+                to=to_emails,
+                cc=cc_emails,
+                subject=subject,
+                body=message,
+                thread_id=thread.thread_id,
+                references=email.message_id,
+                in_reply_to=email.message_id,
+            )
+
+            logger.info(f"Successfully sent reply to thread {thread.thread_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to reply to thread: {e}")
+            return False
+
+    async def _send_email_internal(
+        self,
+        person: PersonPage,
+        additional_recipients: Optional[List[PersonPage]],
+        cc_list: Optional[List[PersonPage]],
+        subject: str,
+        message: str,
+    ) -> bool:
+        """Internal method to handle sending new email."""
+        try:
+            # Build recipient lists
+            to_emails = [person.email]
+            if additional_recipients:
+                to_emails.extend([p.email for p in additional_recipients])
+
+            cc_emails = [p.email for p in (cc_list or [])]
+
+            # Send the email using Gmail API
+            await self.api_client.send_message(
+                to=to_emails,
+                cc=cc_emails,
+                subject=subject,
+                body=message,
+            )
+
+            logger.info(f"Successfully sent email to {', '.join(to_emails)}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send email: {e}")
+            return False
 
     @property
     def name(self) -> str:

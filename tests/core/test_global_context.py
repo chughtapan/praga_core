@@ -12,8 +12,8 @@ from praga_core import (
 from praga_core.types import Page, PageURI
 
 
-class TestPage(Page):
-    """Test page for global context tests."""
+class SamplePage(Page):
+    """Sample page for global context tests."""
 
     title: str
     content: str
@@ -22,10 +22,10 @@ class TestPage(Page):
 class MockService(ContextMixin):
     """Test service that uses ContextMixin."""
 
-    async def create_test_page(self, page_id: str) -> TestPage:
+    async def create_test_page(self, page_id: str) -> SamplePage:
         """Create a test page using global context."""
-        uri = await self.context.create_page_uri(TestPage, "test", page_id)
-        return TestPage(uri=uri, title=f"Test {page_id}", content="Test content")
+        uri = await self.context.create_page_uri(SamplePage, "test", page_id)
+        return SamplePage(uri=uri, title=f"Test {page_id}", content="Test content")
 
     async def get_page_from_context(self, uri: str) -> Page:
         """Get a page using global context."""
@@ -90,8 +90,8 @@ async def test_context_mixin():
 
     # Register handler
     @context.route("test")
-    async def handle_test_page(page_uri: PageURI) -> TestPage:
-        return TestPage(
+    async def handle_test_page(page_uri: PageURI) -> SamplePage:
+        return SamplePage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
 
@@ -126,8 +126,8 @@ async def test_manual_context_setup():
 
     # Can register handlers manually
     @context.route("mytype")
-    def handle_my_type(page_uri: PageURI) -> TestPage:
-        return TestPage(uri=page_uri, title=f"My {page_uri.id}", content="My content")
+    def handle_my_type(page_uri: PageURI) -> SamplePage:
+        return SamplePage(uri=page_uri, title=f"My {page_uri.id}", content="My content")
 
     # Handler should be registered
     assert "mytype" in context._handlers
@@ -168,14 +168,14 @@ async def test_multiple_services_same_context():
 
     # Register handlers for both types
     @context.route("shared")
-    async def handle_shared(page_uri: PageURI) -> TestPage:
-        return TestPage(
+    async def handle_shared(page_uri: PageURI) -> SamplePage:
+        return SamplePage(
             uri=page_uri, title=f"Shared {page_uri.id}", content="Shared content"
         )
 
     @context.route("test")
-    async def handle_test(page_uri: PageURI) -> TestPage:
-        return TestPage(
+    async def handle_test(page_uri: PageURI) -> SamplePage:
+        return SamplePage(
             uri=page_uri, title=f"Test {page_uri.id}", content="Test content"
         )
 

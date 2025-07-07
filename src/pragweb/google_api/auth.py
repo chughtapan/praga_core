@@ -20,6 +20,7 @@ _thread_local = threading.local()
 
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/calendar.readonly",
     "https://www.googleapis.com/auth/contacts.readonly",
     "https://www.googleapis.com/auth/directory.readonly",
@@ -51,6 +52,12 @@ class GoogleAuthManager:
         """Get path to credentials file."""
         return get_current_config().google_credentials_file
 
+    def _scopes_match(
+        self, stored_scopes: list[str], required_scopes: list[str]
+    ) -> bool:
+        """Check if stored scopes contain all required scopes."""
+        return set(required_scopes).issubset(set(stored_scopes))
+
     def _load_credentials(
         self, secrets_manager: SecretsManager
     ) -> Optional[Credentials]:
@@ -62,7 +69,15 @@ class GoogleAuthManager:
         access_token = token_data["access_token"]
         refresh_token = token_data["refresh_token"]
         expires_at = token_data.get("expires_at")
-        scopes = token_data.get("scopes", _SCOPES)
+        stored_scopes = token_data.get("scopes", _SCOPES)
+
+        # Check if stored scopes match required scopes
+        if not self._scopes_match(stored_scopes, _SCOPES):
+            logger.info(
+                f"Stored scopes {stored_scopes} don't match required scopes {_SCOPES}. "
+                "Forcing reauth."
+            )
+            return None
 
         # Get client info from extra_data or use None for missing fields
         extra_data = token_data.get("extra_data", {})
@@ -77,7 +92,7 @@ class GoogleAuthManager:
             token_uri=token_uri,
             client_id=client_id,
             client_secret=client_secret,
-            scopes=scopes,
+            scopes=stored_scopes,
         )
 
         # Set expiry if available
