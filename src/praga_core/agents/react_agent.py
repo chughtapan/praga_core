@@ -358,10 +358,10 @@ class ReactAgent(RetrieverAgentBase):
             if toolkit is None:
                 raise ValueError(f"Tool '{action.action}' not found in any toolkit")
 
-            result = await toolkit.invoke_tool(action.action, action.action_input)
-
-            # Track any pages returned by the tool
-            self._track_pages_from_result(result)
+            # Execute tool with page tracking
+            result = await toolkit.invoke_tool(
+                action.action, action.action_input, callbacks=[self._track_pages]
+            )
 
             observation = Observation(action=action.action, result=result)
             observation_content = observation.to_json()
@@ -445,46 +445,12 @@ class ReactAgent(RetrieverAgentBase):
                 ).model_dump(),
             )
 
-    def _track_pages_from_result(self, result: Dict[str, Any]) -> None:
-        """Track pages found in tool results."""
-        if not isinstance(result, dict):
-            return
-
-        # Look for 'pages' key in result
-        pages = result.get("pages", [])
-        if isinstance(pages, list):
-            for page_data in pages:
-                if isinstance(page_data, dict) and "uri" in page_data:
-                    try:
-                        # Import here to avoid circular imports
-                        from praga_core.types import PageURI
-
-                        page_uri = PageURI.parse(page_data["uri"])
-                        uri_str = str(page_uri)
-
-                        # Try to create a Page object from the data
-                        page = self._create_page_from_data(page_data)
-                        if page:
-                            self._accessed_pages[uri_str] = page
-                            logger.debug(f"Tracked page: {uri_str}")
-                    except Exception as e:
-                        logger.debug(f"Failed to track page from result: {e}")
-
-    def _create_page_from_data(self, page_data: Dict[str, Any]) -> Optional[Page]:
-        """Create a Page object from tool result data."""
-        try:
-            # Import here to avoid circular imports
-            from praga_core.types import TextPage
-
-            # Check if this looks like a TextPage
-            if "content" in page_data and isinstance(page_data["content"], str):
-                return TextPage(**page_data)
-
-            # Could extend this to handle other page types
-            return None
-        except Exception as e:
-            logger.debug(f"Failed to create page from data: {e}")
-            return None
+    def _track_pages(self, tool_name: str, pages: Sequence[Page]) -> None:
+        """Track pages from tool results."""
+        for page in pages:
+            uri_str = str(page.uri)
+            self._accessed_pages[uri_str] = page
+            logger.debug(f"Tracked page from {tool_name}: {uri_str}")
 
     def _extract_json_from_markdown(self, text: str) -> str:
         """Extract JSON content from markdown code blocks."""

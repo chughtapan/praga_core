@@ -11,6 +11,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    List,
     Optional,
     Sequence,
     Tuple,
@@ -145,7 +146,10 @@ class RetrieverToolkitMeta(abc.ABC):
         return self._tools[name]
 
     async def invoke_tool(
-        self, name: str, raw_input: Union[str, Dict[str, Any]]
+        self,
+        name: str,
+        raw_input: Union[str, Dict[str, Any]],
+        callbacks: Optional[List[Callable[[str, Sequence[Page]], None]]] = None,
     ) -> Dict[str, Any]:
         """Invoke a tool by name with pagination support."""
         tool = self.get_tool(name)
@@ -157,12 +161,12 @@ class RetrieverToolkitMeta(abc.ABC):
                 name=name, type="tool", show_input="python", language="python"
             ) as step:
                 step.input = raw_input
-                response = await tool.invoke(raw_input)
+                response = await tool.invoke(raw_input, callbacks)
                 step.output = response
                 return response
         except (ImportError, AttributeError):
             pass
-        return await tool.invoke(raw_input)
+        return await tool.invoke(raw_input, callbacks)
 
     @property
     def tools(self) -> Dict[str, Tool]:
