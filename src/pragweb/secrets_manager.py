@@ -65,11 +65,25 @@ class SecretsManager:
         """Initialize SecretsManager with database connection."""
 
         # Configure engine based on database type
-        engine_args = {}
+        engine_args: Dict[str, Any] = {}
         if database_url.startswith("postgresql"):
             from sqlalchemy.pool import NullPool
 
             engine_args["poolclass"] = NullPool
+        elif database_url.startswith("sqlite"):
+            # SQLite-specific configuration
+            engine_args["pool_pre_ping"] = True
+            if "memory" in database_url:
+                # In-memory SQLite needs special handling
+                from sqlalchemy.pool import StaticPool
+
+                engine_args["poolclass"] = StaticPool
+                engine_args["connect_args"] = {"check_same_thread": False}
+                logger.info(
+                    "SecretsManager: Using in-memory SQLite database (ephemeral)"
+                )
+            else:
+                logger.info("SecretsManager: Using persistent SQLite database")
 
         self._engine = create_engine(database_url, **engine_args)
         self._session_factory = sessionmaker(bind=self._engine)
