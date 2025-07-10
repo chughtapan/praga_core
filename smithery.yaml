@@ -24,13 +24,14 @@ startCommand:
         description: "Google OAuth refresh token for automated authentication"
   commandFunction: |
     (config) => ({
-      command: 'python',
-      args: ['-m', 'pragweb.mcp_server'],
+      command: 'sh',
+      args: ['-c', `fastmcp -t streamable-http --host 0.0.0.0 --port \${PORT:-8080} pragweb/mcp_server.py`],
       env: {
         OPENAI_API_KEY: config.OPENAI_API_KEY,
         GOOGLE_OAUTH_CLIENT_ID: config.GOOGLE_OAUTH_CLIENT_ID || '',
         GOOGLE_OAUTH_CLIENT_SECRET: config.GOOGLE_OAUTH_CLIENT_SECRET || '',
         GOOGLE_OAUTH_REFRESH_TOKEN: config.GOOGLE_OAUTH_REFRESH_TOKEN || '',
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        PORT: process.env.PORT || '8080'
       }
     })
