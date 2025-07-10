@@ -66,7 +66,6 @@ class ServerContext(PageRouterMixin, ActionExecutorMixin):
         self,
         instruction: str,
         retriever: Optional[RetrieverAgentBase] = None,
-        resolve_references: bool = True,
     ) -> SearchResponse:
         """Execute search using the provided retriever."""
         active_retriever = retriever or self.retriever
@@ -76,8 +75,6 @@ class ServerContext(PageRouterMixin, ActionExecutorMixin):
             )
 
         results = await self._search(instruction, active_retriever)
-        if resolve_references:
-            results = await self._resolve_references(results)
         return SearchResponse(results=results)
 
     async def _search(
@@ -93,16 +90,6 @@ class ServerContext(PageRouterMixin, ActionExecutorMixin):
             List[PageReference]: List of page references matching the search
         """
         results = await retriever.search(instruction)
-        return results
-
-    async def _resolve_references(
-        self, results: List[PageReference]
-    ) -> List[PageReference]:
-        """Resolve references to pages by calling get_page."""
-        uris = [ref.uri for ref in results]
-        pages = await self.get_pages(uris)
-        for ref, page in zip(results, pages):
-            ref.page = page
         return results
 
     @property
