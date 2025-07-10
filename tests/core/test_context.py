@@ -142,9 +142,8 @@ class TestSearch:
         assert len(result.results) == 3
         assert mock_retriever.search_calls == ["test query"]
 
-        # Verify pages were resolved
-        for ref in result.results:
-            assert ref._page is not None
+        # Note: Reference resolution is now handled by the agent, not the context
+        # The mock agent returns the same references it was given
 
     @pytest.mark.asyncio
     async def test_search_with_parameter_retriever(
@@ -167,20 +166,19 @@ class TestSearch:
             await context.search("test query")
 
     @pytest.mark.asyncio
-    async def test_search_without_resolve_references(
+    async def test_search_returns_agent_results_directly(
         self, context, sample_page_references: List[PageReference]
     ) -> None:
-        """Test search without resolving references."""
+        """Test search returns results directly from agent."""
         mock_retriever = MockRetrieverAgent(sample_page_references)
         context.retriever = mock_retriever
 
-        result = await context.search("test query", resolve_references=False)
+        result = await context.search("test query")
 
         assert isinstance(result, SearchResponse)
         assert len(result.results) == 3
-        # Verify pages were NOT resolved
-        for ref in result.results:
-            assert ref._page is None
+        # Note: Reference resolution now happens in the agent, not context
+        # So pages may or may not be resolved depending on agent implementation
 
     @pytest.mark.asyncio
     async def test_search_parameter_retriever_overrides_context(
@@ -203,22 +201,29 @@ class TestSearch:
         assert param_retriever.search_calls == ["test query"]
 
 
-class TestReferenceResolution:
-    """Test reference resolution functionality."""
+class TestPageResolution:
+    """Test page resolution functionality through context routing."""
 
     @pytest.mark.asyncio
-    async def test_resolve_references(
+    async def test_get_pages_resolves_correctly(
         self, context, sample_page_references: List[PageReference]
     ) -> None:
-        """Test resolving page references."""
+        """Test resolving page references using get_pages method."""
         context.route("document")(document_page_handler)
         context.route("alternate")(alternate_page_handler)
 
-        resolved_refs = await context._resolve_references(sample_page_references)
+        uris = [ref.uri for ref in sample_page_references]
+        resolved_pages = await context.get_pages(uris)
 
-        assert len(resolved_refs) == 3
-        for ref in resolved_refs:
-            assert ref.page is not None
+        assert len(resolved_pages) == 3
+        assert resolved_pages[0] is not None
+        assert resolved_pages[1] is not None
+        assert resolved_pages[2] is not None
+
+        # Check correct types were used
+        assert isinstance(resolved_pages[0], DocumentPage)
+        assert isinstance(resolved_pages[1], DocumentPage)
+        assert isinstance(resolved_pages[2], AlternateTestPage)
 
 
 class TestIntegration:
@@ -245,22 +250,18 @@ class TestIntegration:
         context.route("alternate")(alternate_page_handler)
 
         # Create mixed references
-        refs = [
-            PageReference(
-                uri=PageURI(root="test", type="document", id="doc1", version=1)
-            ),
-            PageReference(
-                uri=PageURI(root="test", type="alternate", id="alt1", version=1)
-            ),
+        uris = [
+            PageURI(root="test", type="document", id="doc1", version=1),
+            PageURI(root="test", type="alternate", id="alt1", version=1),
         ]
 
-        resolved_refs = await context._resolve_references(refs)
+        resolved_pages = await context.get_pages(uris)
 
-        assert len(resolved_refs) == 2
-        assert isinstance(resolved_refs[0].page, DocumentPage)
-        assert isinstance(resolved_refs[1].page, AlternateTestPage)
-        assert resolved_refs[0].page.title == "Test Page doc1"
-        assert resolved_refs[1].page.name == "Alternate Page alt1"
+        assert len(resolved_pages) == 2
+        assert isinstance(resolved_pages[0], DocumentPage)
+        assert isinstance(resolved_pages[1], AlternateTestPage)
+        assert resolved_pages[0].title == "Test Page doc1"
+        assert resolved_pages[1].name == "Alternate Page alt1"
 
 
 class TestValidatorIntegration:

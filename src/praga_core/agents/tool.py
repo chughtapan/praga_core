@@ -24,6 +24,9 @@ from praga_core.types import Page
 # Type variable bound to Document for generic pagination
 T = TypeVar("T", bound=Page)
 
+# Tool callback types
+ToolCallback = Callable[[str, Sequence[Page]], None]
+
 
 @dataclass(frozen=True)
 class PaginatedResponse(Generic[T], ABCSequence[T]):
@@ -291,7 +294,11 @@ class Tool:
         else:
             return await self._handle_client_side_pagination(**kwargs)
 
-    async def invoke(self, raw_input: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    async def invoke(
+        self,
+        raw_input: Union[str, Dict[str, Any]],
+        callbacks: Optional[List[ToolCallback]] = None,
+    ) -> Dict[str, Any]:
         """Execute the tool with the given input and serialize the response."""
         try:
             kwargs = self._prepare_arguments(raw_input)
@@ -302,6 +309,16 @@ class Tool:
                     "references": [],
                     "error_message": "No matching documents found",
                 }
+
+            # Execute callbacks before serialization if provided
+            if callbacks:
+                # Extract the actual pages from the result
+                pages = (
+                    result.results if isinstance(result, PaginatedResponse) else result
+                )
+                for callback in callbacks:
+                    callback(self.name, pages)
+
             return self._serialize_result(result)
 
         except ValueError as e:
