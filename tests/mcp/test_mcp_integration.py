@@ -95,27 +95,21 @@ class TestMCPIntegration:
         # Check that core tools are registered
         assert "search_pages" in tool_names
         assert "get_pages" in tool_names
-
-        # Check that action tools are registered with correct names
-        assert "test_action_basic_tool" in tool_names
-        assert "test_action_with_person_tool" in tool_names
-        assert "test_action_failure_tool" in tool_names
+        assert "invoke_action" in tool_names
 
         # Verify we have the expected number of tools
-        assert len(tool_names) == 5  # 2 core + 3 action tools
+        assert len(tool_names) == 3  # search_pages, get_pages, invoke_action
 
-    async def test_individual_action_tools_registered(self, mcp_server):
-        """Test that each action gets its own tool."""
+    async def test_invoke_action_tool_registered(self, mcp_server):
+        """Test that the unified invoke_action tool is registered."""
         tools = await mcp_server.get_tools()
+
+        # Should have invoke_action tool
+        assert "invoke_action" in tools
+
+        # Should not have individual action tools
         action_tools = [tool for tool in tools if tool.endswith("_tool")]
-
-        # Each action should have its own tool
-        assert "test_action_basic_tool" in action_tools
-        assert "test_action_with_person_tool" in action_tools
-        assert "test_action_failure_tool" in action_tools
-
-        # No generic 'action_tool' should exist
-        assert "action_tool" not in tools
+        assert len(action_tools) == 0
 
     async def test_search_pages_tool(self, mcp_server, context):
         """Test search_pages tool functionality."""
@@ -130,15 +124,11 @@ class TestMCPIntegration:
         context.search.return_value = mock_response
 
         # Test calling the tool
-        result = await search_tool.fn(
-            instruction="find test pages", resolve_references=True
-        )
+        result = await search_tool.fn(instruction="find test pages")
 
         # Verify the result
         assert result == '{"results": []}'
-        context.search.assert_called_once_with(
-            "find test pages", resolve_references=True
-        )
+        context.search.assert_called_once_with("find test pages")
 
     async def test_get_pages_tool(self, mcp_server, context):
         """Test get_pages tool functionality."""
@@ -168,15 +158,18 @@ class TestMCPIntegration:
 
     async def test_action_tool_success(self, mcp_server, context):
         """Test successful action tool execution."""
-        # Get the action tool
-        action_tool = await mcp_server.get_tool("test_action_basic_tool")
+        # Get the invoke_action tool
+        action_tool = await mcp_server.get_tool("invoke_action")
         assert action_tool is not None
 
         # Mock the context invoke_action method
         context.invoke_action = AsyncMock(return_value={"success": True})
 
         # Test calling the tool with explicit parameters
-        result = await action_tool.fn(page="MCPTestPage:123", message="test")
+        result = await action_tool.fn(
+            action_name="test_action_basic",
+            action_input={"page": "MCPTestPage:123", "message": "test"},
+        )
 
         # Verify the result
         result_data = json.loads(result)
@@ -189,15 +182,17 @@ class TestMCPIntegration:
 
     async def test_action_tool_failure(self, mcp_server, context):
         """Test action tool execution with failure."""
-        # Get the action tool
-        action_tool = await mcp_server.get_tool("test_action_failure_tool")
+        # Get the invoke_action tool
+        action_tool = await mcp_server.get_tool("invoke_action")
         assert action_tool is not None
 
         # Mock the context invoke_action method to raise exception
         context.invoke_action = AsyncMock(side_effect=ValueError("Test error"))
 
         # Test calling the tool with explicit parameters
-        result = await action_tool.fn(page="MCPTestPage:123")
+        result = await action_tool.fn(
+            action_name="test_action_failure", action_input={"page": "MCPTestPage:123"}
+        )
 
         # Verify the result
         result_data = json.loads(result)
@@ -206,8 +201,8 @@ class TestMCPIntegration:
 
     async def test_action_tool_with_multiple_pages(self, mcp_server, context):
         """Test action tool with multiple page parameters."""
-        # Get the action tool
-        action_tool = await mcp_server.get_tool("test_action_with_person_tool")
+        # Get the invoke_action tool
+        action_tool = await mcp_server.get_tool("invoke_action")
         assert action_tool is not None
 
         # Mock the context invoke_action method
@@ -215,9 +210,12 @@ class TestMCPIntegration:
 
         # Test calling the tool with explicit parameters
         result = await action_tool.fn(
-            page="MCPTestPage:123",
-            person="MCPTestPersonPage:456",
-            note="test note",
+            action_name="test_action_with_person",
+            action_input={
+                "page": "MCPTestPage:123",
+                "person": "MCPTestPersonPage:456",
+                "note": "test note",
+            },
         )
 
         # Verify the result
@@ -255,9 +253,7 @@ class TestMCPIntegration:
         mock_ctx.error = AsyncMock()
 
         # Test calling the tool with context
-        result = await search_tool.fn(
-            instruction="find test pages", resolve_references=True, ctx=mock_ctx
-        )
+        result = await search_tool.fn(instruction="find test pages", ctx=mock_ctx)
 
         # Verify the result
         assert '"uri": "test:123"' in result
@@ -270,8 +266,8 @@ class TestMCPIntegration:
 
     async def test_action_tool_with_context_logging(self, mcp_server, context):
         """Test action tool with MCP context logging."""
-        # Get the action tool
-        action_tool = await mcp_server.get_tool("test_action_basic_tool")
+        # Get the invoke_action tool
+        action_tool = await mcp_server.get_tool("invoke_action")
         assert action_tool is not None
 
         # Mock the context invoke_action method
@@ -284,7 +280,9 @@ class TestMCPIntegration:
 
         # Test calling the tool with explicit parameters and context
         result = await action_tool.fn(
-            page="MCPTestPage:123", message="test", ctx=mock_ctx
+            action_name="test_action_basic",
+            action_input={"page": "MCPTestPage:123", "message": "test"},
+            ctx=mock_ctx,
         )
 
         # Verify the result
@@ -326,33 +324,24 @@ class TestMCPIntegration:
         assert result_data["errors"][0]["uri"] == "MCPTestPage:456"
         assert "Page not found" in result_data["errors"][0]["error"]
 
-    async def test_tool_descriptions_are_specific(self, mcp_server):
-        """Test that each tool has a specific description."""
-        # Get tool descriptions
-        basic_tool = await mcp_server.get_tool("test_action_basic_tool")
-        person_tool = await mcp_server.get_tool("test_action_with_person_tool")
-        failure_tool = await mcp_server.get_tool("test_action_failure_tool")
+    async def test_invoke_action_tool_description(self, mcp_server):
+        """Test that invoke_action tool has a proper description."""
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server.get_tool("invoke_action")
+        assert invoke_tool is not None
 
-        # Check that descriptions are specific to each action
-        assert basic_tool.description != person_tool.description
-        assert basic_tool.description != failure_tool.description
-        assert person_tool.description != failure_tool.description
+        # Check that the description mentions action execution
+        description = invoke_tool.description
+        assert "action" in description.lower()
+        assert "invoke" in description.lower() or "execute" in description.lower()
 
-        # Check that action names are in descriptions
-        assert "test_action_basic" in basic_tool.description
-        assert "test_action_with_person" in person_tool.description
-        assert "test_action_failure" in failure_tool.description
-
-    async def test_no_generic_action_tool_exists(self, mcp_server):
-        """Test that no generic 'action_tool' exists."""
+    async def test_unified_action_architecture(self, mcp_server):
+        """Test that only the unified invoke_action tool exists for actions."""
         tools = await mcp_server.get_tools()
 
-        # Should not have any generic action tool
-        assert "action_tool" not in tools
+        # Should have invoke_action tool
+        assert "invoke_action" in tools
 
-        # All action tools should be specifically named
+        # Should not have any individual action tools
         action_tools = [tool for tool in tools if tool.endswith("_tool")]
-        for tool_name in action_tools:
-            assert tool_name != "action_tool"
-            assert "_tool" in tool_name
-            assert tool_name.startswith("test_action_")
+        assert len(action_tools) == 0
