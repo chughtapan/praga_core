@@ -11,13 +11,12 @@ def get_search_tool_description(type_names: List[str]) -> str:
     """Generate description for the search_pages tool."""
     return f"""Search for pages using natural language instructions.
 
-Returns JSON with search results and optionally resolved page content.
+Returns JSON with search results and resolved page content.
 
 Available page types: {', '.join(type_names)}
 
 Parameters:
 - instruction: Natural language search instruction (required)
-- resolve_references: Whether to resolve page content in results (default: true)
 
 Examples:
 - "Find emails from Alice about project X"
@@ -26,9 +25,7 @@ Examples:
 - "Search for person named John Smith"
 
 Response format:
-- results: Array of search results with page references
-- If resolve_references=true: Each result includes full page content
-- If resolve_references=false: Each result includes only page URI and metadata
+- results: Array of search results with page references and resolved page content
 """
 
 

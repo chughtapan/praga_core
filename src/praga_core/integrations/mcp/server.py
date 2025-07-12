@@ -55,28 +55,22 @@ def setup_mcp_tools(
     type_names = list(server_context._handlers.keys())
 
     @mcp.tool(description=get_search_tool_description(type_names))
-    async def search_pages(
-        instruction: str, resolve_references: bool = True, ctx: Optional[Context] = None
-    ) -> str:
+    async def search_pages(instruction: str, ctx: Optional[Context] = None) -> str:
         """Search for pages using natural language instructions.
 
         Args:
             instruction: Natural language search instruction
-            resolve_references: Whether to resolve page content in results
             ctx: MCP context for logging
 
         Returns:
-            JSON string containing search results with page references and resolved content
+            JSON string containing search results with resolved page content
         """
         try:
             if ctx:
                 await ctx.info(f"Searching for: {instruction}")
-                await ctx.info(f"Resolve references: {resolve_references}")
 
-            # Perform the search
-            search_response = await server_context.search(
-                instruction, resolve_references=resolve_references
-            )
+            # Perform the search (page resolution is now handled internally by the agent)
+            search_response = await server_context.search(instruction)
 
             if ctx:
                 await ctx.info(f"Found {len(search_response.results)} results")
