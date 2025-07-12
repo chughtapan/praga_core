@@ -1,0 +1,37 @@
+# Smithery configuration file: https://smithery.ai/docs/deployments
+
+build:
+  dockerBuildPath: .
+
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    required:
+      - OPENAI_API_KEY
+    properties:
+      OPENAI_API_KEY:
+        type: string
+        description: "OpenAI API key for LLM interactions"
+      GOOGLE_OAUTH_CLIENT_ID:
+        type: string
+        description: "Google OAuth Client ID for Google API authentication"
+      GOOGLE_OAUTH_CLIENT_SECRET:
+        type: string
+        description: "Google OAuth Client Secret for Google API authentication"
+      GOOGLE_OAUTH_REFRESH_TOKEN:
+        type: string
+        description: "Google OAuth refresh token for automated authentication"
+  commandFunction: |
+    (config) => ({
+      command: 'sh',
+      args: ['-c', `fastmcp -t streamable-http --host 0.0.0.0 --port \${PORT:-8080} pragweb/mcp_server.py`],
+      env: {
+        OPENAI_API_KEY: config.OPENAI_API_KEY,
+        GOOGLE_OAUTH_CLIENT_ID: config.GOOGLE_OAUTH_CLIENT_ID || '',
+        GOOGLE_OAUTH_CLIENT_SECRET: config.GOOGLE_OAUTH_CLIENT_SECRET || '',
+        GOOGLE_OAUTH_REFRESH_TOKEN: config.GOOGLE_OAUTH_REFRESH_TOKEN || '',
+        PYTHONUNBUFFERED: '1',
+        PORT: process.env.PORT || '8080'
+      }
+    })

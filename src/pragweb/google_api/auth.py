@@ -1,6 +1,7 @@
 """Google API authentication using singleton pattern."""
 
 import logging
+import os
 import threading
 from datetime import timezone
 from typing import Any, Optional
@@ -51,6 +52,35 @@ class GoogleAuthManager:
     def _get_credentials_path(self) -> str:
         """Get path to credentials file."""
         return get_current_config().google_credentials_file
+
+    def _create_credentials_from_env(self) -> Optional[Credentials]:
+        """Create credentials from environment variables if available."""
+        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
+        client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET")
+        refresh_token = os.environ.get("GOOGLE_OAUTH_REFRESH_TOKEN")
+
+        if not all([client_id, client_secret, refresh_token]):
+            return None
+
+        logger.info("Creating Google credentials from environment variables")
+
+        # Create credentials object with refresh token
+        creds = Credentials(  # type: ignore[no-untyped-call]
+            token=None,  # Will be populated on first refresh
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=_SCOPES,
+        )
+
+        # Refresh to get an access token
+        try:
+            creds.refresh(Request())  # type: ignore[no-untyped-call]
+            return creds
+        except Exception as e:
+            logger.error(f"Failed to refresh token from environment variables: {e}")
+            return None
 
     def _scopes_match(
         self, stored_scopes: list[str], required_scopes: list[str]
@@ -140,6 +170,14 @@ class GoogleAuthManager:
 
     def _authenticate(self) -> None:
         """Authenticate with Google APIs."""
+        # First try to create credentials from environment variables
+        self._creds = self._create_credentials_from_env()
+
+        if self._creds and self._creds.valid:
+            logger.info("Successfully authenticated using environment variables")
+            return
+
+        # Fall back to secrets manager
         config = get_current_config()
         secrets_manager = get_secrets_manager(config.secrets_database_url)
 
@@ -149,13 +187,23 @@ class GoogleAuthManager:
                 self._creds.refresh(Request())  # type: ignore[no-untyped-call]
                 self._store_credentials(self._creds, secrets_manager)
             else:
-                credentials_path = self._get_credentials_path()
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    credentials_path, _SCOPES
-                )
-                self._creds = flow.run_local_server(port=0)
-                # Save new credentials
-                self._store_credentials(self._creds, secrets_manager)
+                # Fall back to file-based OAuth flow
+                try:
+                    credentials_path = self._get_credentials_path()
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        credentials_path, _SCOPES
+                    )
+                    self._creds = flow.run_local_server(port=0)
+                    # Save new credentials
+                    self._store_credentials(self._creds, secrets_manager)
+                except Exception as e:
+                    logger.error(f"Failed to authenticate with Google APIs: {e}")
+                    raise RuntimeError(
+                        "Unable to authenticate with Google APIs. "
+                        "Please provide either environment variables "
+                        "(GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_REFRESH_TOKEN) "
+                        "or a valid credentials file."
+                    )
 
     def get_gmail_service(self) -> Any:
         """Get Gmail service (cached)."""
