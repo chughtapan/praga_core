@@ -71,6 +71,15 @@ class GoogleAPIClient:
 
         return messages, next_token
 
+    async def get_user_profile(self) -> Dict[str, Any]:
+        """Get the current user's Gmail profile."""
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            self._executor,
+            lambda: self._gmail.users().getProfile(userId="me").execute(),
+        )
+        return result  # type: ignore
+
     async def send_message(
         self,
         to: List[str],

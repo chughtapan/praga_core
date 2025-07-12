@@ -87,52 +87,55 @@ class TestMCPRealActions:
         """Create MCP server with realistic actions."""
         return create_mcp_server(context_with_actions)
 
-    async def test_realistic_action_tools_registered(self, mcp_server_with_actions):
-        """Test that realistic action tools are registered as separate tools."""
+    async def test_single_invoke_action_tool_registered(self, mcp_server_with_actions):
+        """Test that a single invoke_action tool is registered."""
         tools = await mcp_server_with_actions.get_tools()
         tool_names = [tool for tool in tools]
 
-        # Check that action tools are registered with correct names
-        assert "send_email_tool" in tool_names
-        assert "reply_to_email_tool" in tool_names
-        assert "mark_email_read_tool" in tool_names
+        # Check that invoke_action tool is registered
+        assert "invoke_action" in tool_names
 
         # Check core tools are also present
         assert "search_pages" in tool_names
         assert "get_pages" in tool_names
 
-        # Verify no generic action_tool exists
-        assert "action_tool" not in tool_names
+        # Verify no individual action tools exist
+        assert "send_email_tool" not in tool_names
+        assert "reply_to_email_tool" not in tool_names
+        assert "mark_email_read_tool" not in tool_names
 
-        # Should have 5 tools total (3 actions + 2 core)
-        assert len(tool_names) == 5
+        # Should have 3 tools total (1 invoke_action + 2 core)
+        assert len(tool_names) == 3
 
-    async def test_send_email_tool_execution(
+    async def test_send_email_action_execution(
         self, mcp_server_with_actions, context_with_actions
     ):
-        """Test executing the send_email_tool with realistic parameters."""
+        """Test executing send_email action via invoke_action tool."""
         # Mock the invoke_action method
         context_with_actions.invoke_action = AsyncMock(return_value={"success": True})
 
-        # Get the send email tool
-        send_tool = await mcp_server_with_actions.get_tool("send_email_tool")
-        assert send_tool is not None
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
+        assert invoke_tool is not None
 
-        # Execute the tool with explicit parameters
-        result = await send_tool.fn(
-            person="SamplePersonPage:recipient1",
-            additional_recipients=[
-                "SamplePersonPage:recipient2",
-                "SamplePersonPage:recipient3",
-            ],
-            cc_list=["SamplePersonPage:cc1"],
-            subject="Test Email Subject",
-            message="This is a test email message",
+        # Execute the tool with action_name and action_input
+        result = await invoke_tool.fn(
+            action_name="send_email",
+            action_input={
+                "person": "SamplePersonPage:recipient1",
+                "additional_recipients": [
+                    "SamplePersonPage:recipient2",
+                    "SamplePersonPage:recipient3",
+                ],
+                "cc_list": ["SamplePersonPage:cc1"],
+                "subject": "Test Email Subject",
+                "message": "This is a test email message",
+            },
         )
 
         # Verify the result
         result_data = json.loads(result)
-        assert result_data == {"success": True}
+        assert result_data["success"] is True
 
         # Verify the action was called correctly
         expected_action_input = {
@@ -149,28 +152,31 @@ class TestMCPRealActions:
             "send_email", expected_action_input
         )
 
-    async def test_reply_to_email_tool_execution(
+    async def test_reply_to_email_action_execution(
         self, mcp_server_with_actions, context_with_actions
     ):
-        """Test executing the reply_to_email_tool."""
+        """Test executing reply_to_email action via invoke_action tool."""
         # Mock the invoke_action method
         context_with_actions.invoke_action = AsyncMock(return_value={"success": True})
 
-        # Get the reply tool
-        reply_tool = await mcp_server_with_actions.get_tool("reply_to_email_tool")
-        assert reply_tool is not None
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
+        assert invoke_tool is not None
 
-        # Execute the tool with explicit parameters
-        result = await reply_tool.fn(
-            email="SampleEmailPage:email123",
-            recipients=["SamplePersonPage:person1", "SamplePersonPage:person2"],
-            cc_list=["SamplePersonPage:cc1"],
-            message="This is a reply message",
+        # Execute the tool with action_name and action_input
+        result = await invoke_tool.fn(
+            action_name="reply_to_email",
+            action_input={
+                "email": "SampleEmailPage:email123",
+                "recipients": ["SamplePersonPage:person1", "SamplePersonPage:person2"],
+                "cc_list": ["SamplePersonPage:cc1"],
+                "message": "This is a reply message",
+            },
         )
 
         # Verify the result
         result_data = json.loads(result)
-        assert result_data == {"success": True}
+        assert result_data["success"] is True
 
         # Verify the action was called correctly
         expected_action_input = {
@@ -183,25 +189,28 @@ class TestMCPRealActions:
             "reply_to_email", expected_action_input
         )
 
-    async def test_mark_email_read_tool_execution(
+    async def test_mark_email_read_action_execution(
         self, mcp_server_with_actions, context_with_actions
     ):
-        """Test executing the mark_email_read_tool."""
+        """Test executing mark_email_read action via invoke_action tool."""
         # Mock the invoke_action method
         context_with_actions.invoke_action = AsyncMock(return_value={"success": True})
 
-        # Get the mark read tool
-        mark_read_tool = await mcp_server_with_actions.get_tool("mark_email_read_tool")
-        assert mark_read_tool is not None
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
+        assert invoke_tool is not None
 
-        # Execute the tool with explicit parameters
-        result = await mark_read_tool.fn(
-            email="SampleEmailPage:email456",
+        # Execute the tool with action_name and action_input
+        result = await invoke_tool.fn(
+            action_name="mark_email_read",
+            action_input={
+                "email": "SampleEmailPage:email456",
+            },
         )
 
         # Verify the result
         result_data = json.loads(result)
-        assert result_data == {"success": True}
+        assert result_data["success"] is True
 
         # Verify the action was called correctly
         expected_action_input = {
@@ -211,98 +220,122 @@ class TestMCPRealActions:
             "mark_email_read", expected_action_input
         )
 
-    async def test_action_tool_descriptions_contain_parameters(
+    async def test_invoke_action_tool_description_contains_available_actions(
         self, mcp_server_with_actions
     ):
-        """Test that action tool descriptions contain parameter information."""
-        # Get the send email tool
-        send_tool = await mcp_server_with_actions.get_tool("send_email_tool")
-        description = send_tool.description
+        """Test that invoke_action tool description contains available actions."""
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
+        description = invoke_tool.description
 
         # Check that the description contains expected information
+        assert "Execute any registered action" in description
         assert "send_email" in description
-        assert "Send a new email" in description
+        assert "reply_to_email" in description
+        assert "mark_email_read" in description
 
-        # Check that parameters are documented (note: first Page parameter is excluded from description)
-        assert "additional_recipients:" in description
-        assert "cc_list:" in description
-        assert "subject:" in description
-        assert "message:" in description
+        # Check that parameters are documented
+        assert "action_name" in description
+        assert "action_input" in description
 
-        # Check parameter types are shown (transformed to PageURI types)
-        assert "PageURI" in description
-        assert "List[PageURI]" in description
-        assert "str" in description
+        # Check usage examples
+        assert "action_name=" in description
+        assert "action_input=" in description
 
-    async def test_all_action_tools_have_unique_descriptions(
-        self, mcp_server_with_actions
-    ):
-        """Test that all action tools have unique, specific descriptions."""
-        # Get all action tools
-        send_tool = await mcp_server_with_actions.get_tool("send_email_tool")
-        reply_tool = await mcp_server_with_actions.get_tool("reply_to_email_tool")
-        mark_read_tool = await mcp_server_with_actions.get_tool("mark_email_read_tool")
-
-        # Verify all tools exist
-        assert send_tool is not None
-        assert reply_tool is not None
-        assert mark_read_tool is not None
-
-        # Verify descriptions are unique
-        assert send_tool.description != reply_tool.description
-        assert send_tool.description != mark_read_tool.description
-        assert reply_tool.description != mark_read_tool.description
-
-        # Verify each description contains the correct action name
-        assert "send_email" in send_tool.description
-        assert "reply_to_email" in reply_tool.description
-        assert "mark_email_read" in mark_read_tool.description
-
-    async def test_action_tool_error_handling_realistic(
+    async def test_invoke_action_error_handling(
         self, mcp_server_with_actions, context_with_actions
     ):
-        """Test error handling in action tools with realistic error scenarios."""
+        """Test error handling in invoke_action tool."""
         # Mock the invoke_action method to raise an exception
         context_with_actions.invoke_action = AsyncMock(
-            side_effect=ValueError("Email sending failed: invalid recipient")
+            side_effect=ValueError("Action execution failed: invalid parameters")
         )
 
-        # Get the send email tool
-        send_tool = await mcp_server_with_actions.get_tool("send_email_tool")
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
 
-        # Execute the tool with explicit parameters
-        result = await send_tool.fn(
-            person="SamplePersonPage:invalid_person",
-            subject="Test Subject",
-            message="Test message",
+        # Execute the tool with parameters that will cause an error
+        result = await invoke_tool.fn(
+            action_name="send_email",
+            action_input={
+                "person": "SamplePersonPage:invalid_person",
+                "subject": "Test Subject",
+                "message": "Test message",
+            },
         )
 
         # Verify the error result
         result_data = json.loads(result)
         assert result_data["success"] is False
-        assert "Email sending failed: invalid recipient" in result_data["error"]
+        assert "Action execution failed: invalid parameters" in result_data["error"]
 
-    async def test_no_generic_action_tool_in_realistic_setup(
-        self, mcp_server_with_actions
+    async def test_invoke_action_with_invalid_action_name(
+        self, mcp_server_with_actions, context_with_actions
     ):
-        """Test that no generic 'action_tool' exists in realistic setup."""
-        tools = await mcp_server_with_actions.get_tools()
+        """Test invoke_action with invalid action name."""
+        # Mock the invoke_action method to raise an exception for invalid action
+        context_with_actions.invoke_action = AsyncMock(
+            side_effect=ValueError("Action 'invalid_action' not found")
+        )
 
-        # Should not have any generic action tool
-        assert "action_tool" not in tools
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
 
-        # All action tools should be specifically named
-        action_tools = [tool for tool in tools if tool.endswith("_tool")]
-        expected_action_tools = {
-            "send_email_tool",
-            "reply_to_email_tool",
-            "mark_email_read_tool",
-        }
+        # Execute the tool with invalid action name
+        result = await invoke_tool.fn(
+            action_name="invalid_action", action_input={"some_param": "some_value"}
+        )
 
-        actual_action_tools = set(action_tools)
-        assert expected_action_tools == actual_action_tools
+        # Verify the error result
+        result_data = json.loads(result)
+        assert result_data["success"] is False
+        assert "Action 'invalid_action' not found" in result_data["error"]
 
-        # Verify no generic tool exists
-        for tool_name in action_tools:
-            assert tool_name != "action_tool"
-            assert "_tool" in tool_name
+    async def test_invoke_action_with_complex_input(
+        self, mcp_server_with_actions, context_with_actions
+    ):
+        """Test invoke_action with complex action input containing lists and nested data."""
+        # Mock invoke_action to capture the arguments
+        captured_args = {}
+
+        async def mock_invoke_action(action_name, args):
+            captured_args[action_name] = args
+            return {"success": True}
+
+        context_with_actions.invoke_action = mock_invoke_action
+
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server_with_actions.get_tool("invoke_action")
+
+        # Execute the tool with complex action input
+        result = await invoke_tool.fn(
+            action_name="send_email",
+            action_input={
+                "person": "SamplePersonPage:person1",
+                "additional_recipients": [
+                    "SamplePersonPage:person2",
+                    "SamplePersonPage:person3",
+                ],
+                "cc_list": ["SamplePersonPage:cc1"],
+                "subject": "Test Email Subject",
+                "message": "This is a test email message",
+            },
+        )
+
+        # Verify the result
+        result_data = json.loads(result)
+        assert result_data["success"] is True
+
+        # Verify that the complex input was passed through correctly
+        assert "send_email" in captured_args
+        args = captured_args["send_email"]
+
+        # All parameters should be passed through as-is
+        assert args["person"] == "SamplePersonPage:person1"
+        assert args["additional_recipients"] == [
+            "SamplePersonPage:person2",
+            "SamplePersonPage:person3",
+        ]
+        assert args["cc_list"] == ["SamplePersonPage:cc1"]
+        assert args["subject"] == "Test Email Subject"
+        assert args["message"] == "This is a test email message"

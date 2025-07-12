@@ -55,72 +55,53 @@ class TestMCPGmailIntegration:
         context, gmail_service, mock_client = context_with_gmail
         return create_mcp_server(context), context, gmail_service, mock_client
 
-    async def test_gmail_actions_registered_as_separate_tools(
+    async def test_gmail_actions_available_via_invoke_action(
         self, mcp_server_with_gmail
     ):
-        """Test that Gmail actions are registered as separate MCP tools."""
+        """Test that Gmail actions are available via the single invoke_action tool."""
         mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
 
         tools = await mcp_server.get_tools()
         tool_names = [tool for tool in tools]
 
-        # Check that Gmail action tools are registered with correct names
-        assert "reply_to_email_thread_tool" in tool_names
-        assert "send_email_tool" in tool_names
+        # Check that invoke_action tool is registered
+        assert "invoke_action" in tool_names
 
-        # Verify no generic action_tool exists
-        assert "action_tool" not in tool_names
+        # Verify no individual action tools exist
+        assert "reply_to_email_thread_tool" not in tool_names
+        assert "send_email_tool" not in tool_names
 
-    async def test_reply_to_email_thread_tool_exists(self, mcp_server_with_gmail):
-        """Test that reply_to_email_thread_tool exists and has correct description."""
-        mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
-
-        # Get the reply tool
-        reply_tool = await mcp_server.get_tool("reply_to_email_thread_tool")
-        assert reply_tool is not None
-
-        # Check that the description contains expected information
-        description = reply_tool.description
+        # Get the invoke_action tool and check it lists Gmail actions
+        invoke_tool = await mcp_server.get_tool("invoke_action")
+        description = invoke_tool.description
         assert "reply_to_email_thread" in description
-        assert "Reply to an email thread" in description
-        assert "thread:" in description  # Should show parameters
-
-    async def test_send_email_tool_exists(self, mcp_server_with_gmail):
-        """Test that send_email_tool exists and has correct description."""
-        mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
-
-        # Get the send tool
-        send_tool = await mcp_server.get_tool("send_email_tool")
-        assert send_tool is not None
-
-        # Check that the description contains expected information
-        description = send_tool.description
         assert "send_email" in description
-        assert "Send a new email" in description
-        assert "person:" in description  # Should show parameters
 
-    async def test_reply_to_email_thread_tool_execution(self, mcp_server_with_gmail):
-        """Test executing the reply_to_email_thread_tool."""
+    async def test_reply_to_email_thread_action_execution(self, mcp_server_with_gmail):
+        """Test executing reply_to_email_thread action via invoke_action tool."""
         mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
 
         # Mock the invoke_action method
         context.invoke_action = AsyncMock(return_value={"success": True})
 
-        # Get the reply tool
-        reply_tool = await mcp_server.get_tool("reply_to_email_thread_tool")
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server.get_tool("invoke_action")
 
-        # Execute the tool with explicit parameters
-        result = await reply_tool.fn(
-            thread="EmailThreadPage:thread123",
-            email="EmailPage:email456",
-            recipients=["PersonPage:person1"],
-            cc_list=["PersonPage:person2"],
-            message="This is a test reply",
+        # Execute the tool with action_name and action_input
+        result = await invoke_tool.fn(
+            action_name="reply_to_email_thread",
+            action_input={
+                "thread": "EmailThreadPage:thread123",
+                "email": "EmailPage:email456",
+                "recipients": ["PersonPage:person1"],
+                "cc_list": ["PersonPage:person2"],
+                "message": "This is a test reply",
+            },
         )
 
         # Verify the result
         result_data = json.loads(result)
-        assert result_data == {"success": True}
+        assert result_data["success"] is True
 
         # Verify the action was called correctly
         expected_action_input = {
@@ -134,28 +115,31 @@ class TestMCPGmailIntegration:
             "reply_to_email_thread", expected_action_input
         )
 
-    async def test_send_email_tool_execution(self, mcp_server_with_gmail):
-        """Test executing the send_email_tool."""
+    async def test_send_email_action_execution(self, mcp_server_with_gmail):
+        """Test executing send_email action via invoke_action tool."""
         mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
 
         # Mock the invoke_action method
         context.invoke_action = AsyncMock(return_value={"success": True})
 
-        # Get the send tool
-        send_tool = await mcp_server.get_tool("send_email_tool")
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server.get_tool("invoke_action")
 
-        # Execute the tool with explicit parameters
-        result = await send_tool.fn(
-            person="PersonPage:person1",
-            additional_recipients=["PersonPage:person2"],
-            cc_list=["PersonPage:person3"],
-            subject="Test Email Subject",
-            message="This is a test email message",
+        # Execute the tool with action_name and action_input
+        result = await invoke_tool.fn(
+            action_name="send_email",
+            action_input={
+                "person": "PersonPage:person1",
+                "additional_recipients": ["PersonPage:person2"],
+                "cc_list": ["PersonPage:person3"],
+                "subject": "Test Email Subject",
+                "message": "This is a test email message",
+            },
         )
 
         # Verify the result
         result_data = json.loads(result)
-        assert result_data == {"success": True}
+        assert result_data["success"] is True
 
         # Verify the action was called correctly
         expected_action_input = {
@@ -169,8 +153,8 @@ class TestMCPGmailIntegration:
             "send_email", expected_action_input
         )
 
-    async def test_action_tool_error_handling(self, mcp_server_with_gmail):
-        """Test error handling in action tools."""
+    async def test_invoke_action_error_handling(self, mcp_server_with_gmail):
+        """Test error handling in invoke_action tool."""
         mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
 
         # Mock the invoke_action method to raise an exception
@@ -178,45 +162,23 @@ class TestMCPGmailIntegration:
             side_effect=ValueError("Email sending failed")
         )
 
-        # Get the send tool
-        send_tool = await mcp_server.get_tool("send_email_tool")
+        # Get the invoke_action tool
+        invoke_tool = await mcp_server.get_tool("invoke_action")
 
-        # Execute the tool with explicit parameters
-        result = await send_tool.fn(
-            person="PersonPage:person1",
-            subject="Test Subject",
-            message="Test message",
+        # Execute the tool with parameters that will cause an error
+        result = await invoke_tool.fn(
+            action_name="send_email",
+            action_input={
+                "person": "PersonPage:person1",
+                "subject": "Test Subject",
+                "message": "Test message",
+            },
         )
 
         # Verify the error result
         result_data = json.loads(result)
         assert result_data["success"] is False
         assert "Email sending failed" in result_data["error"]
-
-    async def test_tools_have_unique_names_and_descriptions(
-        self, mcp_server_with_gmail
-    ):
-        """Test that each Gmail action tool has a unique name and description."""
-        mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
-
-        # Get the Gmail action tools
-        reply_tool = await mcp_server.get_tool("reply_to_email_thread_tool")
-        send_tool = await mcp_server.get_tool("send_email_tool")
-
-        assert reply_tool is not None
-        assert send_tool is not None
-
-        # Verify names are different
-        assert reply_tool != send_tool
-
-        # Verify descriptions are different
-        assert reply_tool.description != send_tool.description
-
-        # Verify each description is specific to its action
-        assert "reply_to_email_thread" in reply_tool.description
-        assert "reply_to_email_thread" not in send_tool.description
-        assert "send_email" in send_tool.description
-        assert "send_email" not in reply_tool.description
 
     async def test_mcp_server_with_all_services(self):
         """Test MCP server creation with all Google services."""
@@ -267,48 +229,22 @@ class TestMCPGmailIntegration:
             # Get all tools
             tools = await mcp_server.get_tools()
 
-            # Should have core tools + Gmail action tools
+            # Should have core tools + single invoke_action tool
             # Core tools: search_pages, get_pages
-            # Gmail action tools: reply_to_email_thread_tool, send_email_tool
+            # Action tool: invoke_action
             expected_tools = {
                 "search_pages",
                 "get_pages",
-                "reply_to_email_thread_tool",
-                "send_email_tool",
+                "invoke_action",
             }
 
             actual_tools = set(tools)
             assert expected_tools.issubset(actual_tools)
 
-            # Verify no generic action_tool exists
-            assert "action_tool" not in actual_tools
+            # Verify no individual action tools exist
+            assert "reply_to_email_thread_tool" not in actual_tools
+            assert "send_email_tool" not in actual_tools
 
         finally:
             # Clean up global context after test
             clear_global_context()
-
-    async def test_tool_parameter_extraction(self, mcp_server_with_gmail):
-        """Test that tool descriptions correctly extract parameters."""
-        mcp_server, context, gmail_service, mock_client = mcp_server_with_gmail
-
-        # Get the reply tool
-        reply_tool = await mcp_server.get_tool("reply_to_email_thread_tool")
-        description = reply_tool.description
-
-        # Check that all expected parameters are documented
-        expected_params = [
-            "thread:",
-            "email:",
-            "recipients:",
-            "cc_list:",
-            "message:",
-        ]
-
-        for param in expected_params:
-            assert param in description, f"Parameter {param} not found in description"
-
-        # Check parameter types are shown (transformed to PageURI types)
-        assert "PageURI" in description
-        assert "Optional[PageURI]" in description
-        assert "Optional[List[PageURI]]" in description
-        assert "str" in description

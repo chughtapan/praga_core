@@ -184,11 +184,23 @@ class ActionExecutorMixin(ABC):
         origin = get_origin(param_type)
         args = get_args(param_type)
 
-        if origin in (list, List) and args and self._is_page_type(args[0]):
+        # Handle Sequence[Page], List[Page], etc.
+        if origin in (list, List, Sequence) and args and self._is_page_type(args[0]):
             return List[PageURI]
 
-        if self._is_optional_page_type(param_type):
-            return Union[PageURI, None]
+        # Handle Optional types
+        if origin is Union and len(args) == 2 and type(None) in args:
+            non_none_type = args[0] if args[1] is type(None) else args[1]
+            # Optional[Page] -> Optional[PageURI]
+            if self._is_page_type(non_none_type):
+                return Union[PageURI, None]
+            # Optional[Sequence[Page]] -> Optional[List[PageURI]]
+            elif (
+                get_origin(non_none_type) in (list, List, Sequence)
+                and get_args(non_none_type)
+                and self._is_page_type(get_args(non_none_type)[0])
+            ):
+                return Union[List[PageURI], None]
 
         # For non-Page types, return unchanged
         return param_type
