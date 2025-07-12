@@ -225,15 +225,10 @@ class TestGmailActions:
         # Mock get_page to return the latest email
         self.mock_context.get_page.return_value = latest_email
 
-        # Mock people service to find sender
-        sender_person = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="sender_person", version=1),
-            first_name="Sender",
-            last_name="Two",
-            email="sender2@example.com",
-            source="emails",
+        # Mock _get_current_user_email to return current user email for Reply All
+        self.service._get_current_user_email = AsyncMock(
+            return_value="current-user@example.com"
         )
-        self.mock_people_service.search_existing_records.return_value = [sender_person]
 
         # Mock send_message to succeed
         self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
@@ -242,8 +237,8 @@ class TestGmailActions:
         result = await self.service._reply_to_thread_internal(
             thread=thread,
             email=None,
-            recipients=None,  # Should default to sender of latest email
-            cc_list=None,
+            recipients=None,  # Should trigger Reply All behavior
+            cc_list=None,  # Should trigger Reply All behavior
             message="Reply to the thread",
         )
 
@@ -253,15 +248,17 @@ class TestGmailActions:
         # Verify get_page was called for latest email
         self.mock_context.get_page.assert_called_once_with(email_uri2)
 
-        # Verify people service was called to find sender
-        self.mock_people_service.search_existing_records.assert_called_once_with(
-            "sender2@example.com"
-        )
+        # Verify Reply All behavior - people service should NOT be called
+        self.mock_people_service.search_existing_records.assert_not_called()
 
-        # Verify send_message was called correctly
+        # Verify _get_current_user_email was called for Reply All
+        self.service._get_current_user_email.assert_called_once()
+
+        # Verify send_message was called with Reply All behavior
+        # Should include sender + original recipients (excluding current user)
         self.mock_api_client.send_message.assert_called_once_with(
-            to=["sender2@example.com"],
-            cc=[],
+            to=["sender2@example.com", "recipient@example.com"],  # sender + recipients
+            cc=[],  # no CC in original email
             subject="Re: Test Subject",
             body="Reply to the thread",
             thread_id="thread123",
@@ -346,17 +343,17 @@ class TestGmailActions:
         # Verify the registered action exists
         assert "reply_to_email_thread" in self.registered_actions
 
-        # Call the action
-        result = await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=email,
-            recipients=[],
-            cc_list=None,
-            message="Reply message",
-        )
-
-        # Verify it returns False on failure
-        assert result is False
+        # Call the action and verify it raises RuntimeError
+        with pytest.raises(
+            RuntimeError, match="Failed to reply to thread: Send failed"
+        ):
+            await self.service._reply_to_thread_internal(
+                thread=thread,
+                email=email,
+                recipients=[],
+                cc_list=None,
+                message="Reply message",
+            )
 
     @pytest.mark.asyncio
     async def test_send_email_action_basic(self):
@@ -467,17 +464,232 @@ class TestGmailActions:
         # Mock send_message to fail
         self.mock_api_client.send_message.side_effect = Exception("Send failed")
 
-        # Call the internal action method directly
-        result = await self.service._send_email_internal(
-            person=recipient,
-            additional_recipients=None,
-            cc_list=None,
-            subject="Test Email",
-            message="Test body",
+        # Call the internal action method directly and verify it raises RuntimeError
+        with pytest.raises(RuntimeError, match="Failed to send email: Send failed"):
+            await self.service._send_email_internal(
+                person=recipient,
+                additional_recipients=None,
+                cc_list=None,
+                subject="Test Email",
+                message="Test body",
+            )
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_thread_reply_all_behavior(self):
+        """Test default Reply All behavior when no recipients/CC specified."""
+        # Create test data with multiple recipients and CC
+        thread_uri = PageURI(
+            root="test-root", type="email_thread", id="thread123", version=1
+        )
+        email_uri = PageURI(root="test-root", type="email", id="msg1", version=1)
+
+        thread = EmailThreadPage(
+            uri=thread_uri,
+            thread_id="thread123",
+            subject="Test Thread",
+            emails=[],
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
         )
 
-        # Verify it returns False on failure
-        assert result is False
+        email = EmailPage(
+            uri=email_uri,
+            message_id="msg1",
+            thread_id="thread123",
+            subject="Test Subject",
+            sender="sender@example.com",
+            recipients=[
+                "current-user@example.com",
+                "other1@example.com",
+                "other2@example.com",
+            ],
+            cc_list=["cc1@example.com", "current-user@example.com", "cc2@example.com"],
+            body="Original email",
+            time=datetime.now(),
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+        )
+
+        # Mock _get_current_user_email to return current user email
+        self.service._get_current_user_email = AsyncMock(
+            return_value="current-user@example.com"
+        )
+
+        # Mock send_message to succeed
+        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+
+        # Call the internal action method with no recipients/CC (Reply All)
+        result = await self.service._reply_to_thread_internal(
+            thread=thread,
+            email=email,
+            recipients=None,  # Should trigger Reply All behavior
+            cc_list=None,  # Should trigger Reply All behavior
+            message="Reply All message",
+        )
+
+        # Verify the result
+        assert result is True
+
+        # Verify _get_current_user_email was called
+        self.service._get_current_user_email.assert_called_once()
+
+        # Verify send_message was called with Reply All behavior
+        self.mock_api_client.send_message.assert_called_once()
+        call_args = self.mock_api_client.send_message.call_args
+
+        # Should include sender + other recipients (excluding current user)
+        expected_to = ["sender@example.com", "other1@example.com", "other2@example.com"]
+        assert sorted(call_args[1]["to"]) == sorted(expected_to)
+
+        # Should include original CC (excluding current user)
+        expected_cc = ["cc1@example.com", "cc2@example.com"]
+        assert sorted(call_args[1]["cc"]) == sorted(expected_cc)
+
+        assert call_args[1]["subject"] == "Re: Test Subject"
+        assert call_args[1]["body"] == "Reply All message"
+        assert call_args[1]["thread_id"] == "thread123"
+
+        # Verify people service was NOT called for Reply All
+        self.mock_people_service.search_existing_records.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_thread_with_specific_recipients_and_cc(self):
+        """Test reply with specific recipients and CC list specified."""
+        # Create test data
+        thread_uri = PageURI(
+            root="test-root", type="email_thread", id="thread123", version=1
+        )
+        email_uri = PageURI(root="test-root", type="email", id="msg1", version=1)
+
+        thread = EmailThreadPage(
+            uri=thread_uri,
+            thread_id="thread123",
+            subject="Test Thread",
+            emails=[],
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+        )
+
+        email = EmailPage(
+            uri=email_uri,
+            message_id="msg1",
+            thread_id="thread123",
+            subject="Test Subject",
+            sender="sender@example.com",
+            recipients=["original@example.com"],
+            body="Original email",
+            time=datetime.now(),
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+        )
+
+        # Create mock PersonPages for custom recipients and CC
+        recipient1 = PersonPage(
+            uri=PageURI(root="test-root", type="person", id="recipient1", version=1),
+            first_name="Recipient",
+            last_name="One",
+            email="custom1@example.com",
+            source="emails",
+        )
+        recipient2 = PersonPage(
+            uri=PageURI(root="test-root", type="person", id="recipient2", version=1),
+            first_name="Recipient",
+            last_name="Two",
+            email="custom2@example.com",
+            source="emails",
+        )
+        cc_person = PersonPage(
+            uri=PageURI(root="test-root", type="person", id="cc_person", version=1),
+            first_name="CC",
+            last_name="Person",
+            email="cc@example.com",
+            source="emails",
+        )
+
+        # Mock send_message to succeed
+        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+
+        # Call the internal action method with specific recipients and CC
+        result = await self.service._reply_to_thread_internal(
+            thread=thread,
+            email=email,
+            recipients=[recipient1, recipient2],
+            cc_list=[cc_person],
+            message="Custom reply",
+        )
+
+        # Verify the result
+        assert result is True
+
+        # Verify send_message was called with custom recipients and CC
+        self.mock_api_client.send_message.assert_called_once()
+        call_args = self.mock_api_client.send_message.call_args
+        assert call_args[1]["to"] == ["custom1@example.com", "custom2@example.com"]
+        assert call_args[1]["cc"] == ["cc@example.com"]
+        assert call_args[1]["subject"] == "Re: Test Subject"
+        assert call_args[1]["body"] == "Custom reply"
+        assert call_args[1]["thread_id"] == "thread123"
+
+        # Verify people service was NOT called since recipients were provided
+        self.mock_people_service.search_existing_records.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_thread_reply_all_current_user_is_sender(self):
+        """Test Reply All when current user is the sender."""
+        # Create test data where current user is the sender
+        thread_uri = PageURI(
+            root="test-root", type="email_thread", id="thread123", version=1
+        )
+        email_uri = PageURI(root="test-root", type="email", id="msg1", version=1)
+
+        thread = EmailThreadPage(
+            uri=thread_uri,
+            thread_id="thread123",
+            subject="Test Thread",
+            emails=[],
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+        )
+
+        email = EmailPage(
+            uri=email_uri,
+            message_id="msg1",
+            thread_id="thread123",
+            subject="Test Subject",
+            sender="current-user@example.com",  # Current user is sender
+            recipients=["recipient1@example.com", "recipient2@example.com"],
+            cc_list=["cc1@example.com"],
+            body="Original email",
+            time=datetime.now(),
+            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+        )
+
+        # Mock _get_current_user_email to return current user email
+        self.service._get_current_user_email = AsyncMock(
+            return_value="current-user@example.com"
+        )
+
+        # Mock send_message to succeed
+        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+
+        # Call the internal action method with no recipients/CC (Reply All)
+        result = await self.service._reply_to_thread_internal(
+            thread=thread,
+            email=email,
+            recipients=None,  # Should trigger Reply All behavior
+            cc_list=None,  # Should trigger Reply All behavior
+            message="Reply All to own email",
+        )
+
+        # Verify the result
+        assert result is True
+
+        # Verify send_message was called with Reply All behavior
+        self.mock_api_client.send_message.assert_called_once()
+        call_args = self.mock_api_client.send_message.call_args
+
+        # Should include only other recipients (sender excluded since they're current user)
+        expected_to = ["recipient1@example.com", "recipient2@example.com"]
+        assert sorted(call_args[1]["to"]) == sorted(expected_to)
+
+        # Should include original CC
+        expected_cc = ["cc1@example.com"]
+        assert call_args[1]["cc"] == expected_cc
 
     @pytest.mark.asyncio
     async def test_action_registration(self):

@@ -878,6 +878,115 @@ class TestEmailThreadPageIntegration:
             assert email_summary.body == "Email body content"
             assert isinstance(email_summary.time, datetime)
 
+    @pytest.mark.asyncio
+    async def test_parse_email_headers_with_display_names(self):
+        """Test that email addresses are correctly extracted from headers with display names."""
+        # Setup mock message with display names in headers
+        mock_message = {
+            "id": "msg123",
+            "threadId": "thread456",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "Sam from Cursor <hi@cursor.com>"},
+                    {
+                        "name": "To",
+                        "value": "Tapan C <tapanc@cs.washington.edu>, John Doe <john@example.com>",
+                    },
+                    {
+                        "name": "Cc",
+                        "value": "Jane Smith <jane@example.com>, admin@example.org",
+                    },
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ],
+                "body": {"data": "VGVzdCBlbWFpbCBib2R5"},  # "Test email body" in base64
+            },
+        }
+
+        self.mock_api_client.get_message.return_value = mock_message
+
+        # Create service and fetch page
+        service = GmailService(self.mock_api_client)
+
+        page_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        result = await service.create_email_page(page_uri)
+
+        # Verify email addresses were extracted correctly
+        assert result.sender == "hi@cursor.com"  # Should extract just the email
+        assert result.recipients == ["tapanc@cs.washington.edu", "john@example.com"]
+        assert result.cc_list == ["jane@example.com", "admin@example.org"]
+        assert result.subject == "Test Subject"
+
+    @pytest.mark.asyncio
+    async def test_parse_email_headers_without_display_names(self):
+        """Test that plain email addresses are handled correctly."""
+        # Setup mock message with plain email addresses
+        mock_message = {
+            "id": "msg456",
+            "threadId": "thread789",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Plain Email Test"},
+                    {"name": "From", "value": "plain@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ],
+                "body": {"data": "VGVzdCBlbWFpbCBib2R5"},  # "Test email body" in base64
+            },
+        }
+
+        self.mock_api_client.get_message.return_value = mock_message
+
+        # Create service and fetch page
+        service = GmailService(self.mock_api_client)
+
+        page_uri = PageURI(root="test-root", type="email", id="msg456", version=1)
+        result = await service.create_email_page(page_uri)
+
+        # Verify plain email addresses are preserved
+        assert result.sender == "plain@example.com"
+        assert result.recipients == ["recipient@example.com"]
+        assert result.cc_list == []
+
+    @pytest.mark.asyncio
+    async def test_parse_email_headers_edge_cases(self):
+        """Test edge cases in email header parsing."""
+        # Setup mock message with edge cases
+        mock_message = {
+            "id": "msg789",
+            "threadId": "thread123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Edge Case Test"},
+                    {
+                        "name": "From",
+                        "value": "<only-email@example.com>",
+                    },  # Only email in brackets
+                    {
+                        "name": "To",
+                        "value": "Name Only, <email2@example.com>, email3@example.com",
+                    },  # Mixed formats
+                    {"name": "Cc", "value": ""},  # Empty CC
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ],
+                "body": {"data": "VGVzdCBlbWFpbCBib2R5"},  # "Test email body" in base64
+            },
+        }
+
+        self.mock_api_client.get_message.return_value = mock_message
+
+        # Create service and fetch page
+        service = GmailService(self.mock_api_client)
+
+        page_uri = PageURI(root="test-root", type="email", id="msg789", version=1)
+        result = await service.create_email_page(page_uri)
+
+        # Verify edge cases are handled correctly
+        assert result.sender == "only-email@example.com"
+        # Should skip "Name Only" since it has no "@", but include the others
+        assert result.recipients == ["email2@example.com", "email3@example.com"]
+        assert result.cc_list == []  # Empty CC should result in empty list
+
 
 class TestGmailToolkit:
     """Test suite for GmailService toolkit methods (now integrated into GmailService)."""
@@ -950,88 +1059,5 @@ class TestGmailToolkit:
         args, kwargs = self.mock_api_client.search_messages.call_args
         query = args[0]
         assert query == 'from:"test@example.com" urgent project'
-        assert len(result) == 1
-        assert isinstance(result[0], EmailPage)
-
-    @pytest.mark.asyncio
-    async def test_search_emails_to_person_basic(self):
-        mock_messages = [{"id": "msg1"}]
-        self.mock_api_client.search_messages.return_value = (mock_messages, None)
-        mock_pages = [AsyncMock(spec=EmailPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-        self.mock_context.get_pages.return_value = mock_pages
-        with patch(
-            "pragweb.google_api.utils.resolve_person_identifier",
-            return_value="recipient@example.com",
-        ):
-            result = await self.toolkit.search_emails_to_person("recipient@example.com")
-        args, kwargs = self.mock_api_client.search_messages.call_args
-        query = args[0]
-        assert query == 'to:"recipient@example.com" OR cc:"recipient@example.com"'
-        assert len(result) == 1
-        assert isinstance(result[0], EmailPage)
-
-    @pytest.mark.asyncio
-    async def test_search_emails_to_person_with_keywords(self):
-        mock_messages = [{"id": "msg1"}]
-        self.mock_api_client.search_messages.return_value = (mock_messages, None)
-        mock_pages = [AsyncMock(spec=EmailPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-        self.mock_context.get_pages.return_value = mock_pages
-        with patch(
-            "pragweb.google_api.utils.resolve_person_identifier",
-            return_value="recipient@example.com",
-        ):
-            result = await self.toolkit.search_emails_to_person(
-                "recipient@example.com", content="meeting notes"
-            )
-        args, kwargs = self.mock_api_client.search_messages.call_args
-        query = args[0]
-        assert (
-            query
-            == 'to:"recipient@example.com" OR cc:"recipient@example.com" meeting notes'
-        )
-        assert len(result) == 1
-        assert isinstance(result[0], EmailPage)
-
-    @pytest.mark.asyncio
-    async def test_search_emails_by_content(self):
-        mock_messages = [{"id": "msg1"}]
-        self.mock_api_client.search_messages.return_value = (mock_messages, None)
-        mock_pages = [AsyncMock(spec=EmailPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-        self.mock_context.get_pages.return_value = mock_pages
-        result = await self.toolkit.search_emails_by_content("important announcement")
-        args, kwargs = self.mock_api_client.search_messages.call_args
-        query = args[0]
-        assert query == "important announcement"
-        assert len(result) == 1
-        assert isinstance(result[0], EmailPage)
-
-    @pytest.mark.asyncio
-    async def test_get_recent_emails_basic(self):
-        mock_messages = [{"id": "msg1"}]
-        self.mock_api_client.search_messages.return_value = (mock_messages, None)
-        mock_pages = [AsyncMock(spec=EmailPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-        self.mock_context.get_pages.return_value = mock_pages
-        result = await self.toolkit.get_recent_emails(days=7)
-        args, kwargs = self.mock_api_client.search_messages.call_args
-        query = args[0]
-        assert query == "newer_than:7d"
-        assert len(result) == 1
-        assert isinstance(result[0], EmailPage)
-
-    @pytest.mark.asyncio
-    async def test_get_recent_emails_with_keywords(self):
-        mock_messages = [{"id": "msg1"}]
-        self.mock_api_client.search_messages.return_value = (mock_messages, None)
-        mock_pages = [AsyncMock(spec=EmailPage)]
-        self.mock_context.get_page.side_effect = mock_pages
-        self.mock_context.get_pages.return_value = mock_pages
-        result = await self.toolkit.get_recent_emails(days=3)
-        args, kwargs = self.mock_api_client.search_messages.call_args
-        query = args[0]
-        assert query == "newer_than:3d"
         assert len(result) == 1
         assert isinstance(result[0], EmailPage)

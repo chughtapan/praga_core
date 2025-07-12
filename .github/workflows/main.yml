@@ -24,5 +24,8 @@ jobs:
           source .venv/bin/activate
           uv pip install -e .
 
-      - name: Run tests
+      - name: Run unit tests
         run: uv run pytest
+
+      - name: Run integration tests
+        run: uv run pytest tests/integration/

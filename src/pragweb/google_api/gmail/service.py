@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from email.utils import parsedate_to_datetime
+from email.utils import parseaddr, parsedate_to_datetime
 from typing import Any, List, Optional, Tuple
 
 from praga_core.agents import PaginatedResponse, tool
@@ -11,7 +11,6 @@ from pragweb.toolkit_service import ToolkitService
 
 from ..client import GoogleAPIClient
 from ..people.page import PersonPage
-from ..people.service import PeopleService
 from ..utils import resolve_person_identifier
 from .page import EmailPage, EmailSummary, EmailThreadPage
 from .utils import GmailParser
@@ -25,10 +24,23 @@ class GmailService(ToolkitService):
     def __init__(self, api_client: GoogleAPIClient) -> None:
         super().__init__(api_client)
         self.parser = GmailParser()
+        self._current_user_email: Optional[str] = None
 
         # Register handlers using decorators
         self._register_handlers()
         logger.info("Gmail service initialized and handlers registered")
+
+    async def _get_current_user_email(self) -> Optional[str]:
+        """Get current user email, fetching it if not already cached."""
+        if self._current_user_email is None:
+            try:
+                profile = await self.api_client.get_user_profile()
+                self._current_user_email = profile.get("emailAddress", "").lower()
+                logger.debug(f"Current user email: {self._current_user_email}")
+            except Exception as e:
+                logger.warning(f"Could not get current user email: {e}")
+                self._current_user_email = ""
+        return self._current_user_email if self._current_user_email else None
 
     def _register_handlers(self) -> None:
         """Register handlers with context using decorators."""
@@ -103,13 +115,29 @@ class GmailService(ToolkitService):
 
         # Parse basic fields
         subject = headers.get("Subject", "")
-        sender = headers.get("From", "")
-        recipients = headers.get("To", "").split(",") if headers.get("To") else []
-        cc_list = headers.get("Cc", "").split(",") if headers.get("Cc") else []
 
-        # Clean up recipient lists
-        recipients = [r.strip() for r in recipients if r.strip()]
-        cc_list = [cc.strip() for cc in cc_list if cc.strip()]
+        # Extract sender email address
+        sender_header = headers.get("From", "")
+        _, sender_email = parseaddr(sender_header)
+        sender = sender_email if sender_email and "@" in sender_email else sender_header
+
+        # Extract recipient email addresses
+        recipients_header = headers.get("To", "")
+        recipients = []
+        if recipients_header:
+            for addr in recipients_header.split(","):
+                _, email = parseaddr(addr.strip())
+                if email and "@" in email:
+                    recipients.append(email)
+
+        # Extract CC email addresses
+        cc_header = headers.get("Cc", "")
+        cc_list = []
+        if cc_header:
+            for addr in cc_header.split(","):
+                _, email = parseaddr(addr.strip())
+                if email and "@" in email:
+                    cc_list.append(email)
 
         # Extract body using parser
         body = self.parser.extract_body(message.get("payload", {}))
@@ -367,36 +395,50 @@ class GmailService(ToolkitService):
                 # Fetch the full email page
                 page = await self.context.get_page(latest_email_uri)
                 if not isinstance(page, EmailPage):
-                    logger.error(f"Failed to get email page for {latest_email_uri}")
-                    return False
+                    error_msg = f"Failed to get email page for {latest_email_uri}"
+                    logger.error(error_msg)
+                    raise ValueError(error_msg)
                 email = page
 
             if email is None:
-                logger.error("No email to reply to in thread")
-                return False
+                error_msg = "No email to reply to in thread"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
 
-            # Determine recipients if not provided
-            if recipients is None:
-                # Default to replying to the sender of the email being replied to
-                sender_email = email.sender
-                # Try to find person page for sender
-                try:
-                    people_service = self.context.get_service("people")
-                    if isinstance(people_service, PeopleService):
-                        sender_people = await people_service.search_existing_records(
-                            sender_email
-                        )
-                    else:
-                        logger.warning("People service is not a PeopleService instance")
-                        sender_people = []
-                except Exception as e:
-                    logger.warning(f"Could not find people service or sender: {e}")
-                    sender_people = []
-                recipients = sender_people[:1] if sender_people else []
+            # Determine recipients and CC if not provided - Reply All behavior
+            if recipients is None and cc_list is None:
+                # Default Reply All behavior: include sender + original recipients as recipients,
+                # and original CC list as CC (excluding current user)
 
-            # Convert PersonPage objects to email addresses
-            to_emails = [person.email for person in (recipients or [])]
-            cc_emails = [person.email for person in (cc_list or [])]
+                # Get current user email to exclude from reply
+                current_user_email = await self._get_current_user_email()
+
+                # Build recipient list: sender + original recipients (excluding current user)
+                to_emails = []
+
+                # Add sender as recipient
+                if email.sender and email.sender.lower() != current_user_email:
+                    to_emails.append(email.sender)
+
+                # Add original recipients (excluding current user)
+                for recipient in email.recipients:
+                    if (
+                        recipient.lower() != current_user_email
+                        and recipient not in to_emails
+                    ):
+                        to_emails.append(recipient)
+
+                # Add original CC as CC (excluding current user)
+                cc_emails = []
+                for cc in email.cc_list:
+                    if cc.lower() != current_user_email:
+                        cc_emails.append(cc)
+
+                logger.info(f"Reply All - to: {to_emails}, cc: {cc_emails}")
+            else:
+                # Use provided recipients and CC - convert PersonPage objects to email addresses
+                to_emails = [person.email for person in (recipients or [])]
+                cc_emails = [person.email for person in (cc_list or [])]
 
             # Prepare the reply
             subject = email.subject
@@ -418,8 +460,9 @@ class GmailService(ToolkitService):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to reply to thread: {e}")
-            return False
+            error_msg = f"Failed to reply to thread: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     async def _send_email_internal(
         self,
@@ -450,8 +493,9 @@ class GmailService(ToolkitService):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
-            return False
+            error_msg = f"Failed to send email: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     @property
     def name(self) -> str:
