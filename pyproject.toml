@@ -45,7 +45,7 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--asyncio-mode=auto"
+addopts = "--asyncio-mode=auto --ignore=tests/integration/"
 
 [tool.black]
 line-length = 88

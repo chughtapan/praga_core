@@ -343,17 +343,17 @@ class TestGmailActions:
         # Verify the registered action exists
         assert "reply_to_email_thread" in self.registered_actions
 
-        # Call the action
-        result = await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=email,
-            recipients=[],
-            cc_list=None,
-            message="Reply message",
-        )
-
-        # Verify it returns False on failure
-        assert result is False
+        # Call the action and verify it raises RuntimeError
+        with pytest.raises(
+            RuntimeError, match="Failed to reply to thread: Send failed"
+        ):
+            await self.service._reply_to_thread_internal(
+                thread=thread,
+                email=email,
+                recipients=[],
+                cc_list=None,
+                message="Reply message",
+            )
 
     @pytest.mark.asyncio
     async def test_send_email_action_basic(self):
@@ -464,17 +464,15 @@ class TestGmailActions:
         # Mock send_message to fail
         self.mock_api_client.send_message.side_effect = Exception("Send failed")
 
-        # Call the internal action method directly
-        result = await self.service._send_email_internal(
-            person=recipient,
-            additional_recipients=None,
-            cc_list=None,
-            subject="Test Email",
-            message="Test body",
-        )
-
-        # Verify it returns False on failure
-        assert result is False
+        # Call the internal action method directly and verify it raises RuntimeError
+        with pytest.raises(RuntimeError, match="Failed to send email: Send failed"):
+            await self.service._send_email_internal(
+                person=recipient,
+                additional_recipients=None,
+                cc_list=None,
+                subject="Test Email",
+                message="Test body",
+            )
 
     @pytest.mark.asyncio
     async def test_reply_to_email_thread_reply_all_behavior(self):
