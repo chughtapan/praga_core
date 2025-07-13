@@ -785,8 +785,8 @@ class ProvenanceError(PragaError):
 ```python
 import asyncio
 from praga_core import ServerContext, set_global_context
-from pragweb.google_api.gmail import GmailService
-from pragweb.google_api.client import GoogleAPIClient
+from pragweb.services import EmailService
+from pragweb.api_clients.google import GoogleProviderClient
 
 async def main():
     # Initialize context
@@ -797,11 +797,11 @@ async def main():
     set_global_context(context)
     
     # Initialize services
-    google_client = GoogleAPIClient()
-    gmail_service = GmailService(google_client)
+    google_provider = GoogleProviderClient()
+    email_service = EmailService({"google": google_provider})
     
-    # Use the service
-    emails = await gmail_service.get_recent_emails(days=7)
+    # Use the service through tools
+    emails = await email_service.search_emails("recent emails", days=7)
     for email in emails.results:
         print(f"- {email.subject} from {email.sender}")
 

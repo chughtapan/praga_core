@@ -69,15 +69,11 @@ class MicrosoftAuthManager(BaseAuthManager):
         # TODO: Add Microsoft fields to AppConfig for consistency
         import os
 
-        try:
-            self._client_id = os.getenv("MICROSOFT_CLIENT_ID", "")
-            self._client_secret = os.getenv("MICROSOFT_CLIENT_SECRET", "")
-            self._redirect_uri = os.getenv(
-                "MICROSOFT_REDIRECT_URI", "http://localhost:8080"
-            )
-        except Exception as e:
-            logger.error(f"Failed to load Microsoft client credentials: {e}")
-            raise
+        self._client_id = os.getenv("MICROSOFT_CLIENT_ID", "")
+        self._client_secret = os.getenv("MICROSOFT_CLIENT_SECRET", "")
+        self._redirect_uri = os.getenv(
+            "MICROSOFT_REDIRECT_URI", "http://localhost:8080"
+        )
 
         # Try to load existing token
         self._load_token()
@@ -128,50 +124,45 @@ class MicrosoftAuthManager(BaseAuthManager):
 
     def _perform_oauth_flow(self) -> None:
         """Perform OAuth 2.0 flow to get access token."""
-        try:
-            # Create OAuth2 session
-            oauth = OAuth2Session(
-                client_id=self._client_id,
-                redirect_uri=self._redirect_uri,
-                scope=_SCOPES,
-            )
+        # Create OAuth2 session
+        oauth = OAuth2Session(
+            client_id=self._client_id,
+            redirect_uri=self._redirect_uri,
+            scope=_SCOPES,
+        )
 
-            # Get authorization URL
-            authorization_url, state = oauth.authorization_url(
-                AUTHORIZATION_URL,
-                prompt="consent",  # Force consent screen
-            )
+        # Get authorization URL
+        authorization_url, state = oauth.authorization_url(
+            AUTHORIZATION_URL,
+            prompt="consent",  # Force consent screen
+        )
 
-            logger.info(
-                f"Please visit this URL to authorize the application: {authorization_url}"
-            )
-            print(
-                f"\nPlease visit this URL to authorize the application:\n{authorization_url}\n"
-            )
+        logger.info(
+            f"Please visit this URL to authorize the application: {authorization_url}"
+        )
+        print(
+            f"\nPlease visit this URL to authorize the application:\n{authorization_url}\n"
+        )
 
-            # Get authorization code from user
-            authorization_response = input("Enter the full callback URL: ").strip()
+        # Get authorization code from user
+        authorization_response = input("Enter the full callback URL: ").strip()
 
-            # Exchange authorization code for access token
-            token = oauth.fetch_token(
-                TOKEN_URL,
-                authorization_response=authorization_response,
-                client_secret=self._client_secret,
-            )
+        # Exchange authorization code for access token
+        token = oauth.fetch_token(
+            TOKEN_URL,
+            authorization_response=authorization_response,
+            client_secret=self._client_secret,
+        )
 
-            self._access_token = token["access_token"]
-            self._refresh_token = token.get("refresh_token")
+        self._access_token = token["access_token"]
+        self._refresh_token = token.get("refresh_token")
 
-            # Calculate expiration time
-            expires_in = token.get("expires_in", 3600)
-            self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+        # Calculate expiration time
+        expires_in = token.get("expires_in", 3600)
+        self._token_expires_at = datetime.now() + timedelta(seconds=expires_in)
 
-            self._save_token()
-            logger.info("Successfully obtained Microsoft access token")
-
-        except Exception as e:
-            logger.error(f"Failed to perform OAuth flow: {e}")
-            raise
+        self._save_token()
+        logger.info("Successfully obtained Microsoft access token")
 
     def _refresh_access_token(self) -> None:
         """Refresh the access token using refresh token."""

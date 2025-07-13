@@ -216,9 +216,6 @@ class MockGoogleProviderClient(BaseProviderClient):
 
             return PersonPage(
                 uri=page_uri,
-                provider_person_id=contact_data.get(
-                    "resourceName", "test_person"
-                ).replace("people/", ""),
                 first_name=first_name,
                 last_name=last_name,
                 email=email,
@@ -318,7 +315,6 @@ class TestEmailServiceActions:
         # Create person pages for recipients
         person1 = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person1", version=1),
-            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
@@ -326,7 +322,6 @@ class TestEmailServiceActions:
 
         person2 = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person2", version=1),
-            provider_person_id="person2",
             first_name="Jane",
             last_name="Smith",
             email="jane@example.com",
@@ -406,7 +401,6 @@ class TestEmailServiceActions:
         # Create person page
         primary_recipient = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person1", version=1),
-            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
@@ -446,7 +440,6 @@ class TestEmailServiceActions:
         # Create person pages
         primary = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person1", version=1),
-            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
@@ -454,7 +447,6 @@ class TestEmailServiceActions:
 
         additional1 = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person2", version=1),
-            provider_person_id="person2",
             first_name="Jane",
             last_name="Smith",
             email="jane@example.com",
@@ -462,7 +454,6 @@ class TestEmailServiceActions:
 
         additional2 = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person3", version=1),
-            provider_person_id="person3",
             first_name="Bob",
             last_name="Wilson",
             email="bob@example.com",
@@ -470,7 +461,6 @@ class TestEmailServiceActions:
 
         cc_person = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person4", version=1),
-            provider_person_id="person4",
             first_name="Alice",
             last_name="Brown",
             email="alice@example.com",
@@ -518,7 +508,6 @@ class TestEmailServiceActions:
         # Create person page
         recipient = PersonPage(
             uri=PageURI(root="test://example", type="person", id="person1", version=1),
-            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",

@@ -46,16 +46,13 @@ class GoogleProviderClient(BaseProviderClient):
 
     async def test_connection(self) -> bool:
         """Test connection to Google APIs."""
-        try:
-            # Test authentication
-            if not self.auth_manager.is_authenticated():
-                return False
-
-            # Test a simple API call
-            await self._email_client.search_messages("", max_results=1)
-            return True
-        except Exception:
+        # Test authentication
+        if not self.auth_manager.is_authenticated():
             return False
+
+        # Test a simple API call
+        await self._email_client.search_messages("", max_results=1)
+        return True
 
     def get_provider_name(self) -> str:
         """Get provider name."""

@@ -76,12 +76,8 @@ class GoogleAuthManager(BaseAuthManager):
         )
 
         # Refresh to get an access token
-        try:
-            creds.refresh(Request())  # type: ignore[no-untyped-call]
-            return creds
-        except Exception as e:
-            logger.error(f"Failed to refresh token from environment variables: {e}")
-            return None
+        creds.refresh(Request())  # type: ignore[no-untyped-call]
+        return creds
 
     def _scopes_match(
         self, stored_scopes: list[str], required_scopes: list[str]

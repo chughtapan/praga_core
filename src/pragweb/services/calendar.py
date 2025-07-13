@@ -1,8 +1,8 @@
 """Calendar orchestration service that coordinates between multiple providers."""
 
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, cast
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import PageURI
@@ -24,6 +24,7 @@ class CalendarService(ToolkitService):
             raise ValueError("CalendarService requires exactly one provider")
 
         self.providers = providers
+        self.provider_client = list(providers.values())[0]
         super().__init__()
         self._register_handlers()
         logger.info(
@@ -127,20 +128,17 @@ class CalendarService(ToolkitService):
         """Create a CalendarEventPage from a Calendar event ID."""
         # 1. Fetch event from Calendar API using shared client
         try:
-            provider_client = (
-                list(self.providers.values())[0] if self.providers else None
-            )
-            if not provider_client:
+            if not self.provider_client:
                 raise ValueError("No provider available for service")
 
-            event = await provider_client.calendar_client.get_event(
+            event = await self.provider_client.calendar_client.get_event(
                 event_id, calendar_id
             )
         except Exception as e:
             raise ValueError(f"Failed to fetch event {event_id}: {e}")
 
         # Parse to CalendarEventPage using provider client
-        return provider_client.calendar_client.parse_event_to_calendar_page(
+        return self.provider_client.calendar_client.parse_event_to_calendar_page(
             event, page_uri
         )
 
@@ -159,36 +157,92 @@ class CalendarService(ToolkitService):
         return await self.create_page(page_uri, event_id, calendar_id)
 
     @tool()
-    async def search_calendar_events(
+    async def get_upcoming_events(
         self,
-        query: str,
-        provider: str = "google",
-        calendar_id: str = "primary",
-        max_results: int = 10,
+        days: int = 7,
+        content: Optional[str] = None,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[CalendarEventPage]:
-        """Search for calendar events across providers.
+        """Get upcoming events for the next N days.
 
         Args:
-            query: Search query string
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            max_results: Maximum number of results to return
-            cursor: Pagination cursor
+            days: Number of days to look ahead (default: 7)
+            content: Optional content to search for in event title or description
+            cursor: Cursor token for pagination (optional)
 
         Returns:
-            Paginated response of matching calendar event pages
+            Paginated response of upcoming calendar event pages
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
+        calendar_id = "primary"
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
-            # Search events
-            search_results = await provider_client.calendar_client.search_events(
-                query=query,
+            # Get events from now to specified days ahead
+            now = datetime.now(timezone.utc)
+            end_time = now + timedelta(days=days)
+
+            # Use provider-specific method for upcoming events
+            provider_name = list(self.providers.keys())[0]
+            if provider_name == "google":
+                events, next_cursor = await self._get_upcoming_events_google(
+                    self.provider_client, now, end_time, calendar_id, content
+                )
+            elif provider_name == "microsoft":
+                events, next_cursor = await self._get_upcoming_events_microsoft(
+                    self.provider_client, now, end_time, calendar_id, content
+                )
+            else:
+                raise ValueError(f"Unsupported provider: {provider_name}")
+
+            # Convert to CalendarEventPage objects
+            event_pages = []
+            for event in events:
+                page_uri = PageURI(
+                    root=self.context.root,
+                    type=self.name,
+                    id=event["id"],
+                )
+                event_page = (
+                    self.provider_client.calendar_client.parse_event_to_calendar_page(
+                        event, page_uri
+                    )
+                )
+                event_pages.append(event_page)
+
+            return PaginatedResponse(
+                results=event_pages,
+                next_cursor=next_cursor,
+            )
+        except Exception as e:
+            logger.error(f"Failed to get upcoming events: {e}")
+            return PaginatedResponse(results=[], next_cursor=None)
+
+    @tool()
+    async def get_events_by_keyword(
+        self,
+        keyword: str,
+        cursor: Optional[str] = None,
+    ) -> PaginatedResponse[CalendarEventPage]:
+        """Get events containing a specific keyword in title or description.
+
+        Args:
+            keyword: Keyword to search for in event title or description
+            cursor: Cursor token for pagination (optional)
+
+        Returns:
+            Paginated response of calendar event pages containing the keyword
+        """
+        calendar_id = "primary"
+        if not self.provider_client:
+            return PaginatedResponse(results=[], next_cursor=None)
+
+        try:
+            # Search events using provider's search functionality
+            search_results = await self.provider_client.calendar_client.search_events(
+                query=keyword,
                 calendar_id=calendar_id,
-                max_results=max_results,
+                max_results=50,
                 page_token=cursor,
             )
 
@@ -201,7 +255,7 @@ class CalendarService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=self.name,  # Use service name like other services
+                    type=self.name,
                     id=event_id,
                 )
                 for event_id in event_ids
@@ -209,7 +263,6 @@ class CalendarService(ToolkitService):
 
             # Resolve URIs to pages
             pages = await self.context.get_pages(uris)
-            # Cast to CalendarEventPage list for type safety
             event_pages = [
                 page for page in pages if isinstance(page, CalendarEventPage)
             ]
@@ -219,112 +272,42 @@ class CalendarService(ToolkitService):
                 next_cursor=search_results.get("nextPageToken"),
             )
         except Exception as e:
-            logger.error(f"Failed to search calendar events: {e}")
-            return PaginatedResponse(results=[], next_cursor=None)
-
-    @tool()
-    async def get_upcoming_events(
-        self,
-        provider: str = "google",
-        calendar_id: str = "primary",
-        max_results: int = 10,
-        cursor: Optional[str] = None,
-    ) -> PaginatedResponse[CalendarEventPage]:
-        """Get upcoming calendar events from a provider.
-
-        Args:
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            max_results: Maximum number of results to return
-            cursor: Pagination cursor
-
-        Returns:
-            Paginated response of upcoming calendar event pages
-        """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
-            return PaginatedResponse(results=[], next_cursor=None)
-
-        try:
-            # Get events from now to next 30 days
-            now = datetime.now()
-            end_time = now + timedelta(days=30)
-
-            # List events
-            events_results = await provider_client.calendar_client.list_events(
-                calendar_id=calendar_id,
-                time_min=now,
-                time_max=end_time,
-                max_results=max_results,
-                page_token=cursor,
-            )
-
-            # Extract event IDs
-            event_ids = []
-            for event in events_results.get("items", []):
-                event_ids.append(event["id"])
-
-            # Create URIs
-            uris = [
-                PageURI(
-                    root=self.context.root,
-                    type=self.name,  # Use service name like other services
-                    id=event_id,
-                )
-                for event_id in event_ids
-            ]
-
-            # Resolve URIs to pages
-            pages = await self.context.get_pages(uris)
-            # Cast to CalendarEventPage list for type safety
-            event_pages = [
-                page for page in pages if isinstance(page, CalendarEventPage)
-            ]
-
-            return PaginatedResponse(
-                results=event_pages,
-                next_cursor=events_results.get("nextPageToken"),
-            )
-        except Exception as e:
-            logger.error(f"Failed to get upcoming events: {e}")
+            logger.error(f"Failed to get events by keyword: {e}")
             return PaginatedResponse(results=[], next_cursor=None)
 
     @tool()
     async def get_events_for_date(
         self,
         date: datetime,
-        provider: str = "google",
-        calendar_id: str = "primary",
-        max_results: int = 50,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[CalendarEventPage]:
         """Get calendar events for a specific date.
 
         Args:
             date: Date to get events for
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            max_results: Maximum number of results to return
             cursor: Pagination cursor
 
         Returns:
             Paginated response of calendar event pages for the date
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
+        calendar_id = "primary"
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # Get events for the specific date (all day)
+            # Ensure the date is timezone-aware
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
             start_time = date.replace(hour=0, minute=0, second=0, microsecond=0)
             end_time = start_time + timedelta(days=1)
 
             # List events
-            events_results = await provider_client.calendar_client.list_events(
+            events_results = await self.provider_client.calendar_client.list_events(
                 calendar_id=calendar_id,
                 time_min=start_time,
                 time_max=end_time,
-                max_results=max_results,
+                max_results=50,
                 page_token=cursor,
             )
 
@@ -362,72 +345,97 @@ class CalendarService(ToolkitService):
     async def find_events_with_person(
         self,
         person: PersonPage,
-        provider: str = "google",
-        calendar_id: str = "primary",
-        max_results: int = 10,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[CalendarEventPage]:
         """Find calendar events that include a specific person.
 
         Args:
             person: Person to search for
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            max_results: Maximum number of results to return
             cursor: Pagination cursor
 
         Returns:
             Paginated response of calendar event pages with the person
         """
-        # Search for events mentioning the person's email
-        result = await self.search_calendar_events(
-            query=person.email,
-            provider=provider,
-            calendar_id=calendar_id,
-            max_results=max_results,
-            cursor=cursor,
-        )
-        return cast(PaginatedResponse[CalendarEventPage], result)
+        calendar_id = "primary"
+        max_results = 10
+        if not self.provider_client:
+            return PaginatedResponse(results=[], next_cursor=None)
+
+        try:
+            # Search for events mentioning the person's email
+            search_results = await self.provider_client.calendar_client.search_events(
+                query=person.email,
+                calendar_id=calendar_id,
+                max_results=max_results,
+                page_token=cursor,
+            )
+
+            # Extract event IDs
+            event_ids = []
+            for event in search_results.get("items", []):
+                event_ids.append(event["id"])
+
+            # Create URIs
+            uris = [
+                PageURI(
+                    root=self.context.root,
+                    type=self.name,
+                    id=event_id,
+                )
+                for event_id in event_ids
+            ]
+
+            # Resolve URIs to pages
+            pages = await self.context.get_pages(uris)
+            event_pages = [
+                page for page in pages if isinstance(page, CalendarEventPage)
+            ]
+
+            return PaginatedResponse(
+                results=event_pages,
+                next_cursor=search_results.get("nextPageToken"),
+            )
+        except Exception as e:
+            logger.error(f"Failed to find events with person: {e}")
+            return PaginatedResponse(results=[], next_cursor=None)
 
     @tool()
     async def get_events_by_date_range(
         self,
         start_date: str,
-        days: int,
-        provider: str = "google",
-        calendar_id: str = "primary",
+        num_days: int,
         content: Optional[str] = None,
-    ) -> List[CalendarEventPage]:
-        """Get events within a date range.
+        cursor: Optional[str] = None,
+    ) -> PaginatedResponse[CalendarEventPage]:
+        """Get calendar events within a date range.
 
         Args:
             start_date: Start date in YYYY-MM-DD format
-            days: Number of days from start date
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            content: Optional content filter
+            num_days: Number of days to search
+            content: Optional content to search for in event title or description
+            cursor: Cursor token for pagination (optional)
 
         Returns:
-            List of calendar event pages in the date range
+            Paginated response of calendar event pages in the date range
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
-            return []
+        calendar_id = "primary"
+        if not self.provider_client:
+            return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # Convert start_date string to datetime
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = start_dt + timedelta(days=days)
+            end_dt = start_dt + timedelta(days=num_days)
 
             # Use provider-specific method for date range filtering
             provider_name = list(self.providers.keys())[0]
             if provider_name == "google":
-                events = await self._get_events_by_date_range_google(
-                    provider_client, start_dt, end_dt, calendar_id, content
+                events, next_cursor = await self._get_events_by_date_range_google(
+                    self.provider_client, start_dt, end_dt, calendar_id, content
                 )
             elif provider_name == "microsoft":
-                events = await self._get_events_by_date_range_microsoft(
-                    provider_client, start_dt, end_dt, calendar_id, content
+                events, next_cursor = await self._get_events_by_date_range_microsoft(
+                    self.provider_client, start_dt, end_dt, calendar_id, content
                 )
             else:
                 raise ValueError(f"Unsupported provider: {provider_name}")
@@ -441,54 +449,55 @@ class CalendarService(ToolkitService):
                     id=event["id"],
                 )
                 event_page = (
-                    provider_client.calendar_client.parse_event_to_calendar_page(
+                    self.provider_client.calendar_client.parse_event_to_calendar_page(
                         event, page_uri
                     )
                 )
                 event_pages.append(event_page)
 
-            return event_pages
+            return PaginatedResponse(
+                results=event_pages,
+                next_cursor=next_cursor,
+            )
 
         except Exception as e:
             logger.error(f"Failed to get events by date range: {e}")
-            return []
+            return PaginatedResponse(results=[], next_cursor=None)
 
     @tool()
     async def get_events_with_person(
         self,
-        person_identifier: str,
-        provider: str = "google",
-        calendar_id: str = "primary",
+        person: str,
         content: Optional[str] = None,
-    ) -> List[CalendarEventPage]:
-        """Get events that include a specific person.
+        cursor: Optional[str] = None,
+    ) -> PaginatedResponse[CalendarEventPage]:
+        """Get calendar events where a specific person is involved (as attendee or organizer).
 
         Args:
-            person_identifier: Email address or name of the person
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            content: Optional content filter
+            person: Email address or name of the person to search for
+            content: Additional content to search for in event title or description (optional)
+            cursor: Cursor token for pagination (optional)
 
         Returns:
-            List of calendar event pages that include the person
+            Paginated response of calendar event pages that include the person
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
-            return []
+        calendar_id = "primary"
+        if not self.provider_client:
+            return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # Resolve person identifier to email
-            email = resolve_person_identifier(person_identifier)
+            email = resolve_person_identifier(person)
 
             # Use provider-specific method for person filtering
             provider_name = list(self.providers.keys())[0]
             if provider_name == "google":
-                events = await self._get_events_with_person_google(
-                    provider_client, email, calendar_id, content
+                events, next_cursor = await self._get_events_with_person_google(
+                    self.provider_client, email, calendar_id, content
                 )
             elif provider_name == "microsoft":
-                events = await self._get_events_with_person_microsoft(
-                    provider_client, email, calendar_id, content
+                events, next_cursor = await self._get_events_with_person_microsoft(
+                    self.provider_client, email, calendar_id, content
                 )
             else:
                 raise ValueError(f"Unsupported provider: {provider_name}")
@@ -502,79 +511,20 @@ class CalendarService(ToolkitService):
                     id=event["id"],
                 )
                 event_page = (
-                    provider_client.calendar_client.parse_event_to_calendar_page(
+                    self.provider_client.calendar_client.parse_event_to_calendar_page(
                         event, page_uri
                     )
                 )
                 event_pages.append(event_page)
 
-            return event_pages
+            return PaginatedResponse(
+                results=event_pages,
+                next_cursor=next_cursor,
+            )
 
         except Exception as e:
             logger.error(f"Failed to get events with person: {e}")
-            return []
-
-    @tool()
-    async def get_upcoming_events_basic(
-        self,
-        days: int = 7,
-        provider: str = "google",
-        calendar_id: str = "primary",
-        content: Optional[str] = None,
-    ) -> List[CalendarEventPage]:
-        """Get upcoming events in the next N days.
-
-        Args:
-            days: Number of days from today
-            provider: Provider to search (google, microsoft, etc.)
-            calendar_id: Calendar ID to search
-            content: Optional content filter
-
-        Returns:
-            List of upcoming calendar event pages
-        """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
-            return []
-
-        try:
-            # Get current time and end time
-            now = datetime.now()
-            end_time = now + timedelta(days=days)
-
-            # Use provider-specific method for upcoming events
-            provider_name = list(self.providers.keys())[0]
-            if provider_name == "google":
-                events = await self._get_upcoming_events_google(
-                    provider_client, now, end_time, calendar_id, content
-                )
-            elif provider_name == "microsoft":
-                events = await self._get_upcoming_events_microsoft(
-                    provider_client, now, end_time, calendar_id, content
-                )
-            else:
-                raise ValueError(f"Unsupported provider: {provider_name}")
-
-            # Convert to CalendarEventPage objects
-            event_pages = []
-            for event in events:
-                page_uri = PageURI(
-                    root=self.context.root,
-                    type=self.name,
-                    id=event["id"],
-                )
-                event_page = (
-                    provider_client.calendar_client.parse_event_to_calendar_page(
-                        event, page_uri
-                    )
-                )
-                event_pages.append(event_page)
-
-            return event_pages
-
-        except Exception as e:
-            logger.error(f"Failed to get upcoming events: {e}")
-            return []
+            return PaginatedResponse(results=[], next_cursor=None)
 
     def _parse_event_uri(self, page_uri: PageURI) -> tuple[str, str, str]:
         """Parse event URI to extract provider, calendar ID, and event ID."""
@@ -590,7 +540,7 @@ class CalendarService(ToolkitService):
     ) -> Optional[BaseProviderClient]:
         """Get provider client for an event."""
         # Since each service instance has only one provider, return it
-        return list(self.providers.values())[0] if self.providers else None
+        return self.provider_client
 
     async def _get_events_by_date_range_google(
         self,
@@ -599,7 +549,7 @@ class CalendarService(ToolkitService):
         end_dt: datetime,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get events by date range for Google Calendar."""
         if content:
             # Use search_events with content query for better efficiency
@@ -624,7 +574,7 @@ class CalendarService(ToolkitService):
                     event_date = datetime.fromisoformat(event_start["date"])
                     if start_dt.date() <= event_date.date() <= end_dt.date():
                         filtered_events.append(event)
-            return filtered_events
+            return filtered_events, events_result.get("nextPageToken")
         else:
             # Use list_events for time-based filtering (most efficient)
             events_result = await provider_client.calendar_client.list_events(
@@ -633,7 +583,9 @@ class CalendarService(ToolkitService):
                 time_max=end_dt,
                 max_results=50,
             )
-            return list(events_result.get("items", []))
+            return list(events_result.get("items", [])), events_result.get(
+                "nextPageToken"
+            )
 
     async def _get_events_by_date_range_microsoft(
         self,
@@ -642,7 +594,7 @@ class CalendarService(ToolkitService):
         end_dt: datetime,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get events by date range for Microsoft Calendar."""
         if content:
             # Use search_events for content queries (leverages Microsoft Graph search)
@@ -663,7 +615,7 @@ class CalendarService(ToolkitService):
                     event_time_naive = event_time.replace(tzinfo=None)
                     if start_dt <= event_time_naive <= end_dt:
                         filtered_events.append(event)
-            return filtered_events
+            return filtered_events, events_result.get("nextPageToken")
         else:
             # Use list_events with time filtering (uses OData filtering, most efficient)
             events_result = await provider_client.calendar_client.list_events(
@@ -672,7 +624,9 @@ class CalendarService(ToolkitService):
                 time_max=end_dt,
                 max_results=50,
             )
-            return list(events_result.get("value", []))
+            return list(events_result.get("value", [])), events_result.get(
+                "nextPageToken"
+            )
 
     async def _get_events_with_person_google(
         self,
@@ -680,7 +634,7 @@ class CalendarService(ToolkitService):
         email: str,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get events with person for Google Calendar."""
         # Use search_events with attendee filter for Google
         query = f"attendees:{email}"
@@ -692,7 +646,7 @@ class CalendarService(ToolkitService):
         )
 
         result: List[Dict[str, Any]] = events_result.get("items", [])
-        return result
+        return result, events_result.get("nextPageToken")
 
     async def _get_events_with_person_microsoft(
         self,
@@ -700,7 +654,7 @@ class CalendarService(ToolkitService):
         email: str,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get events with person for Microsoft Calendar."""
         # Get all events and filter manually for Microsoft (they may not support attendee search)
         events_result = await provider_client.calendar_client.list_events(
@@ -750,7 +704,10 @@ class CalendarService(ToolkitService):
                     filtered_events.append(event)
             events = filtered_events
 
-        return events
+        return (
+            events,
+            None,
+        )  # Microsoft filtering doesn't support pagination for this complex query
 
     async def _get_upcoming_events_google(
         self,
@@ -759,7 +716,7 @@ class CalendarService(ToolkitService):
         end_time: datetime,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get upcoming events for Google Calendar."""
         if content:
             # Use search_events with content query for better efficiency
@@ -778,13 +735,21 @@ class CalendarService(ToolkitService):
                     )
                     # Convert to naive datetime for comparison
                     event_time_naive = event_time.replace(tzinfo=None)
-                    if start_time <= event_time_naive <= end_time:
+                    start_time_naive = (
+                        start_time.replace(tzinfo=None)
+                        if start_time.tzinfo
+                        else start_time
+                    )
+                    end_time_naive = (
+                        end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
+                    )
+                    if start_time_naive <= event_time_naive <= end_time_naive:
                         filtered_events.append(event)
                 elif "date" in event_start:
                     event_date = datetime.fromisoformat(event_start["date"])
                     if start_time.date() <= event_date.date() <= end_time.date():
                         filtered_events.append(event)
-            return filtered_events
+            return filtered_events, events_result.get("nextPageToken")
         else:
             # Use list_events for time-based filtering (most efficient)
             events_result = await provider_client.calendar_client.list_events(
@@ -793,7 +758,9 @@ class CalendarService(ToolkitService):
                 time_max=end_time,
                 max_results=50,
             )
-            return list(events_result.get("items", []))
+            return list(events_result.get("items", [])), events_result.get(
+                "nextPageToken"
+            )
 
     async def _get_upcoming_events_microsoft(
         self,
@@ -802,7 +769,7 @@ class CalendarService(ToolkitService):
         end_time: datetime,
         calendar_id: str,
         content: Optional[str],
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], Optional[str]]:
         """Get upcoming events for Microsoft Calendar."""
         if content:
             # Use search_events for content queries (leverages Microsoft Graph search)
@@ -821,9 +788,17 @@ class CalendarService(ToolkitService):
                     )
                     # Convert to naive datetime for comparison
                     event_time_naive = event_time.replace(tzinfo=None)
-                    if start_time <= event_time_naive <= end_time:
+                    start_time_naive = (
+                        start_time.replace(tzinfo=None)
+                        if start_time.tzinfo
+                        else start_time
+                    )
+                    end_time_naive = (
+                        end_time.replace(tzinfo=None) if end_time.tzinfo else end_time
+                    )
+                    if start_time_naive <= event_time_naive <= end_time_naive:
                         filtered_events.append(event)
-            return filtered_events
+            return filtered_events, events_result.get("nextPageToken")
         else:
             # Use list_events with time filtering (uses OData filtering, most efficient)
             events_result = await provider_client.calendar_client.list_events(
@@ -832,4 +807,6 @@ class CalendarService(ToolkitService):
                 time_max=end_time,
                 max_results=50,
             )
-            return list(events_result.get("value", []))
+            return list(events_result.get("value", [])), events_result.get(
+                "nextPageToken"
+            )

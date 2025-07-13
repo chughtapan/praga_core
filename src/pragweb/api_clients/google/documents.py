@@ -181,15 +181,12 @@ class GoogleDocumentsClient(BaseDocumentsClient):
 
     async def delete_document(self, document_id: str) -> bool:
         """Delete a Google Document."""
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: (self._drive.files().delete(fileId=document_id).execute()),
-            )
-            return True
-        except Exception:
-            return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self._executor,
+            lambda: (self._drive.files().delete(fileId=document_id).execute()),
+        )
+        return True
 
     async def parse_document_to_header_page(
         self, document_data: Dict[str, Any], page_uri: PageURI

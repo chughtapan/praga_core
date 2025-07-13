@@ -179,7 +179,7 @@ class BasePeopleClient(ABC):
 
     @abstractmethod
     async def create_contact(
-        self, first_name: str, last_name: str, email: str, **additional_fields: Any
+        self, first_name: str, last_name: str, email: str
     ) -> Dict[str, Any]:
         """Create a new contact."""
 

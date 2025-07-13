@@ -148,11 +148,8 @@ class OutlookCalendarClient(BaseCalendarClient):
 
     async def delete_event(self, event_id: str, calendar_id: str = "primary") -> bool:
         """Delete an Outlook calendar event."""
-        try:
-            await self.graph_client.delete_event(event_id)
-            return True
-        except Exception:
-            return False
+        await self.graph_client.delete_event(event_id)
+        return True
 
     def parse_event_to_calendar_page(
         self, event_data: Dict[str, Any], page_uri: PageURI

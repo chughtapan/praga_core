@@ -51,7 +51,8 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--asyncio-mode=auto --ignore=tests/integration/"
+addopts = "--ignore=tests/integration/"
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 88
@@ -84,4 +85,5 @@ disallow_untyped_calls = true
 max-line-length = 80
 extend-select = "B950"
 extend-ignore = "E203,E501,E701,W291"
+exclude = "tests/*"
 

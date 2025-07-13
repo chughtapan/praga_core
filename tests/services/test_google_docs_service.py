@@ -256,8 +256,8 @@ class TestGoogleDocumentsService:
         assert chunk_page.chunk_index == 0
 
     @pytest.mark.asyncio
-    async def test_search_documents(self, service):
-        """Test searching for documents."""
+    async def test_search_documents_by_title(self, service):
+        """Test searching for documents by title."""
         # Mock search results
         mock_results = {
             "files": [
@@ -316,45 +316,46 @@ class TestGoogleDocumentsService:
         ]
         service.context.get_pages = AsyncMock(return_value=mock_headers)
 
-        # Test search
-        result = await service.search_documents("test query", "google")
+        # Test search by title
+        result = await service.search_documents_by_title("test query")
 
         assert isinstance(result.results, list)
         assert len(result.results) == 2
         assert result.next_cursor == "next_token"
 
-        # Verify the search was called correctly
+        # Verify the search was called correctly with title prefix
         service.providers[
             "google"
         ].documents_client.search_documents.assert_called_once_with(
-            query="test query",
+            query="title:test query",
             max_results=10,
             page_token=None,
         )
 
     @pytest.mark.asyncio
-    async def test_get_all_documents(self, service):
-        """Test getting all documents."""
-        # Mock list results
+    async def test_search_documents_by_topic(self, service):
+        """Test searching for documents by topic."""
+        # Mock search results
         mock_results = {
             "files": [{"id": "doc1", "name": "Document 1"}],
             "nextPageToken": None,
         }
 
-        service.providers["google"].documents_client.list_documents = AsyncMock(
+        service.providers["google"].documents_client.search_documents = AsyncMock(
             return_value=mock_results
         )
 
-        # Test get all
-        result = await service.get_all_documents("google", max_results=5)
+        # Test search by topic
+        result = await service.search_documents_by_topic("test topic")
 
         assert isinstance(result.results, list)
 
-        # Verify the list was called correctly
+        # Verify the search was called correctly with topic query
         service.providers[
             "google"
-        ].documents_client.list_documents.assert_called_once_with(
-            max_results=5,
+        ].documents_client.search_documents.assert_called_once_with(
+            query="test topic",
+            max_results=10,
             page_token=None,
         )
 
@@ -453,7 +454,7 @@ class TestGoogleDocumentsService:
             return_value={"files": []}
         )
 
-        result = await service.search_documents("test", "google")
+        result = await service.search_documents_by_title("test")
 
         assert len(result.results) == 0
         assert result.next_cursor is None

@@ -2,8 +2,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from praga_core.types import PageURI
@@ -59,8 +58,14 @@ class GoogleCalendarClient(BaseCalendarClient):
         }
 
         if time_min:
+            # Ensure timezone-aware datetime for Google Calendar API
+            if time_min.tzinfo is None:
+                time_min = time_min.replace(tzinfo=timezone.utc)
             kwargs["timeMin"] = time_min.isoformat()
         if time_max:
+            # Ensure timezone-aware datetime for Google Calendar API
+            if time_max.tzinfo is None:
+                time_max = time_max.replace(tzinfo=timezone.utc)
             kwargs["timeMax"] = time_max.isoformat()
         if page_token:
             kwargs["pageToken"] = page_token
@@ -109,6 +114,12 @@ class GoogleCalendarClient(BaseCalendarClient):
         attendees: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Create a Google Calendar event."""
+        # Ensure timezone-aware datetimes
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+
         event_body = {
             "summary": title,
             "start": {
@@ -155,11 +166,17 @@ class GoogleCalendarClient(BaseCalendarClient):
             elif key == "location":
                 current_event["location"] = value
             elif key == "start_time":
+                # Ensure timezone-aware datetime
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
                 current_event["start"] = {
                     "dateTime": value.isoformat(),
                     "timeZone": "UTC",
                 }
             elif key == "end_time":
+                # Ensure timezone-aware datetime
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
                 current_event["end"] = {
                     "dateTime": value.isoformat(),
                     "timeZone": "UTC",
@@ -180,19 +197,16 @@ class GoogleCalendarClient(BaseCalendarClient):
 
     async def delete_event(self, event_id: str, calendar_id: str = "primary") -> bool:
         """Delete a Google Calendar event."""
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: (
-                    self._calendar.events()
-                    .delete(calendarId=calendar_id, eventId=event_id)
-                    .execute()
-                ),
-            )
-            return True
-        except Exception:
-            return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._calendar.events()
+                .delete(calendarId=calendar_id, eventId=event_id)
+                .execute()
+            ),
+        )
+        return True
 
     def parse_event_to_calendar_page(
         self, event_data: Dict[str, Any], page_uri: PageURI
@@ -204,13 +218,31 @@ class GoogleCalendarClient(BaseCalendarClient):
 
         # Handle both dateTime and date formats
         if "dateTime" in start_data:
-            start_time = parsedate_to_datetime(start_data["dateTime"])
+            # Parse ISO 8601 datetime with timezone
+            start_time_str = start_data["dateTime"]
+            if start_time_str.endswith("Z"):
+                # Handle Zulu time format
+                start_time = datetime.fromisoformat(
+                    start_time_str.replace("Z", "+00:00")
+                )
+            else:
+                # Handle ISO 8601 with timezone offset
+                start_time = datetime.fromisoformat(start_time_str)
         else:
+            # All-day event - just date
             start_time = datetime.fromisoformat(start_data["date"])
 
         if "dateTime" in end_data:
-            end_time = parsedate_to_datetime(end_data["dateTime"])
+            # Parse ISO 8601 datetime with timezone
+            end_time_str = end_data["dateTime"]
+            if end_time_str.endswith("Z"):
+                # Handle Zulu time format
+                end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+            else:
+                # Handle ISO 8601 with timezone offset
+                end_time = datetime.fromisoformat(end_time_str)
         else:
+            # All-day event - just date
             end_time = datetime.fromisoformat(end_data["date"])
 
         # Parse attendees - simple email list

@@ -137,41 +137,31 @@ class GoogleEmailClient(BaseEmailClient):
 
     async def mark_as_read(self, message_id: str) -> bool:
         """Mark a Gmail message as read."""
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: (
-                    self._gmail.users()
-                    .messages()
-                    .modify(
-                        userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]}
-                    )
-                    .execute()
-                ),
-            )
-            return True
-        except Exception:
-            return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._gmail.users()
+                .messages()
+                .modify(userId="me", id=message_id, body={"removeLabelIds": ["UNREAD"]})
+                .execute()
+            ),
+        )
+        return True
 
     async def mark_as_unread(self, message_id: str) -> bool:
         """Mark a Gmail message as unread."""
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: (
-                    self._gmail.users()
-                    .messages()
-                    .modify(
-                        userId="me", id=message_id, body={"addLabelIds": ["UNREAD"]}
-                    )
-                    .execute()
-                ),
-            )
-            return True
-        except Exception:
-            return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._gmail.users()
+                .messages()
+                .modify(userId="me", id=message_id, body={"addLabelIds": ["UNREAD"]})
+                .execute()
+            ),
+        )
+        return True
 
     def parse_message_to_email_page(
         self, message_data: Dict[str, Any], page_uri: PageURI

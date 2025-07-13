@@ -22,6 +22,7 @@ class DocumentService(ToolkitService):
             raise ValueError("DocumentService requires exactly one provider")
 
         self.providers = providers
+        self.provider_client = list(providers.values())[0]
         super().__init__()
         self._register_handlers()
         logger.info(
@@ -51,65 +52,24 @@ class DocumentService(ToolkitService):
         async def handle_document_chunk(page_uri: PageURI) -> DocumentChunk:
             return await self.create_document_chunk_page(page_uri)
 
-        # Register document actions
-        @ctx.action()
-        async def update_document(
-            document: DocumentHeader,
-            title: Optional[str] = None,
-            content: Optional[str] = None,
-        ) -> bool:
-            """Update a document."""
-            try:
-                provider = self._get_provider_for_document(document)
-                if not provider:
-                    return False
-
-                updates = {}
-                if title is not None:
-                    updates["title"] = title
-                if content is not None:
-                    updates["content"] = content
-
-                await provider.documents_client.update_document(
-                    document_id=document.provider_document_id,
-                    **updates,
-                )
-
-                return True
-            except Exception as e:
-                logger.error(f"Failed to update document: {e}")
-                return False
-
-        @ctx.action()
-        async def delete_document(document: DocumentHeader) -> bool:
-            """Delete a document."""
-            try:
-                provider = self._get_provider_for_document(document)
-                if not provider:
-                    return False
-
-                return await provider.documents_client.delete_document(
-                    document_id=document.provider_document_id,
-                )
-            except Exception as e:
-                logger.error(f"Failed to delete document: {e}")
-                return False
-
     async def create_document_header_page(self, page_uri: PageURI) -> DocumentHeader:
         """Create a DocumentHeader from a URI."""
         # Extract provider and document ID from URI
         provider_name, document_id = self._parse_document_uri(page_uri)
 
-        provider = self.providers.get(provider_name)
-        if not provider:
-            raise ValueError(f"Provider {provider_name} not available")
+        if not self.provider_client:
+            raise ValueError("No provider available")
 
         # Get document data from provider
-        document_data = await provider.documents_client.get_document(document_id)
+        document_data = await self.provider_client.documents_client.get_document(
+            document_id
+        )
 
         # Parse to DocumentHeader
-        return await provider.documents_client.parse_document_to_header_page(
-            document_data, page_uri
+        return (
+            await self.provider_client.documents_client.parse_document_to_header_page(
+                document_data, page_uri
+            )
         )
 
     async def create_document_chunk_page(self, page_uri: PageURI) -> DocumentChunk:
@@ -117,12 +77,13 @@ class DocumentService(ToolkitService):
         # Extract provider, document ID, and chunk index from URI
         provider_name, document_id, chunk_index = self._parse_chunk_uri(page_uri)
 
-        provider = self.providers.get(provider_name)
-        if not provider:
-            raise ValueError(f"Provider {provider_name} not available")
+        if not self.provider_client:
+            raise ValueError("No provider available")
 
         # Get document data from provider
-        document_data = await provider.documents_client.get_document(document_id)
+        document_data = await self.provider_client.documents_client.get_document(
+            document_id
+        )
 
         # Create header URI for parsing chunks
         header_uri = PageURI(
@@ -133,7 +94,7 @@ class DocumentService(ToolkitService):
         )
 
         # Parse to DocumentChunk list and return the requested chunk
-        chunks = provider.documents_client.parse_document_to_chunks(
+        chunks = self.provider_client.documents_client.parse_document_to_chunks(
             document_data, header_uri
         )
 
@@ -143,34 +104,32 @@ class DocumentService(ToolkitService):
         return chunks[chunk_index]
 
     @tool()
-    async def search_documents(
+    async def search_documents_by_title(
         self,
-        query: str,
-        provider: str = "google",
-        max_results: int = 10,
+        title_query: str,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[DocumentHeader]:
-        """Search for documents across providers.
+        """Search for documents that match a title query.
 
         Args:
-            query: Search query string
-            provider: Provider to search (google, microsoft, etc.)
-            max_results: Maximum number of results to return
-            cursor: Pagination cursor
+            title_query: Search query for document titles
+            cursor: Cursor token for pagination (optional)
 
         Returns:
             Paginated response of matching document header pages
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
+        max_results = 10
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
-            # Search documents
-            search_results = await provider_client.documents_client.search_documents(
-                query=query,
-                max_results=max_results,
-                page_token=cursor,
+            # Search documents by title
+            search_results = (
+                await self.provider_client.documents_client.search_documents(
+                    query=f"title:{title_query}",
+                    max_results=max_results,
+                    page_token=cursor,
+                )
             )
 
             # Extract document IDs
@@ -190,9 +149,6 @@ class DocumentService(ToolkitService):
 
             # Resolve URIs to pages
             pages = await self.context.get_pages(uris)
-            # Cast to DocumentHeader list for type safety
-            from pragweb.pages import DocumentHeader
-
             doc_pages = [page for page in pages if isinstance(page, DocumentHeader)]
 
             return PaginatedResponse(
@@ -200,40 +156,41 @@ class DocumentService(ToolkitService):
                 next_cursor=search_results.get("nextPageToken"),
             )
         except Exception as e:
-            logger.error(f"Failed to search documents: {e}")
+            logger.error(f"Failed to search documents by title: {e}")
             return PaginatedResponse(results=[], next_cursor=None)
 
     @tool()
-    async def get_all_documents(
+    async def search_documents_by_topic(
         self,
-        provider: str = "google",
-        max_results: int = 10,
+        topic_query: str,
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[DocumentHeader]:
-        """Get all documents from a provider.
+        """Search for documents that match a topic/content query.
 
         Args:
-            provider: Provider to search (google, microsoft, etc.)
-            max_results: Maximum number of results to return
-            cursor: Pagination cursor
+            topic_query: Search query for document content/topics
+            cursor: Cursor token for pagination (optional)
 
         Returns:
-            Paginated response of document header pages
+            Paginated response of matching document header pages
         """
-        provider_client = self.providers.get(provider)
-        if not provider_client:
+        max_results = 10
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
-            # List documents
-            documents_results = await provider_client.documents_client.list_documents(
-                max_results=max_results,
-                page_token=cursor,
+            # Search documents by content/topic
+            search_results = (
+                await self.provider_client.documents_client.search_documents(
+                    query=topic_query,
+                    max_results=max_results,
+                    page_token=cursor,
+                )
             )
 
             # Extract document IDs
             document_ids = []
-            for doc in documents_results.get("files", []):
+            for doc in search_results.get("files", []):
                 document_ids.append(doc["id"])
 
             # Create URIs
@@ -248,14 +205,11 @@ class DocumentService(ToolkitService):
 
             # Resolve URIs to pages
             pages = await self.context.get_pages(uris)
-            # Cast to DocumentHeader list for type safety
-            from pragweb.pages import DocumentHeader
-
             doc_pages = [page for page in pages if isinstance(page, DocumentHeader)]
 
             return PaginatedResponse(
                 results=doc_pages,
-                next_cursor=documents_results.get("nextPageToken"),
+                next_cursor=search_results.get("nextPageToken"),
             )
         except Exception as e:
             logger.error(f"Failed to search documents by topic: {e}")
@@ -271,16 +225,17 @@ class DocumentService(ToolkitService):
             owner_identifier: Email address or name of the document owner
             cursor: Cursor token for pagination (optional)
         """
-        provider_client = list(self.providers.values())[0] if self.providers else None
-        if not provider_client:
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # Search documents by owner (use query parameter)
-            documents_results = await provider_client.documents_client.search_documents(
-                query=f"owner:{owner_identifier}",
-                max_results=10,
-                page_token=cursor,
+            documents_results = (
+                await self.provider_client.documents_client.search_documents(
+                    query=f"owner:{owner_identifier}",
+                    max_results=10,
+                    page_token=cursor,
+                )
             )
 
             # Extract document IDs
@@ -323,16 +278,17 @@ class DocumentService(ToolkitService):
             days: Number of days to look back for recent modifications (default: 7)
             cursor: Cursor token for pagination (optional)
         """
-        provider_client = list(self.providers.values())[0] if self.providers else None
-        if not provider_client:
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # Search recently modified documents (use query parameter)
-            documents_results = await provider_client.documents_client.search_documents(
-                query=f"modifiedTime > '{days} days ago'",
-                max_results=10,
-                page_token=cursor,
+            documents_results = (
+                await self.provider_client.documents_client.search_documents(
+                    query=f"modifiedTime > '{days} days ago'",
+                    max_results=10,
+                    page_token=cursor,
+                )
             )
 
             # Extract document IDs
@@ -374,15 +330,16 @@ class DocumentService(ToolkitService):
         Args:
             cursor: Cursor token for pagination (optional)
         """
-        provider_client = list(self.providers.values())[0] if self.providers else None
-        if not provider_client:
+        if not self.provider_client:
             return PaginatedResponse(results=[], next_cursor=None)
 
         try:
             # List all documents
-            documents_results = await provider_client.documents_client.list_documents(
-                max_results=10,
-                page_token=cursor,
+            documents_results = (
+                await self.provider_client.documents_client.list_documents(
+                    max_results=10,
+                    page_token=cursor,
+                )
             )
 
             # Extract document IDs
@@ -435,11 +392,17 @@ class DocumentService(ToolkitService):
             if not isinstance(document_header, DocumentHeader):
                 return PaginatedResponse(results=[], next_cursor=None)
 
-            chunks = await self.get_document_chunks(document_header)
+            # Get chunk URIs from document header
+            chunk_uris = document_header.chunk_uris
+
+            # Resolve URIs to pages
+            chunks = await self.context.get_pages(chunk_uris)
+            # Cast to DocumentChunk list for type safety
+            doc_chunks = [chunk for chunk in chunks if isinstance(chunk, DocumentChunk)]
 
             # Filter chunks that contain the query
             matching_chunks = []
-            for chunk in chunks:
+            for chunk in doc_chunks:
                 if (
                     isinstance(chunk, DocumentChunk)
                     and query.lower() in chunk.content.lower()
@@ -478,70 +441,6 @@ class DocumentService(ToolkitService):
             logger.error(f"Failed to get document content: {e}")
             return ""
 
-    @tool()
-    async def get_document_chunks(
-        self,
-        document: DocumentHeader,
-    ) -> List[DocumentChunk]:
-        """Get all chunks for a document.
-
-        Args:
-            document: Document header page
-
-        Returns:
-            List of document chunks
-        """
-        try:
-            # Get chunk URIs from document header
-            chunk_uris = document.chunk_uris
-
-            # Resolve URIs to pages
-            chunks = await self.context.get_pages(chunk_uris)
-            # Cast to DocumentChunk list for type safety
-            from pragweb.pages import DocumentChunk
-
-            doc_chunks = [chunk for chunk in chunks if isinstance(chunk, DocumentChunk)]
-
-            return doc_chunks
-        except Exception as e:
-            logger.error(f"Failed to get document chunks: {e}")
-            return []
-
-    @tool()
-    async def search_document_content(
-        self,
-        query: str,
-        document: DocumentHeader,
-    ) -> List[DocumentChunk]:
-        """Search within a document's content.
-
-        Args:
-            query: Search query string
-            document: Document header page
-
-        Returns:
-            List of document chunks matching the query
-        """
-        try:
-            # Get all chunks for the document
-            chunks = await self.get_document_chunks(document)
-
-            # Filter chunks that contain the query
-            from pragweb.pages import DocumentChunk
-
-            matching_chunks = []
-            for chunk in chunks:
-                if (
-                    isinstance(chunk, DocumentChunk)
-                    and query.lower() in chunk.content.lower()
-                ):
-                    matching_chunks.append(chunk)
-
-            return matching_chunks
-        except Exception as e:
-            logger.error(f"Failed to search document content: {e}")
-            return []
-
     def _parse_document_uri(self, page_uri: PageURI) -> tuple[str, str]:
         """Parse document URI to extract provider and document ID."""
         # URI format: google_docs_header with document_id as the ID
@@ -572,7 +471,7 @@ class DocumentService(ToolkitService):
     ) -> Optional[BaseProviderClient]:
         """Get provider client for a document."""
         # Since each service instance has only one provider, return it
-        return list(self.providers.values())[0] if self.providers else None
+        return self.provider_client
 
     def _extract_text_from_content(self, content: List[Dict[str, Any]]) -> str:
         """Extract text content from document structure (provider-agnostic).

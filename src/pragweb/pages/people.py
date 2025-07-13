@@ -11,9 +11,6 @@ class PersonPage(Page):
     """A page representing a person with their basic information."""
 
     # Provider-specific metadata (stored as internal fields)
-    provider_person_id: str = Field(
-        description="Provider-specific person ID", exclude=True
-    )
     source: Optional[str] = Field(
         None,
         exclude=True,

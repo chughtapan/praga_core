@@ -127,19 +127,13 @@ class OutlookEmailClient(BaseEmailClient):
 
     async def mark_as_read(self, message_id: str) -> bool:
         """Mark an Outlook message as read."""
-        try:
-            await self.graph_client.mark_message_as_read(message_id)
-            return True
-        except Exception:
-            return False
+        await self.graph_client.mark_message_as_read(message_id)
+        return True
 
     async def mark_as_unread(self, message_id: str) -> bool:
         """Mark an Outlook message as unread."""
-        try:
-            await self.graph_client.mark_message_as_unread(message_id)
-            return True
-        except Exception:
-            return False
+        await self.graph_client.mark_message_as_unread(message_id)
+        return True
 
     def parse_message_to_email_page(
         self, message_data: Dict[str, Any], page_uri: PageURI

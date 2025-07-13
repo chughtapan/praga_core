@@ -197,7 +197,7 @@ class TestCalendarService:
         )
 
         # Test search
-        result = await service.search_calendar_events("test query", "google")
+        result = await service.get_events_by_keyword("test query")
 
         assert isinstance(result.results, list)
         assert result.next_cursor == "next_token"
@@ -219,7 +219,7 @@ class TestCalendarService:
         )
 
         # Test get events
-        result = await service.get_upcoming_events(provider="google", max_results=5)
+        result = await service.get_upcoming_events()
 
         assert isinstance(result.results, list)
 
@@ -227,8 +227,7 @@ class TestCalendarService:
         assert service.providers["google"].calendar_client.list_events.called
         call_args = service.providers["google"].calendar_client.list_events.call_args
         assert call_args.kwargs["calendar_id"] == "primary"
-        assert call_args.kwargs["max_results"] == 5
-        assert call_args.kwargs["page_token"] is None
+        assert call_args.kwargs["max_results"] == 50
         assert "time_min" in call_args.kwargs
         assert "time_max" in call_args.kwargs
 
@@ -250,6 +249,7 @@ class TestCalendarService:
         """Test handling of service with no providers."""
         # Clear providers to simulate error
         service.providers = {}
+        service.provider_client = None
 
         page_uri = PageURI(
             root="test://example", type="google_calendar_event", id="event123"
@@ -266,7 +266,7 @@ class TestCalendarService:
             return_value={"items": [], "nextPageToken": None}
         )
 
-        result = await service.search_calendar_events("test", "google")
+        result = await service.get_events_by_keyword("test")
 
         assert len(result.results) == 0
         assert result.next_cursor is None
@@ -279,11 +279,12 @@ class TestCalendarService:
             return_value={"items": mock_events, "nextPageToken": None}
         )
 
-        result = await service.get_events_by_date_range("2023-06-15", 7)
+        result = await service.get_events_by_date_range("2023-06-15", num_days=7)
 
         service.providers["google"].calendar_client.list_events.assert_called_once()
-        assert len(result) == 2
-        assert all(isinstance(page, CalendarEventPage) for page in result)
+        assert isinstance(result.results, list)
+        assert len(result.results) == 2
+        assert all(isinstance(page, CalendarEventPage) for page in result.results)
 
     @pytest.mark.asyncio
     async def test_get_events_by_date_range_with_keywords(self, service):
@@ -300,12 +301,13 @@ class TestCalendarService:
         )
 
         result = await service.get_events_by_date_range(
-            "2023-06-15", 7, content="meeting"
+            "2023-06-15", num_days=7, content="meeting"
         )
 
         service.providers["google"].calendar_client.search_events.assert_called_once()
-        assert len(result) == 1
-        assert isinstance(result[0], CalendarEventPage)
+        assert isinstance(result.results, list)
+        assert len(result.results) == 1
+        assert isinstance(result.results[0], CalendarEventPage)
 
     @pytest.mark.asyncio
     async def test_get_events_with_person_basic(self, service):
@@ -322,8 +324,9 @@ class TestCalendarService:
             result = await service.get_events_with_person("test@example.com")
 
         service.providers["google"].calendar_client.search_events.assert_called_once()
-        assert len(result) == 1
-        assert isinstance(result[0], CalendarEventPage)
+        assert isinstance(result.results, list)
+        assert len(result.results) == 1
+        assert isinstance(result.results[0], CalendarEventPage)
 
     @pytest.mark.asyncio
     async def test_get_events_with_person_with_keywords(self, service):
@@ -342,22 +345,23 @@ class TestCalendarService:
             )
 
         service.providers["google"].calendar_client.search_events.assert_called_once()
-        assert len(result) == 1
-        assert isinstance(result[0], CalendarEventPage)
+        assert isinstance(result.results, list)
+        assert len(result.results) == 1
+        assert isinstance(result.results[0], CalendarEventPage)
 
     @pytest.mark.asyncio
-    async def test_get_upcoming_events_basic(self, service):
-        """Test basic upcoming events retrieval."""
+    async def test_get_events_by_keyword(self, service):
+        """Test getting events by keyword."""
         mock_events = [{"id": "event1"}]
-        service.providers["google"].calendar_client.list_events = AsyncMock(
+        service.providers["google"].calendar_client.search_events = AsyncMock(
             return_value={"items": mock_events, "nextPageToken": None}
         )
 
-        result = await service.get_upcoming_events_basic(days=7)
+        result = await service.get_events_by_keyword("meeting")
 
-        service.providers["google"].calendar_client.list_events.assert_called_once()
-        assert len(result) == 1
-        assert all(isinstance(page, CalendarEventPage) for page in result)
+        service.providers["google"].calendar_client.search_events.assert_called_once()
+        assert isinstance(result.results, list)
+        assert len(result.results) == 1
 
     @pytest.mark.asyncio
     async def test_get_upcoming_events_with_keywords(self, service):
@@ -374,8 +378,8 @@ class TestCalendarService:
             return_value={"items": mock_events, "nextPageToken": None}
         )
 
-        result = await service.get_upcoming_events_basic(days=7, content="meeting")
+        result = await service.get_upcoming_events(days=7, content="meeting")
 
         service.providers["google"].calendar_client.search_events.assert_called_once()
-        assert len(result) == 1
-        assert isinstance(result[0], CalendarEventPage)
+        assert isinstance(result.results, list)
+        assert len(result.results) == 1

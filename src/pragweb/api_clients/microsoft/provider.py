@@ -76,11 +76,8 @@ class MicrosoftDocumentsClient(BaseDocumentsClient):
 
     async def delete_document(self, document_id: str) -> bool:
         """Delete a OneDrive document."""
-        try:
-            await self.graph_client.delete(f"me/drive/items/{document_id}")
-            return True
-        except Exception:
-            return False
+        await self.graph_client.delete(f"me/drive/items/{document_id}")
+        return True
 
     async def parse_document_to_header_page(
         self, document_data: Dict[str, Any], page_uri: PageURI
@@ -132,17 +129,14 @@ class MicrosoftProviderClient(BaseProviderClient):
 
     async def test_connection(self) -> bool:
         """Test connection to Microsoft Graph APIs."""
-        try:
-            # Test authentication
-            if not self._microsoft_auth_manager.is_authenticated():
-                return False
-
-            # Test a simple API call
-            graph_client = MicrosoftGraphClient(self._microsoft_auth_manager)
-            await graph_client.get_user_profile()
-            return True
-        except Exception:
+        # Test authentication
+        if not self._microsoft_auth_manager.is_authenticated():
             return False
+
+        # Test a simple API call
+        graph_client = MicrosoftGraphClient(self._microsoft_auth_manager)
+        await graph_client.get_user_profile()
+        return True
 
     def get_provider_name(self) -> str:
         """Get provider name."""

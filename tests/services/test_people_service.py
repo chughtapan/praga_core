@@ -48,15 +48,9 @@ class MockPeopleClient:
         """Parse contact data to PersonPage."""
         return PersonPage(
             uri=page_uri,
-            provider_person_id=contact_data.get("resourceName", "test_person").replace(
-                "people/", ""
-            ),
             first_name=contact_data.get("first_name", "Test"),
             last_name=contact_data.get("last_name", "Person"),
             email=contact_data.get("email", "test@example.com"),
-            phone_numbers=contact_data.get("phone_numbers", []),
-            job_title=contact_data.get("job_title"),
-            company=contact_data.get("company"),
         )
 
 
@@ -194,65 +188,3 @@ class TestPeopleService:
 
         with pytest.raises(ValueError, match="No provider available for service"):
             await service.create_person_page(page_uri)
-
-    @pytest.mark.asyncio
-    async def test_update_contact_action(self, service):
-        """Test update_contact action."""
-        # Create person page
-        person_uri = PageURI(root="test://example", type="person", id="person123")
-
-        # Mock update_contact to succeed
-        service.providers["google"].people_client.update_contact = AsyncMock(
-            return_value={"resourceName": "people/person123"}
-        )
-
-        # Test the action through context
-        context = service.context
-        result = await context.invoke_action(
-            "update_contact",
-            {
-                "person": person_uri,
-                "first_name": "Updated",
-                "last_name": "Name",
-                "email": "updated@example.com",
-            },
-        )
-
-        # Verify the result
-        assert result == {"success": True}
-
-        # Verify update_contact was called
-        service.providers["google"].people_client.update_contact.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_contact_action(self, service):
-        """Test delete_contact action."""
-        # Create person page
-        person_uri = PageURI(root="test://example", type="person", id="person123")
-
-        # Mock delete_contact to succeed
-        service.providers["google"].people_client.delete_contact = AsyncMock(
-            return_value=True
-        )
-
-        # Test the action through context
-        context = service.context
-        result = await context.invoke_action(
-            "delete_contact",
-            {"person": person_uri},
-        )
-
-        # Verify the result
-        assert result == {"success": True}
-
-        # Verify delete_contact was called
-        service.providers["google"].people_client.delete_contact.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_action_registration(self, service):
-        """Test that actions are properly registered with the context."""
-        context = service.context
-
-        # Verify actions are registered (create_contact is now a tool, not an action)
-        assert "update_contact" in context._actions
-        assert "delete_contact" in context._actions

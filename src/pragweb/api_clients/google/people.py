@@ -34,7 +34,7 @@ class GooglePeopleClient(BasePeopleClient):
                 self._people.people()
                 .get(
                     resourceName=f"people/{contact_id}",
-                    personFields="names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,photos,urls,memberships,metadata",
+                    personFields="names,emailAddresses,metadata",
                 )
                 .execute()
             ),
@@ -44,7 +44,16 @@ class GooglePeopleClient(BasePeopleClient):
     async def search_contacts(
         self, query: str, max_results: int = 10, page_token: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Search Google contacts."""
+        """Search Google contacts.
+
+        Note: Google's searchContacts API does not support pagination via pageToken.
+        If page_token is provided, this method will raise a NotImplementedError.
+        """
+        if page_token is not None:
+            raise NotImplementedError(
+                "Google People API searchContacts does not support pagination via pageToken"
+            )
+
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             self._executor,
@@ -53,8 +62,7 @@ class GooglePeopleClient(BasePeopleClient):
                 .searchContacts(
                     query=query,
                     pageSize=max_results,
-                    pageToken=page_token,
-                    readMask="names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,photos,urls,memberships,metadata",
+                    readMask="names,emailAddresses,metadata",
                 )
                 .execute()
             ),
@@ -75,7 +83,7 @@ class GooglePeopleClient(BasePeopleClient):
                     resourceName="people/me",
                     pageSize=max_results,
                     pageToken=page_token,
-                    personFields="names,emailAddresses,phoneNumbers,organizations,addresses,birthdays,photos,urls,memberships,metadata",
+                    personFields="names,emailAddresses,metadata",
                 )
                 .execute()
             ),
@@ -83,7 +91,7 @@ class GooglePeopleClient(BasePeopleClient):
         return dict(result)
 
     async def create_contact(
-        self, first_name: str, last_name: str, email: str, **additional_fields: Any
+        self, first_name: str, last_name: str, email: str
     ) -> Dict[str, Any]:
         """Create a new Google contact."""
         contact_body = {
@@ -100,28 +108,6 @@ class GooglePeopleClient(BasePeopleClient):
                 }
             ],
         }
-
-        # Add additional fields
-        if "phone" in additional_fields:
-            contact_body["phoneNumbers"] = [
-                {
-                    "value": additional_fields["phone"],
-                    "type": "work",
-                }
-            ]
-
-        if "company" in additional_fields:
-            contact_body["organizations"] = [
-                {
-                    "name": additional_fields["company"],
-                    "type": "work",
-                }
-            ]
-
-        if "job_title" in additional_fields:
-            if "organizations" not in contact_body:
-                contact_body["organizations"] = [{}]
-            contact_body["organizations"][0]["title"] = additional_fields["job_title"]
 
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -153,8 +139,6 @@ class GooglePeopleClient(BasePeopleClient):
                     {"value": updates["email"], "type": "work"}
                 ]
 
-        # Add more update logic as needed
-
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             self._executor,
@@ -163,7 +147,7 @@ class GooglePeopleClient(BasePeopleClient):
                 .updateContact(
                     resourceName=f"people/{contact_id}",
                     body=current_contact,
-                    updatePersonFields="names,emailAddresses,phoneNumbers,organizations",
+                    updatePersonFields="names,emailAddresses",
                 )
                 .execute()
             ),
@@ -172,19 +156,16 @@ class GooglePeopleClient(BasePeopleClient):
 
     async def delete_contact(self, contact_id: str) -> bool:
         """Delete a Google contact."""
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self._executor,
-                lambda: (
-                    self._people.people()
-                    .deleteContact(resourceName=f"people/{contact_id}")
-                    .execute()
-                ),
-            )
-            return True
-        except Exception:
-            return False
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            self._executor,
+            lambda: (
+                self._people.people()
+                .deleteContact(resourceName=f"people/{contact_id}")
+                .execute()
+            ),
+        )
+        return True
 
     def parse_contact_to_person_page(
         self, contact_data: Dict[str, Any], page_uri: PageURI
@@ -205,47 +186,8 @@ class GooglePeopleClient(BasePeopleClient):
         emails = contact_data.get("emailAddresses", [])
         primary_email = emails[0]["value"] if emails else ""
 
-        # Extract phone numbers
-        phones = contact_data.get("phoneNumbers", [])
-        [phone["value"] for phone in phones]
-
-        # Extract organization info
-        organizations = contact_data.get("organizations", [])
-
-        if organizations:
-            org = organizations[0]
-            org.get("name", "")
-            org.get("title", "")
-            org.get("department", "")
-
-        # Extract addresses
-        addresses = contact_data.get("addresses", [])
-
-        for address in addresses:
-            if address.get("type") == "work":
-                address.get("formattedValue", "")
-            elif address.get("type") == "home":
-                address.get("formattedValue", "")
-
-        # Extract photo URL
-        photos = contact_data.get("photos", [])
-        photos[0].get("url") if photos else None
-
-        # Extract groups/memberships
-        memberships = contact_data.get("memberships", [])
-        groups = []
-        for membership in memberships:
-            contact_group = membership.get("contactGroupMembership", {})
-            if contact_group:
-                groups.append(contact_group.get("contactGroupResourceName", ""))
-
-        # Extract metadata
-        metadata = contact_data.get("metadata", {})
-        person_id = metadata.get("sources", [{}])[0].get("id", "")
-
         return PersonPage(
             uri=page_uri,
-            provider_person_id=person_id,
             source="people_api",
             first_name=first_name,
             last_name=last_name,

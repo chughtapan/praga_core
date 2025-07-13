@@ -52,7 +52,7 @@ class OutlookPeopleClient(BasePeopleClient):
         )
 
     async def create_contact(
-        self, first_name: str, last_name: str, email: str, **additional_fields: Any
+        self, first_name: str, last_name: str, email: str
     ) -> Dict[str, Any]:
         """Create a new Outlook contact."""
         contact_data = {
@@ -62,19 +62,6 @@ class OutlookPeopleClient(BasePeopleClient):
                 {"address": email, "name": f"{first_name} {last_name}".strip()}
             ],
         }
-
-        # Add additional fields
-        if "phone" in additional_fields:
-            contact_data["businessPhones"] = [additional_fields["phone"]]
-
-        if "company" in additional_fields:
-            contact_data["companyName"] = additional_fields["company"]
-
-        if "job_title" in additional_fields:
-            contact_data["jobTitle"] = additional_fields["job_title"]
-
-        if "department" in additional_fields:
-            contact_data["department"] = additional_fields["department"]
 
         return await self.graph_client.create_contact(contact_data)
 
@@ -109,11 +96,8 @@ class OutlookPeopleClient(BasePeopleClient):
 
     async def delete_contact(self, contact_id: str) -> bool:
         """Delete an Outlook contact."""
-        try:
-            await self.graph_client.delete_contact(contact_id)
-            return True
-        except Exception:
-            return False
+        await self.graph_client.delete_contact(contact_id)
+        return True
 
     def parse_contact_to_person_page(
         self, contact_data: Dict[str, Any], page_uri: PageURI
@@ -197,7 +181,6 @@ class OutlookPeopleClient(BasePeopleClient):
 
         return PersonPage(
             uri=page_uri,
-            provider_person_id=contact_data.get("id", ""),
             source="contacts_api",
             first_name=first_name,
             last_name=last_name,

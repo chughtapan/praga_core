@@ -44,8 +44,7 @@ def resolve_person_to_emails(person_identifier: str) -> List[str]:
         return []
     except Exception as e:
         logger.debug(f"Failed to resolve person '{person_identifier}': {e}")
-
-    return []
+        return []
 
 
 def resolve_person_identifier(person_identifier: str) -> str:

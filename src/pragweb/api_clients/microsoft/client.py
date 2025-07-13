@@ -321,8 +321,5 @@ class MicrosoftGraphClient:
     # Test connection
     async def test_connection(self) -> bool:
         """Test connection to Microsoft Graph API."""
-        try:
-            await self.get_user_profile()
-            return True
-        except Exception:
-            return False
+        await self.get_user_profile()
+        return True
