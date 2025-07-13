@@ -183,6 +183,34 @@ class TestGoogleDocumentsService:
             return_value=document_data
         )
 
+        # Mock parse_document_to_header_page to return DocumentHeader
+        from datetime import datetime, timezone
+
+        expected_header = DocumentHeader(
+            uri=PageURI(
+                root="test://example", type="google_docs_header", id="test_document"
+            ),
+            provider_document_id="test_document",
+            title="Test Document",
+            summary="Test document summary",
+            created_time=datetime.now(timezone.utc),
+            modified_time=datetime.now(timezone.utc),
+            owner="test@example.com",
+            word_count=50,
+            chunk_count=1,
+            chunk_uris=[
+                PageURI(
+                    root="test://example",
+                    type="google_docs_chunk",
+                    id="test_document_0",
+                )
+            ],
+            permalink="https://docs.google.com/document/d/test_document",
+        )
+        service.providers["google"].documents_client.parse_document_to_header_page = (
+            AsyncMock(return_value=expected_header)
+        )
+
         # Create page URI with new format (google is embedded in type, not ID)
         page_uri = PageURI(
             root="test://example", type="google_docs_header", id="test_document"
@@ -243,10 +271,56 @@ class TestGoogleDocumentsService:
             return_value=mock_results
         )
 
+        # Mock the context.get_pages to return mock document headers
+        from datetime import datetime, timezone
+
+        mock_headers = [
+            DocumentHeader(
+                uri=PageURI(
+                    root="test://example", type="google_docs_header", id="doc1"
+                ),
+                provider_document_id="doc1",
+                title="Document 1",
+                summary="Document 1 summary",
+                created_time=datetime.now(timezone.utc),
+                modified_time=datetime.now(timezone.utc),
+                owner="test@example.com",
+                word_count=100,
+                chunk_count=1,
+                chunk_uris=[
+                    PageURI(
+                        root="test://example", type="google_docs_chunk", id="doc1_0"
+                    )
+                ],
+                permalink="https://docs.google.com/document/d/doc1",
+            ),
+            DocumentHeader(
+                uri=PageURI(
+                    root="test://example", type="google_docs_header", id="doc2"
+                ),
+                provider_document_id="doc2",
+                title="Document 2",
+                summary="Document 2 summary",
+                created_time=datetime.now(timezone.utc),
+                modified_time=datetime.now(timezone.utc),
+                owner="test@example.com",
+                word_count=200,
+                chunk_count=1,
+                chunk_uris=[
+                    PageURI(
+                        root="test://example", type="google_docs_chunk", id="doc2_0"
+                    )
+                ],
+                permalink="https://docs.google.com/document/d/doc2",
+            ),
+        ]
+        service.context.get_pages = AsyncMock(return_value=mock_headers)
+
         # Test search
         result = await service.search_documents("test query", "google")
 
         assert isinstance(result.results, list)
+        assert len(result.results) == 2
         assert result.next_cursor == "next_token"
 
         # Verify the search was called correctly

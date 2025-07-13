@@ -9,7 +9,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from praga_core.retriever import RetrieverAgentBase
-from praga_core.types import PageReference
+from praga_core.types import Page, PageReference
 
 from .format_instructions import get_agent_format_instructions
 from .response import (
@@ -150,6 +150,9 @@ class ReactAgent(RetrieverAgentBase):
         # Configure logging
         self._configure_logging()
 
+        # Track pages accessed during search
+        self._accessed_pages: Dict[str, Page] = {}
+
     async def search(self, query: str) -> List[PageReference]:
         """
         Execute a search using the ReAct agent's approach.
@@ -163,6 +166,9 @@ class ReactAgent(RetrieverAgentBase):
         """
         logger.info("Starting RetrieverAgent search")
         logger.info("Query: %s", query)
+
+        # Clear accessed pages for new search
+        self._accessed_pages.clear()
 
         try:
             return await self._run_agent(query)
@@ -288,13 +294,44 @@ class ReactAgent(RetrieverAgentBase):
         if agent_response.response_code != ResponseCode.SUCCESS:
             logger.error("Agent response code: %s", agent_response.response_code)
             return []
+
+        # Resolve references using tracked pages
+        resolved_references = self._resolve_references_internally(
+            agent_response.references
+        )
+
         logger.info("=" * 80)
         logger.info(
-            f"Search completed: Found {len(agent_response.references)} document references"
+            f"Search completed: Found {len(resolved_references)} document references"
         )
         logger.info("=" * 80)
 
-        return agent_response.references
+        return resolved_references
+
+    def _resolve_references_internally(
+        self, references: List[PageReference]
+    ) -> List[PageReference]:
+        """Resolve PageReference objects using tracked pages."""
+        resolved_references = []
+
+        for ref in references:
+            uri_str = str(ref.uri)
+
+            # Try to find the page in our tracked pages
+            if uri_str in self._accessed_pages:
+                # Create a new reference with the resolved page
+                resolved_ref = PageReference(
+                    uri=ref.uri, score=ref.score, explanation=ref.explanation
+                )
+                resolved_ref.page = self._accessed_pages[uri_str]
+                resolved_references.append(resolved_ref)
+                logger.debug(f"Resolved reference: {uri_str}")
+            else:
+                # Keep the original reference if we can't resolve it
+                resolved_references.append(ref)
+                logger.debug(f"Could not resolve reference: {uri_str}")
+
+        return resolved_references
 
     async def _handle_agent_action(
         self,
@@ -321,7 +358,10 @@ class ReactAgent(RetrieverAgentBase):
             if toolkit is None:
                 raise ValueError(f"Tool '{action.action}' not found in any toolkit")
 
-            result = await toolkit.invoke_tool(action.action, action.action_input)
+            # Execute tool with page tracking
+            result = await toolkit.invoke_tool(
+                action.action, action.action_input, callbacks=[self._track_pages]
+            )
 
             observation = Observation(action=action.action, result=result)
             observation_content = observation.to_json()
@@ -404,6 +444,13 @@ class ReactAgent(RetrieverAgentBase):
                     error_message=f"Failed to parse agent output: {str(e)}",
                 ).model_dump(),
             )
+
+    def _track_pages(self, tool_name: str, pages: Sequence[Page]) -> None:
+        """Track pages from tool results."""
+        for page in pages:
+            uri_str = str(page.uri)
+            self._accessed_pages[uri_str] = page
+            logger.debug(f"Tracked page from {tool_name}: {uri_str}")
 
     def _extract_json_from_markdown(self, text: str) -> str:
         """Extract JSON content from markdown code blocks."""
