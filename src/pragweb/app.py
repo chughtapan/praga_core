@@ -10,7 +10,8 @@ from praga_core.agents import ReactAgent
 from pragweb.api_clients.base import BaseProviderClient
 
 # Import provider clients
-from pragweb.api_clients.google import GoogleProviderClient
+# from pragweb.api_clients.google import GoogleProviderClient
+from pragweb.api_clients.microsoft import MicrosoftProviderClient
 from pragweb.config import get_current_config
 
 # Import new orchestration services
@@ -31,28 +32,28 @@ async def initialize_providers() -> Dict[str, BaseProviderClient]:
     providers: Dict[str, BaseProviderClient] = {}
 
     # Try to initialize Google provider
-    try:
-        logger.info("Initializing Google provider...")
-        google_provider = GoogleProviderClient()
-        if await google_provider.test_connection():
-            providers["google"] = google_provider
-            logger.info("✅ Google provider initialized successfully")
-        else:
-            logger.warning("❌ Google provider failed connection test")
-    except Exception as e:
-        logger.warning(f"❌ Failed to initialize Google provider: {e}")
+    # try:
+    #     logger.info("Initializing Google provider...")
+    #     google_provider = GoogleProviderClient()
+    #     if await google_provider.test_connection():
+    #         providers["google"] = google_provider
+    #         logger.info("✅ Google provider initialized successfully")
+    #     else:
+    #         logger.warning("❌ Google provider failed connection test")
+    # except Exception as e:
+    #     logger.warning(f"❌ Failed to initialize Google provider: {e}")
 
     # Try to initialize Microsoft provider
-    # try:
-    #    logger.info("Initializing Microsoft provider...")
-    #    microsoft_provider = MicrosoftProviderClient()
-    #    if await microsoft_provider.test_connection():
-    #        providers["microsoft"] = microsoft_provider
-    #        logger.info("✅ Microsoft provider initialized successfully")
-    #    else:
-    #        logger.warning("❌ Microsoft provider failed connection test")
-    # except Exception as e:
-    #    logger.warning(f"❌ Failed to initialize Microsoft provider: {e}")
+    try:
+        logger.info("Initializing Microsoft provider...")
+        microsoft_provider = MicrosoftProviderClient()
+        if await microsoft_provider.test_connection():
+            providers["microsoft"] = microsoft_provider
+            logger.info("✅ Microsoft provider initialized successfully")
+        else:
+            logger.warning("❌ Microsoft provider failed connection test")
+    except Exception as e:
+        logger.warning(f"❌ Failed to initialize Microsoft provider: {e}")
 
     if not providers:
         logger.error("❌ No providers could be initialized!")
