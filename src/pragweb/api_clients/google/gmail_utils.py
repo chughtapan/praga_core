@@ -365,3 +365,233 @@ class GmailParser:
         result = re.sub(r"\n{3,}", "\n\n", result)
 
         return result.strip()
+
+    @classmethod
+    def parse_message(cls, message_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse Gmail message data into a normalized format.
+
+        This method was used in the original GmailService to parse messages.
+        It extracts headers, body content, and other metadata.
+
+        Args:
+            message_data: Raw Gmail API message data
+
+        Returns:
+            Normalized message data dictionary with keys:
+            - thread_id: Thread ID
+            - subject: Email subject
+            - sender: Sender email address
+            - recipients: List of recipient email addresses
+            - cc: List of CC email addresses
+            - body: Cleaned email body text
+            - time: Email timestamp
+            - permalink: Gmail web URL for the message
+        """
+        from datetime import datetime
+        from email.utils import parsedate_to_datetime
+
+        # Extract headers
+        headers = message_data.get("payload", {}).get("headers", [])
+        header_dict = {header["name"]: header["value"] for header in headers}
+
+        # Parse basic fields
+        thread_id = message_data.get("threadId", "")
+        subject = header_dict.get("Subject", "")
+        sender = header_dict.get("From", "")
+
+        # Parse recipients
+        recipients = []
+        to_header = header_dict.get("To", "")
+        if to_header:
+            # Simple email extraction - split by comma and clean
+            recipients = [r.strip() for r in to_header.split(",") if r.strip()]
+
+        # Parse CC recipients
+        cc = []
+        cc_header = header_dict.get("Cc", "")
+        if cc_header:
+            cc = [c.strip() for c in cc_header.split(",") if c.strip()]
+
+        # Parse timestamp
+        date_str = header_dict.get("Date", "")
+        time = datetime.now()
+        if date_str:
+            try:
+                time = parsedate_to_datetime(date_str)
+            except (ValueError, TypeError):
+                pass
+
+        # Extract body using existing method
+        payload = message_data.get("payload", {})
+        body = cls.extract_body(payload)
+
+        # Create permalink
+        message_id = message_data.get("id", "")
+        permalink = f"https://mail.google.com/mail/u/0/#inbox/{message_id}"
+
+        return {
+            "thread_id": thread_id,
+            "subject": subject,
+            "sender": sender,
+            "recipients": recipients,
+            "cc": cc,
+            "body": body,
+            "time": time,
+            "permalink": permalink,
+        }
+
+    @classmethod
+    def parse_thread(cls, thread_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse Gmail thread data into a normalized format.
+
+        Args:
+            thread_data: Raw Gmail API thread data
+
+        Returns:
+            Normalized thread data dictionary with keys:
+            - id: Thread ID
+            - subject: Thread subject (from first message)
+            - messages: List of message summaries
+            - permalink: Gmail web URL for the thread
+        """
+        messages = thread_data.get("messages", [])
+        if not messages:
+            return {
+                "id": thread_data.get("id", ""),
+                "subject": "",
+                "messages": [],
+                "permalink": "",
+            }
+
+        # Use first message for thread subject
+        first_message = messages[0]
+        first_parsed = cls.parse_message(first_message)
+
+        # Parse all messages in thread
+        message_summaries = []
+        for msg in messages:
+            parsed = cls.parse_message(msg)
+            message_summaries.append(
+                {
+                    "id": msg.get("id", ""),
+                    "sender": parsed["sender"],
+                    "recipients": parsed["recipients"],
+                    "cc": parsed.get("cc", []),
+                    "body": parsed["body"],
+                    "time": parsed["time"],
+                }
+            )
+
+        thread_id = thread_data.get("id", "")
+        thread_permalink = f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
+
+        return {
+            "id": thread_id,
+            "subject": first_parsed["subject"],
+            "messages": message_summaries,
+            "permalink": thread_permalink,
+        }
+
+    @classmethod
+    def build_message(
+        cls,
+        to: List[str],
+        subject: str,
+        body: str,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        thread_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build a message for sending via Gmail API.
+
+        Args:
+            to: List of recipient email addresses
+            subject: Email subject
+            body: Email body text
+            cc: Optional CC recipients
+            bcc: Optional BCC recipients
+            thread_id: Optional thread ID for replies
+
+        Returns:
+            Message dict ready for Gmail API
+        """
+        import base64
+        from email.message import EmailMessage
+
+        # Create message
+        message = EmailMessage()
+        message["To"] = ", ".join(to)
+        message["Subject"] = subject
+
+        if cc:
+            message["Cc"] = ", ".join(cc)
+        if bcc:
+            message["Bcc"] = ", ".join(bcc)
+
+        message.set_content(body)
+
+        # Encode message
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+        # Prepare request body
+        send_body = {"raw": raw_message}
+        if thread_id:
+            send_body["threadId"] = thread_id
+
+        return send_body
+
+    @classmethod
+    def build_reply_message(
+        cls, original_message: Dict[str, Any], reply_body: str, reply_all: bool = False
+    ) -> Dict[str, Any]:
+        """Build a reply message.
+
+        Args:
+            original_message: Original message data from Gmail API
+            reply_body: Reply body text
+            reply_all: Whether to reply to all recipients
+
+        Returns:
+            Reply message dict ready for Gmail API
+        """
+        import base64
+        from email.message import EmailMessage
+
+        # Extract recipients from original
+        headers = original_message.get("payload", {}).get("headers", [])
+        header_dict = {header["name"]: header["value"] for header in headers}
+
+        # Reply to sender
+        reply_to = [header_dict.get("From", "")]
+
+        # Add CC if reply all
+        cc = []
+        if reply_all and header_dict.get("Cc"):
+            cc = [email.strip() for email in header_dict["Cc"].split(",")]
+
+        # Build subject
+        original_subject = header_dict.get("Subject", "")
+        if not original_subject.startswith("Re:"):
+            subject = f"Re: {original_subject}"
+        else:
+            subject = original_subject
+
+        # Create reply message
+        message = EmailMessage()
+        message["To"] = ", ".join(reply_to)
+        message["Subject"] = subject
+
+        if cc:
+            message["Cc"] = ", ".join(cc)
+
+        # Add threading headers
+        if header_dict.get("Message-ID"):
+            message["In-Reply-To"] = header_dict["Message-ID"]
+            message["References"] = header_dict["Message-ID"]
+
+        message.set_content(reply_body)
+
+        # Encode message
+        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+        return {"raw": raw_message, "threadId": original_message.get("threadId", "")}

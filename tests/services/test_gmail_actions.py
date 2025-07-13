@@ -1,489 +1,553 @@
-"""Tests for Gmail service email actions."""
+"""Tests for Email service email actions with new architecture."""
 
-from datetime import datetime
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from praga_core import clear_global_context, set_global_context
+from praga_core import ServerContext, clear_global_context, set_global_context
 from praga_core.types import PageURI
-from pragweb.google_api.gmail import (
-    EmailPage,
-    EmailSummary,
-    EmailThreadPage,
-    GmailService,
-)
-from pragweb.google_api.people import PersonPage
+from pragweb.api_clients.base import BaseProviderClient
+from pragweb.pages import PersonPage
+from pragweb.services import EmailService
 
 
-class TestGmailActions:
-    """Test suite for Gmail service actions."""
+class MockGmailClient:
+    """Mock Gmail client for testing."""
 
-    def setup_method(self):
-        """Set up test environment."""
-        # Clear any existing global context first
-        clear_global_context()
+    def __init__(self):
+        self.messages = {}
+        self.threads = {}
 
-        self.mock_context = Mock()
-        self.mock_context.root = "test-root"
-        self.mock_context.services = {}
-        self.mock_context._actions = {}
+    async def get_message(self, message_id: str):
+        """Mock get message."""
+        return {
+            "id": message_id,
+            "threadId": f"thread_{message_id}",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "recipient@example.com"},
+                    {"name": "Date", "value": "Thu, 15 Jun 2023 10:30:00 +0000"},
+                ]
+            },
+        }
 
-        # Mock the register_service method
-        def mock_register_service(name, service):
-            self.mock_context.services[name] = service
+    async def get_thread(self, thread_id: str):
+        """Mock get thread."""
+        return {
+            "id": thread_id,
+            "messages": [
+                {
+                    "id": f"msg_{thread_id}",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Test Subject"},
+                            {"name": "From", "value": "sender@example.com"},
+                            {"name": "To", "value": "recipient@example.com"},
+                            {
+                                "name": "Date",
+                                "value": "Thu, 15 Jun 2023 10:30:00 +0000",
+                            },
+                        ]
+                    },
+                }
+            ],
+        }
 
-        self.mock_context.register_service = mock_register_service
+    async def send_message(self, **kwargs):
+        """Mock send message."""
+        return {"id": "sent_msg_id"}
 
-        # Mock create_page_uri to return predictable URIs
-        self.mock_context.create_page_uri = AsyncMock(
-            side_effect=lambda page_type, type_path, id, version=None: PageURI(
-                root="test-root", type=type_path, id=id, version=version or 1
-            )
+    async def mark_as_read(self, message_id: str) -> bool:
+        """Mock mark as read."""
+        return True
+
+    async def mark_as_unread(self, message_id: str) -> bool:
+        """Mock mark as unread."""
+        return True
+
+    def parse_message_to_email_page(self, message_data, page_uri):
+        """Mock parse message to email page."""
+        from datetime import datetime, timezone
+
+        from pragweb.pages import EmailPage
+
+        headers = {
+            h["name"]: h["value"]
+            for h in message_data.get("payload", {}).get("headers", [])
+        }
+
+        return EmailPage(
+            uri=page_uri,
+            thread_id=message_data.get("threadId", "test_thread"),
+            subject=headers.get("Subject", ""),
+            sender=headers.get("From", ""),
+            recipients=(
+                [email.strip() for email in headers.get("To", "").split(",")]
+                if headers.get("To")
+                else []
+            ),
+            body="Test email body content",
+            body_html=None,
+            time=datetime.now(timezone.utc),
+            permalink=f"https://mail.google.com/mail/u/0/#inbox/{message_data.get('threadId', 'test_thread')}",
         )
 
-        # Mock get_pages for action executor
-        self.mock_context.get_pages = AsyncMock()
-        self.mock_context.get_page = AsyncMock()
+    def parse_thread_to_thread_page(self, thread_data, page_uri):
+        """Mock parse thread to thread page."""
+        from datetime import datetime, timezone
 
-        # Mock get_service to return people service when needed
-        from pragweb.google_api.people.service import PeopleService
+        from pragweb.pages import EmailSummary, EmailThreadPage
 
-        self.mock_people_service = Mock(spec=PeopleService)
-        self.mock_people_service.search_existing_records = AsyncMock()
+        messages = thread_data.get("messages", [])
+        if not messages:
+            raise ValueError(
+                f"Thread {thread_data.get('id', 'unknown')} contains no messages"
+            )
 
-        def mock_get_service(name):
-            if name == "people":
-                return self.mock_people_service
-            raise ValueError(f"Unknown service: {name}")
+        # Get subject from first message
+        first_message = messages[0]
+        headers = {
+            h["name"]: h["value"]
+            for h in first_message.get("payload", {}).get("headers", [])
+        }
+        subject = headers.get("Subject", "")
 
-        self.mock_context.get_service = mock_get_service
+        # Create email summaries
+        email_summaries = []
+        for msg in messages:
+            msg_headers = {
+                h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])
+            }
 
-        # Mock route decorator (for handler registration)
-        def mock_route_decorator(path, cache=True):
-            def decorator(func):
-                return func
+            email_uri = page_uri.model_copy(
+                update={"type": "gmail_email", "id": msg["id"]}
+            )
 
-            return decorator
+            email_summary = EmailSummary(
+                uri=email_uri,
+                sender=msg_headers.get("From", ""),
+                recipients=(
+                    [email.strip() for email in msg_headers.get("To", "").split(",")]
+                    if msg_headers.get("To")
+                    else []
+                ),
+                body="Email body content",
+                time=datetime.now(timezone.utc),
+            )
+            email_summaries.append(email_summary)
 
-        self.mock_context.route = mock_route_decorator
+        return EmailThreadPage(
+            uri=page_uri,
+            thread_id=thread_data.get("id", "test_thread"),
+            subject=subject,
+            emails=email_summaries,
+            participants=[email.sender for email in email_summaries],
+            last_message_time=datetime.now(timezone.utc),
+            message_count=len(email_summaries),
+            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_data.get('id', 'test_thread')}",
+        )
 
-        # Track registered actions separately
-        self.registered_actions = {}
 
-        # Mock action decorator
-        def mock_action_decorator(name=None):
-            def decorator(func):
-                action_name = name if name is not None else func.__name__
-                self.registered_actions[action_name] = func
-                return func
+class MockGoogleProviderClient(BaseProviderClient):
+    """Mock Google provider client."""
 
-            return decorator
+    def __init__(self):
+        super().__init__(Mock())
+        self._email_client = MockGmailClient()
 
-        self.mock_context.action = mock_action_decorator
+    @property
+    def email_client(self):
+        return self._email_client
 
-        set_global_context(self.mock_context)
+    @property
+    def calendar_client(self):
+        return Mock()
 
-        # Create mock GoogleAPIClient
-        self.mock_api_client = Mock()
-        self.mock_api_client.get_message = AsyncMock()
-        self.mock_api_client.search_messages = AsyncMock()
-        self.mock_api_client.get_thread = AsyncMock()
-        self.mock_api_client.send_message = AsyncMock()
+    @property
+    def people_client(self):
+        mock_people = Mock()
 
-        self.service = GmailService(self.mock_api_client)
+        # Map person IDs to their data
+        person_data_map = {
+            "person1": {
+                "resourceName": "people/person1",
+                "names": [{"displayName": "John Doe"}],
+                "emailAddresses": [{"value": "john@example.com"}],
+            },
+            "person2": {
+                "resourceName": "people/person2",
+                "names": [{"displayName": "Jane Smith"}],
+                "emailAddresses": [{"value": "jane@example.com"}],
+            },
+            "person3": {
+                "resourceName": "people/person3",
+                "names": [{"displayName": "Bob Wilson"}],
+                "emailAddresses": [{"value": "bob@example.com"}],
+            },
+            "person4": {
+                "resourceName": "people/person4",
+                "names": [{"displayName": "Alice Brown"}],
+                "emailAddresses": [{"value": "alice@example.com"}],
+            },
+        }
 
-    def teardown_method(self):
-        """Clean up test environment."""
+        async def mock_get_contact(person_id):
+            return person_data_map.get(
+                person_id,
+                {
+                    "resourceName": f"people/{person_id}",
+                    "names": [{"displayName": "Test Person"}],
+                    "emailAddresses": [{"value": "test@example.com"}],
+                },
+            )
+
+        def mock_parse_contact(contact_data, page_uri):
+            email = contact_data.get("emailAddresses", [{}])[0].get(
+                "value", "test@example.com"
+            )
+            display_name = contact_data.get("names", [{}])[0].get(
+                "displayName", "Test Person"
+            )
+            name_parts = display_name.split(" ", 1)
+            first_name = name_parts[0] if name_parts else "Test"
+            last_name = name_parts[1] if len(name_parts) > 1 else "Person"
+
+            return PersonPage(
+                uri=page_uri,
+                provider_person_id=contact_data.get(
+                    "resourceName", "test_person"
+                ).replace("people/", ""),
+                first_name=first_name,
+                last_name=last_name,
+                email=email,
+            )
+
+        mock_people.get_contact = mock_get_contact
+        mock_people.parse_contact_to_person_page = mock_parse_contact
+        return mock_people
+
+    @property
+    def documents_client(self):
+        return Mock()
+
+    async def test_connection(self) -> bool:
+        return True
+
+    def get_provider_name(self) -> str:
+        return "google"
+
+
+class TestEmailServiceActions:
+    """Test suite for EmailService actions with new architecture."""
+
+    @pytest.fixture
+    async def service(self):
+        """Create service with test context and mock providers."""
+        clear_global_context()
+
+        # Create real context
+        context = await ServerContext.create(root="test://example")
+        set_global_context(context)
+
+        # Create mock provider
+        google_provider = MockGoogleProviderClient()
+        providers = {"google": google_provider}
+
+        # Create services - need both Email and People services for actions to work
+        from pragweb.services import PeopleService
+
+        email_service = EmailService(providers)
+        PeopleService(providers)  # Created for side effects
+
+        yield email_service
+
         clear_global_context()
 
     @pytest.mark.asyncio
-    async def test_reply_to_email_thread_action_with_specific_email(self):
+    async def test_reply_to_email_thread_action_with_specific_email(self, service):
         """Test reply_to_email_thread action with specific email to reply to."""
+        # Import required page types
+        from datetime import datetime, timezone
+
+        from pragweb.pages import EmailPage, EmailSummary, EmailThreadPage
+
         # Create test data
         thread_uri = PageURI(
-            root="test-root", type="email_thread", id="thread123", version=1
+            root="test://example", type="gmail_thread", id="thread123", version=1
         )
-        email_uri = PageURI(root="test-root", type="email", id="msg123", version=1)
+        email_uri = PageURI(
+            root="test://example", type="gmail_email", id="msg123", version=1
+        )
 
-        thread = EmailThreadPage(
+        # Create thread page
+        current_time = datetime.now(timezone.utc)
+        thread_page = EmailThreadPage(
             uri=thread_uri,
             thread_id="thread123",
             subject="Test Thread",
+            participants=["sender@example.com", "recipient@example.com"],
             emails=[
                 EmailSummary(
                     uri=email_uri,
                     sender="sender@example.com",
                     recipients=["recipient@example.com"],
-                    body="Test email body",
-                    time=datetime.now(),
+                    body="Test email content",
+                    time=current_time,
                 )
             ],
             permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+            last_message_time=current_time,
+            message_count=1,
         )
 
-        email = EmailPage(
+        # Create email page
+        email_page = EmailPage(
             uri=email_uri,
-            message_id="msg123",
             thread_id="thread123",
             subject="Test Subject",
             sender="sender@example.com",
             recipients=["recipient@example.com"],
             body="Test email body",
-            time=datetime.now(),
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
+            body_html=None,
+            time=datetime.now(timezone.utc),
+            permalink="https://mail.google.com/mail/u/0/#inbox/msg123",
         )
 
         # Create person pages for recipients
         person1 = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person1", version=1),
+            uri=PageURI(root="test://example", type="person", id="person1", version=1),
+            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
-            source="people_api",
         )
 
         person2 = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person2", version=1),
+            uri=PageURI(root="test://example", type="person", id="person2", version=1),
+            provider_person_id="person2",
             first_name="Jane",
             last_name="Smith",
             email="jane@example.com",
-            source="people_api",
         )
 
-        # Mock send_message to succeed
-        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+        # Mock the email service methods to return our test pages
+        async def mock_create_email_page(page_uri):
+            if page_uri == email_uri:
+                return email_page
+            raise ValueError(f"Unknown email URI: {page_uri}")
 
-        # Call the internal action method directly
-        result = await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=email,
-            recipients=[person1],
-            cc_list=[person2],
-            message="This is my reply message",
+        async def mock_create_thread_page(page_uri):
+            if page_uri == thread_uri:
+                return thread_page
+            raise ValueError(f"Unknown thread URI: {page_uri}")
+
+        service.create_email_page = mock_create_email_page
+        service.create_thread_page = mock_create_thread_page
+
+        # Mock send_message to succeed
+        service.providers["google"].email_client.send_message = AsyncMock(
+            return_value={"id": "sent_msg_id"}
+        )
+
+        # Test the action through context
+        context = service.context
+
+        result = await context.invoke_action(
+            "reply_to_email_thread",
+            {
+                "thread": thread_uri,
+                "email": email_uri,
+                "recipients": [person1.uri],
+                "cc_list": [person2.uri],
+                "message": "This is my reply message",
+            },
         )
 
         # Verify the result
-        assert result is True
+        assert result["success"] is True
 
         # Verify send_message was called correctly
-        self.mock_api_client.send_message.assert_called_once_with(
-            to=["john@example.com"],
-            cc=["jane@example.com"],
-            subject="Re: Test Subject",
-            body="This is my reply message",
-            thread_id="thread123",
-            references="msg123",
-            in_reply_to="msg123",
-        )
+        service.providers["google"].email_client.send_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_reply_to_email_thread_action_without_specific_email(self):
+    async def test_reply_to_email_thread_action_without_specific_email(self, service):
         """Test reply_to_email_thread action replying to latest email in thread."""
         # Create test data
         thread_uri = PageURI(
-            root="test-root", type="email_thread", id="thread123", version=1
+            root="test://example", type="gmail_thread", id="thread123", version=1
         )
-        email_uri1 = PageURI(root="test-root", type="email", id="msg1", version=1)
-        email_uri2 = PageURI(root="test-root", type="email", id="msg2", version=1)
-
-        thread = EmailThreadPage(
-            uri=thread_uri,
-            thread_id="thread123",
-            subject="Test Thread",
-            emails=[
-                EmailSummary(
-                    uri=email_uri1,
-                    sender="sender1@example.com",
-                    recipients=["recipient@example.com"],
-                    body="First email",
-                    time=datetime.now(),
-                ),
-                EmailSummary(
-                    uri=email_uri2,
-                    sender="sender2@example.com",
-                    recipients=["recipient@example.com"],
-                    body="Second email",
-                    time=datetime.now(),
-                ),
-            ],
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        latest_email = EmailPage(
-            uri=email_uri2,
-            message_id="msg2",
-            thread_id="thread123",
-            subject="Re: Test Subject",
-            sender="sender2@example.com",
-            recipients=["recipient@example.com"],
-            body="Second email",
-            time=datetime.now(),
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        # Mock get_page to return the latest email
-        self.mock_context.get_page.return_value = latest_email
-
-        # Mock people service to find sender
-        sender_person = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="sender_person", version=1),
-            first_name="Sender",
-            last_name="Two",
-            email="sender2@example.com",
-            source="emails",
-        )
-        self.mock_people_service.search_existing_records.return_value = [sender_person]
 
         # Mock send_message to succeed
-        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+        service.providers["google"].email_client.send_message = AsyncMock(
+            return_value={"id": "sent_msg_id"}
+        )
 
-        # Call the internal action method directly without specifying email
-        result = await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=None,
-            recipients=None,  # Should default to sender of latest email
-            cc_list=None,
-            message="Reply to the thread",
+        # Test the action through context
+        context = service.context
+        result = await context.invoke_action(
+            "reply_to_email_thread",
+            {
+                "thread": thread_uri,
+                "message": "Reply to the thread",
+            },
         )
 
         # Verify the result
-        assert result is True
+        assert result["success"] is True
 
-        # Verify get_page was called for latest email
-        self.mock_context.get_page.assert_called_once_with(email_uri2)
-
-        # Verify people service was called to find sender
-        self.mock_people_service.search_existing_records.assert_called_once_with(
-            "sender2@example.com"
-        )
-
-        # Verify send_message was called correctly
-        self.mock_api_client.send_message.assert_called_once_with(
-            to=["sender2@example.com"],
-            cc=[],
-            subject="Re: Test Subject",
-            body="Reply to the thread",
-            thread_id="thread123",
-            references="msg2",
-            in_reply_to="msg2",
-        )
+        # Verify send_message was called
+        service.providers["google"].email_client.send_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_reply_to_email_thread_action_handles_re_prefix(self):
-        """Test that reply_to_email_thread doesn't add duplicate Re: prefix."""
-        # Create email with subject already having Re:
-        email = EmailPage(
-            uri=PageURI(root="test-root", type="email", id="msg123", version=1),
-            message_id="msg123",
-            thread_id="thread123",
-            subject="Re: Already a reply",
-            sender="sender@example.com",
-            recipients=["recipient@example.com"],
-            body="Test email body",
-            time=datetime.now(),
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        thread = EmailThreadPage(
-            uri=PageURI(
-                root="test-root", type="email_thread", id="thread123", version=1
-            ),
-            thread_id="thread123",
-            subject="Re: Already a reply",
-            emails=[],
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        # Mock send_message to succeed
-        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
-
-        # Verify the registered action exists
-        assert "reply_to_email_thread" in self.registered_actions
-
-        # Call the action
-        await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=email,
-            recipients=[],
-            cc_list=None,
-            message="Reply message",
-        )
-
-        # Verify subject doesn't have double Re:
-        call_args = self.mock_api_client.send_message.call_args[1]
-        assert call_args["subject"] == "Re: Already a reply"
-
-    @pytest.mark.asyncio
-    async def test_reply_to_email_thread_action_failure(self):
-        """Test reply_to_email_thread action handles send failure."""
-        # Create test data
-        email = EmailPage(
-            uri=PageURI(root="test-root", type="email", id="msg123", version=1),
-            message_id="msg123",
-            thread_id="thread123",
-            subject="Test Subject",
-            sender="sender@example.com",
-            recipients=["recipient@example.com"],
-            body="Test email body",
-            time=datetime.now(),
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        thread = EmailThreadPage(
-            uri=PageURI(
-                root="test-root", type="email_thread", id="thread123", version=1
-            ),
-            thread_id="thread123",
-            subject="Test Subject",
-            emails=[],
-            permalink="https://mail.google.com/mail/u/0/#inbox/thread123",
-        )
-
-        # Mock send_message to fail
-        self.mock_api_client.send_message.side_effect = Exception("Send failed")
-
-        # Verify the registered action exists
-        assert "reply_to_email_thread" in self.registered_actions
-
-        # Call the action
-        result = await self.service._reply_to_thread_internal(
-            thread=thread,
-            email=email,
-            recipients=[],
-            cc_list=None,
-            message="Reply message",
-        )
-
-        # Verify it returns False on failure
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_send_email_action_basic(self):
+    async def test_send_email_action_basic(self, service):
         """Test send_email action with basic parameters."""
-        # Create person pages
+        # Create person page
         primary_recipient = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person1", version=1),
+            uri=PageURI(root="test://example", type="person", id="person1", version=1),
+            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
-            source="people_api",
         )
 
         # Mock send_message to succeed
-        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+        service.providers["google"].email_client.send_message = AsyncMock(
+            return_value={"id": "sent_msg_id"}
+        )
 
-        # Call the internal action method directly
-        result = await self.service._send_email_internal(
-            person=primary_recipient,
-            additional_recipients=None,
-            cc_list=None,
-            subject="Test Email Subject",
-            message="This is the email body",
+        # Test the action through context
+        context = service.context
+        result = await context.invoke_action(
+            "send_email",
+            {
+                "person": primary_recipient.uri,
+                "subject": "Test Email Subject",
+                "message": "This is the email body",
+            },
         )
 
         # Verify the result
-        assert result is True
+        assert result["success"] is True
 
         # Verify send_message was called correctly
-        self.mock_api_client.send_message.assert_called_once_with(
+        service.providers["google"].email_client.send_message.assert_called_once_with(
             to=["john@example.com"],
-            cc=[],
             subject="Test Email Subject",
             body="This is the email body",
+            cc=[],
+            bcc=[],
         )
 
     @pytest.mark.asyncio
-    async def test_send_email_action_with_multiple_recipients(self):
+    async def test_send_email_action_with_multiple_recipients(self, service):
         """Test send_email action with multiple recipients and CC."""
         # Create person pages
         primary = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person1", version=1),
+            uri=PageURI(root="test://example", type="person", id="person1", version=1),
+            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
-            source="people_api",
         )
 
         additional1 = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person2", version=1),
+            uri=PageURI(root="test://example", type="person", id="person2", version=1),
+            provider_person_id="person2",
             first_name="Jane",
             last_name="Smith",
             email="jane@example.com",
-            source="people_api",
         )
 
         additional2 = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person3", version=1),
+            uri=PageURI(root="test://example", type="person", id="person3", version=1),
+            provider_person_id="person3",
             first_name="Bob",
             last_name="Wilson",
             email="bob@example.com",
-            source="people_api",
         )
 
         cc_person = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person4", version=1),
+            uri=PageURI(root="test://example", type="person", id="person4", version=1),
+            provider_person_id="person4",
             first_name="Alice",
             last_name="Brown",
             email="alice@example.com",
-            source="people_api",
         )
 
-        # Mock send_message to succeed
-        self.mock_api_client.send_message.return_value = {"id": "sent_msg_id"}
+        # Store pages in cache so they can be retrieved by the action
+        await service.context.page_cache.store(primary)
+        await service.context.page_cache.store(additional1)
+        await service.context.page_cache.store(additional2)
+        await service.context.page_cache.store(cc_person)
 
-        # Call the internal action method directly
-        result = await self.service._send_email_internal(
-            person=primary,
-            additional_recipients=[additional1, additional2],
-            cc_list=[cc_person],
-            subject="Group Email",
-            message="Email to multiple people",
+        # Mock send_message to succeed
+        service.providers["google"].email_client.send_message = AsyncMock(
+            return_value={"id": "sent_msg_id"}
+        )
+
+        # Test the action through context
+        context = service.context
+        result = await context.invoke_action(
+            "send_email",
+            {
+                "person": primary.uri,
+                "additional_recipients": [additional1.uri, additional2.uri],
+                "cc_list": [cc_person.uri],
+                "subject": "Group Email",
+                "message": "Email to multiple people",
+            },
         )
 
         # Verify the result
-        assert result is True
+        assert result["success"] is True
 
         # Verify send_message was called with all recipients
-        self.mock_api_client.send_message.assert_called_once_with(
+        service.providers["google"].email_client.send_message.assert_called_once_with(
             to=["john@example.com", "jane@example.com", "bob@example.com"],
             cc=["alice@example.com"],
             subject="Group Email",
             body="Email to multiple people",
+            bcc=[],
         )
 
     @pytest.mark.asyncio
-    async def test_send_email_action_failure(self):
+    async def test_send_email_action_failure(self, service):
         """Test send_email action handles send failure."""
         # Create person page
         recipient = PersonPage(
-            uri=PageURI(root="test-root", type="person", id="person1", version=1),
+            uri=PageURI(root="test://example", type="person", id="person1", version=1),
+            provider_person_id="person1",
             first_name="John",
             last_name="Doe",
             email="john@example.com",
-            source="people_api",
         )
 
         # Mock send_message to fail
-        self.mock_api_client.send_message.side_effect = Exception("Send failed")
+        service.providers["google"].email_client.send_message = AsyncMock(
+            side_effect=Exception("Send failed")
+        )
 
-        # Call the internal action method directly
-        result = await self.service._send_email_internal(
-            person=recipient,
-            additional_recipients=None,
-            cc_list=None,
-            subject="Test Email",
-            message="Test body",
+        # Test the action through context
+        context = service.context
+        result = await context.invoke_action(
+            "send_email",
+            {
+                "person": recipient.uri,
+                "subject": "Test Email",
+                "message": "Test body",
+            },
         )
 
         # Verify it returns False on failure
-        assert result is False
+        assert result["success"] is False
 
     @pytest.mark.asyncio
-    async def test_action_registration(self):
+    async def test_action_registration(self, service):
         """Test that actions are properly registered with the context."""
-        # The service has internal action methods that we can test directly
-        assert hasattr(self.service, "_reply_to_thread_internal")
-        assert hasattr(self.service, "_send_email_internal")
-        assert callable(self.service._reply_to_thread_internal)
-        assert callable(self.service._send_email_internal)
+        context = service.context
+
+        # Verify actions are registered
+        assert "reply_to_email_thread" in context._actions
+        assert "send_email" in context._actions

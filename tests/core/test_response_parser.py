@@ -2,11 +2,7 @@
 
 import pytest
 
-from praga_core.agents.response import (
-    AgentResponse,
-    ResponseCode,
-    parse_agent_response,
-)
+from praga_core.agents.response import AgentResponse, ResponseCode, parse_agent_response
 from praga_core.types import PageURI, TextPage
 
 

@@ -1,11 +1,11 @@
-"""Tests for GoogleAPIClient."""
+"""Tests for Google API Client integration with new architecture."""
 
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from pragweb.google_api.auth import _SCOPES, GoogleAuthManager
-from pragweb.google_api.client import GoogleAPIClient
+from pragweb.api_clients.google.auth import _SCOPES, GoogleAuthManager
+from pragweb.api_clients.google.client import GoogleAPIClient
 
 
 class TestGoogleAPIClient:
@@ -34,7 +34,7 @@ class TestGoogleAPIClient:
         client = GoogleAPIClient(auth_manager=self.mock_auth_manager)
         assert client.auth_manager is self.mock_auth_manager
 
-    @patch("pragweb.google_api.client.GoogleAuthManager")
+    @patch("pragweb.api_clients.google.client.GoogleAuthManager")
     def test_init_without_auth_manager(self, mock_auth_class):
         """Test initialization creates default auth manager."""
         mock_instance = Mock()
@@ -323,9 +323,9 @@ class TestGoogleAuthManagerIntegration:
         GoogleAuthManager._instance = None
         GoogleAuthManager._initialized = False
 
-    @patch("pragweb.google_api.auth.get_current_config")
-    @patch("pragweb.google_api.auth.get_secrets_manager")
-    @patch("pragweb.google_api.auth.InstalledAppFlow")
+    @patch("pragweb.api_clients.google.auth.get_current_config")
+    @patch("pragweb.api_clients.google.auth.get_secrets_manager")
+    @patch("pragweb.api_clients.google.auth.InstalledAppFlow")
     def test_auth_manager_forces_reauth_on_scope_mismatch(
         self, mock_flow_class, mock_get_secrets, mock_get_config
     ):
@@ -369,8 +369,8 @@ class TestGoogleAuthManagerIntegration:
         mock_flow.run_local_server.assert_called_once_with(port=0)
         mock_secrets.store_oauth_token.assert_called_once()
 
-    @patch("pragweb.google_api.auth.get_current_config")
-    @patch("pragweb.google_api.auth.get_secrets_manager")
+    @patch("pragweb.api_clients.google.auth.get_current_config")
+    @patch("pragweb.api_clients.google.auth.get_secrets_manager")
     def test_auth_manager_uses_existing_creds_when_scopes_match(
         self, mock_get_secrets, mock_get_config
     ):
@@ -396,7 +396,7 @@ class TestGoogleAuthManagerIntegration:
         mock_get_secrets.return_value = mock_secrets
 
         # Mock the credentials to appear valid
-        with patch("pragweb.google_api.auth.Credentials") as mock_creds_class:
+        with patch("pragweb.api_clients.google.auth.Credentials") as mock_creds_class:
             mock_creds = Mock()
             mock_creds.valid = True
             mock_creds_class.return_value = mock_creds

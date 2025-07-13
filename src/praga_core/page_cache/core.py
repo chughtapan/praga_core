@@ -16,11 +16,7 @@ from typing import (
 )
 
 from sqlalchemy import Table
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool, StaticPool
 
 from ..types import Page, PageURI

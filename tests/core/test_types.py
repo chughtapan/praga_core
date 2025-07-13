@@ -6,12 +6,7 @@ and related classes with the new json_encoders configuration.
 
 import json
 
-from praga_core.types import (
-    PageReference,
-    PageURI,
-    SearchResponse,
-    TextPage,
-)
+from praga_core.types import PageReference, PageURI, SearchResponse, TextPage
 
 
 class TestPageURIJSONSerialization:

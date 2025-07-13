@@ -1,4 +1,4 @@
-"""Gmail page definition."""
+"""Provider-agnostic email page definitions."""
 
 from datetime import datetime
 from typing import List
@@ -14,15 +14,19 @@ class EmailPage(Page):
     @computed_field
     def thread_uri(self) -> PageURI:
         """URI that links to the thread page containing this email."""
+        # Convert email service type to thread service type
+        service_type = self.uri.type.replace("_email", "_thread")
         return PageURI(
             root=self.uri.root,
-            type="email_thread",
+            type=service_type,  # gmail_thread, outlook_thread
             id=self.thread_id,
             version=self.uri.version,
         )
 
-    message_id: str = Field(description="Gmail message ID", exclude=True)
-    thread_id: str = Field(description="Gmail thread ID", exclude=True)
+    # Provider-specific metadata (stored as internal fields)
+    thread_id: str = Field(description="Thread ID", exclude=True)
+
+    # Core email fields (provider-agnostic)
     subject: str = Field(description="Email subject")
     sender: str = Field(description="Email sender")
     recipients: List[str] = Field(description="List of email recipients")
@@ -31,7 +35,7 @@ class EmailPage(Page):
     )
     body: str = Field(description="Email body content")
     time: datetime = Field(description="Email timestamp")
-    permalink: str = Field(description="Gmail permalink URL")
+    permalink: str = Field(description="Provider-specific permalink URL")
 
 
 class EmailSummary(BaseModel):
@@ -50,9 +54,9 @@ class EmailSummary(BaseModel):
 class EmailThreadPage(Page):
     """A page representing an email thread with all emails in the thread."""
 
-    thread_id: str = Field(description="Gmail thread ID", exclude=True)
+    thread_id: str = Field(description="Thread ID", exclude=True)
     subject: str = Field(description="Thread subject (usually from first email)")
     emails: List[EmailSummary] = Field(
         description="List of compressed email summaries in this thread"
     )
-    permalink: str = Field(description="Gmail thread permalink URL")
+    permalink: str = Field(description="Provider-specific thread permalink URL")

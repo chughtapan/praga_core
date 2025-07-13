@@ -5,8 +5,7 @@ import re
 from typing import List, cast
 
 from praga_core.global_context import get_global_context
-
-from .people import PeopleService, PersonPage
+from pragweb.services import PeopleService
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +28,20 @@ def resolve_person_to_emails(person_identifier: str) -> List[str]:
     try:
         context = get_global_context()
         service = cast(PeopleService, context.get_service("people"))
-        people = service.toolkit.find_or_create_person(person_identifier)
-        if not people:
-            return []
-        emails = [cast(PersonPage, person).email for person in people]
-        return emails
+        if service and hasattr(service, "resolve_person_identifier"):
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            result = loop.run_until_complete(
+                service.resolve_person_identifier(person_identifier)
+            )
+            if result.results:
+                return [
+                    person.email
+                    for person in result.results
+                    if hasattr(person, "email")
+                ]
+        return []
     except Exception as e:
         logger.debug(f"Failed to resolve person '{person_identifier}': {e}")
 

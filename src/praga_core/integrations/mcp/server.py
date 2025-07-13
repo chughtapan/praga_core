@@ -3,15 +3,7 @@
 import inspect
 import json
 import logging
-from typing import (
-    Any,
-    List,
-    Optional,
-    Union,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
+from typing import Any, List, Optional, Union, get_args, get_origin, get_type_hints
 
 from fastmcp import Context, FastMCP
 

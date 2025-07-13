@@ -10,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
 
+from pragweb.api_clients.base import BaseAuthManager
 from pragweb.config import get_current_config
 from pragweb.secrets_manager import SecretsManager, get_secrets_manager
 
@@ -29,7 +30,7 @@ _SCOPES = [
 ]
 
 
-class GoogleAuthManager:
+class GoogleAuthManager(BaseAuthManager):
     """Singleton Google API authentication manager."""
 
     _instance: Optional["GoogleAuthManager"] = None
@@ -155,6 +156,7 @@ class GoogleAuthManager:
                 )
                 self._creds = flow.run_local_server(port=0)
                 # Save new credentials
+                assert self._creds is not None
                 self._store_credentials(self._creds, secrets_manager)
 
     def get_gmail_service(self) -> Any:
@@ -191,3 +193,21 @@ class GoogleAuthManager:
         if not hasattr(_thread_local, "drive_service"):
             _thread_local.drive_service = build("drive", "v3", credentials=self._creds)
         return _thread_local.drive_service
+
+    # BaseAuthManager interface implementation
+    async def get_credentials(self) -> Any:
+        """Get authentication credentials."""
+        return self._creds
+
+    async def refresh_credentials(self) -> Any:
+        """Refresh authentication credentials."""
+        if self._creds and self._creds.expired and self._creds.refresh_token:
+            self._creds.refresh(Request())  # type: ignore[no-untyped-call]
+            config = get_current_config()
+            secrets_manager = get_secrets_manager(config.secrets_database_url)
+            self._store_credentials(self._creds, secrets_manager)
+        return self._creds
+
+    def is_authenticated(self) -> bool:
+        """Check if user is authenticated."""
+        return self._creds is not None and self._creds.valid

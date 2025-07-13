@@ -12,11 +12,7 @@ import pytest
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from praga_core.page_cache import (
-    PageCache,
-    PageCacheError,
-    ProvenanceError,
-)
+from praga_core.page_cache import PageCache, PageCacheError, ProvenanceError
 from praga_core.page_cache.schema import PageRelationships
 from praga_core.page_cache.serialization import (
     deserialize_from_storage,
