@@ -1,21 +1,66 @@
-"""Google API Integration App"""
+"""Multi-Provider API Integration App"""
 
 import argparse
 import asyncio
 import logging
+from typing import Dict
 
 from praga_core import ServerContext, set_global_context
 from praga_core.agents import ReactAgent
+from pragweb.api_clients.base import BaseProviderClient
+
+# Import provider clients
+# from pragweb.api_clients.google import GoogleProviderClient
+from pragweb.api_clients.microsoft import MicrosoftProviderClient
 from pragweb.config import get_current_config
-from pragweb.google_api.calendar import CalendarService
-from pragweb.google_api.client import GoogleAPIClient
-from pragweb.google_api.docs import GoogleDocsService
-from pragweb.google_api.gmail import GmailService
-from pragweb.google_api.people import PeopleService
+
+# Import new orchestration services
+from pragweb.services import (
+    CalendarService,
+    DocumentService,
+    EmailService,
+    PeopleService,
+)
 
 logging.basicConfig(level=getattr(logging, get_current_config().log_level))
 
 logger = logging.getLogger(__name__)
+
+
+async def initialize_providers() -> Dict[str, BaseProviderClient]:
+    """Initialize all available providers."""
+    providers: Dict[str, BaseProviderClient] = {}
+
+    # Try to initialize Google provider
+    # try:
+    #     logger.info("Initializing Google provider...")
+    #     google_provider = GoogleProviderClient()
+    #     if await google_provider.test_connection():
+    #         providers["google"] = google_provider
+    #         logger.info("✅ Google provider initialized successfully")
+    #     else:
+    #         logger.warning("❌ Google provider failed connection test")
+    # except Exception as e:
+    #     logger.warning(f"❌ Failed to initialize Google provider: {e}")
+
+    # Try to initialize Microsoft provider
+    try:
+        logger.info("Initializing Microsoft provider...")
+        microsoft_provider = MicrosoftProviderClient()
+        if await microsoft_provider.test_connection():
+            providers["microsoft"] = microsoft_provider
+            logger.info("✅ Microsoft provider initialized successfully")
+        else:
+            logger.warning("❌ Microsoft provider failed connection test")
+    except Exception as e:
+        logger.warning(f"❌ Failed to initialize Microsoft provider: {e}")
+
+    if not providers:
+        logger.error("❌ No providers could be initialized!")
+        raise RuntimeError("No providers available")
+
+    logger.info(f"✅ Initialized {len(providers)} providers: {list(providers.keys())}")
+    return providers
 
 
 async def setup_global_context() -> None:
@@ -31,24 +76,36 @@ async def setup_global_context() -> None:
     )
     set_global_context(context)
 
-    # Create single Google API client
-    google_client = GoogleAPIClient()
+    # Initialize providers
+    providers = await initialize_providers()
 
-    # Initialize services (they auto-register with global context)
-    logger.info("Initializing services...")
-    gmail_service = GmailService(google_client)
-    calendar_service = CalendarService(google_client)
-    people_service = PeopleService(google_client)
-    google_docs_service = GoogleDocsService(google_client)
+    # Initialize provider-specific service instances
+    logger.info("Initializing provider-specific services...")
+    all_toolkits = []
 
-    # Collect all toolkits from registered services
-    logger.info("Collecting toolkits...")
-    all_toolkits = [
-        gmail_service.toolkit,
-        calendar_service.toolkit,
-        people_service.toolkit,
-        google_docs_service.toolkit,
-    ]
+    # Create separate service instances for each provider
+    for provider_name, provider_client in providers.items():
+        logger.info(f"Creating services for provider: {provider_name}")
+
+        # Email service for this provider
+        email_service = EmailService({provider_name: provider_client})
+        all_toolkits.append(email_service.toolkit)
+
+        # Calendar service for this provider
+        calendar_service = CalendarService({provider_name: provider_client})
+        all_toolkits.append(calendar_service.toolkit)
+
+        # Document service for this provider
+        document_service = DocumentService({provider_name: provider_client})
+        all_toolkits.append(document_service.toolkit)
+
+    # Create shared people service with all providers
+    logger.info("Creating shared people service...")
+    people_service = PeopleService(providers)
+    all_toolkits.append(people_service.toolkit)
+
+    # Collect all toolkits
+    logger.info(f"Collected {len(all_toolkits)} service toolkits")
 
     # Set up agent with collected toolkits
     logger.info("Setting up React agent...")
@@ -62,6 +119,11 @@ async def setup_global_context() -> None:
     context.retriever = agent
 
     logger.info("✅ Global context setup complete!")
+    logger.info("🚀 Multi-provider integration ready!")
+
+    # Show available providers
+    provider_list = ", ".join(providers.keys())
+    logger.info(f"📡 Available providers: {provider_list}")
 
 
 async def run_interactive_cli() -> None:
@@ -70,9 +132,12 @@ async def run_interactive_cli() -> None:
 
     context = get_global_context()
 
-    print("🚀 Google API Integration - Interactive Mode")
+    print("🚀 Multi-Provider API Integration - Interactive Mode")
     print("=" * 50)
     print("✅ Setup complete! Ready for queries.")
+    print(
+        "📧 Supports: gmail/, outlook/, google_calendar/, outlook_calendar/, people/, etc."
+    )
     print("-" * 50)
 
     # Interactive loop
@@ -118,8 +183,17 @@ async def run_interactive_cli() -> None:
 async def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Google API Integration with Global Context",
+        description="Multi-Provider API Integration with Global Context",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python app.py                    # Run interactive mode
+  python app.py -v                 # Run with verbose logging
+
+Supported Providers:
+  - Google (Gmail, Calendar, Contacts, Docs, Drive)
+  - Microsoft (Outlook, Calendar, Contacts, OneDrive)
+        """,
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
@@ -132,8 +206,15 @@ async def main() -> None:
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Set up global context
-    await setup_global_context()
-    await run_interactive_cli()
+    try:
+        await setup_global_context()
+        await run_interactive_cli()
+    except Exception as e:
+        logger.error(f"Failed to start application: {e}")
+        print(f"\n❌ Startup failed: {e}")
+        print("\nPlease check your provider configurations:")
+        print("- For Google: docs/integrations/GOOGLE_OAUTH_SETUP.md")
+        print("- For Microsoft: docs/integrations/OUTLOOK_OAUTH_SETUP.md")
 
 
 if __name__ == "__main__":

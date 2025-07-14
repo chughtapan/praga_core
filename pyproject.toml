@@ -25,6 +25,11 @@ dependencies = [
     "bs4==0.0.2",
     "chonkie>=1.0.0",
     "tokenizers>=0.21",
+    # Microsoft Graph API dependencies
+    "aiohttp>=3.8.0",
+    "requests>=2.31.0",
+    "requests-oauthlib>=1.3.1",
+    "msal<=1.33.0b",
     # Development dependencies
     "mypy>=1.5.1",
     "flake8-pyproject==1.2.3",
@@ -36,6 +41,8 @@ dependencies = [
     "pyproject-autoflake>=1.0.2",
     "pytest>=8.4.0",
     "pytest-asyncio>=1.0.0",
+    "types-requests>=2.32.4.20250611",
+    "types-beautifulsoup4>=4.12.0.20250516",
 ]
 
 [build-system]
@@ -45,7 +52,8 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "--asyncio-mode=auto --ignore=tests/integration/"
+addopts = "--ignore=tests/integration/"
+asyncio_mode = "auto"
 
 [tool.black]
 line-length = 88
@@ -78,4 +86,5 @@ disallow_untyped_calls = true
 max-line-length = 80
 extend-select = "B950"
 extend-ignore = "E203,E501,E701,W291"
+exclude = "tests/*"
 

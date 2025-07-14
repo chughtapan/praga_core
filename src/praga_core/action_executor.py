@@ -279,11 +279,24 @@ class ActionExecutorMixin(ABC):
         for param_name, value in args.items():
             param_type = type_hints.get(param_name, type(value))
 
-            # Handle single PageURI -> Page
+            # Handle single PageURI -> Page or Optional[PageURI] -> Optional[Page]
             if isinstance(value, (PageURI, str)):
+                # Get the actual page type, handling Optional wrapper
+                page_type = param_type
+                origin = get_origin(param_type)
+
+                # If this is Optional[Page], unwrap to get Page
+                if origin is Union:
+                    args_types = get_args(param_type)
+                    # Find the non-None type in the union
+                    for arg_type in args_types:
+                        if arg_type is not type(None):
+                            page_type = arg_type
+                            break
+
                 # Check if this parameter should be a Page
-                if param_type is Page or (
-                    isinstance(param_type, type) and issubclass(param_type, Page)
+                if page_type is Page or (
+                    isinstance(page_type, type) and issubclass(page_type, Page)
                 ):
                     page_uri = (
                         value if isinstance(value, PageURI) else PageURI.parse(value)
@@ -294,10 +307,23 @@ class ActionExecutorMixin(ABC):
                     )
                 else:
                     converted_args[param_name] = value
-            # Handle List[PageURI] -> List[Page]
+            # Handle List[PageURI] -> List[Page] or Optional[List[PageURI]] -> Optional[List[Page]]
             elif isinstance(value, (list, tuple)) and value:
+                # Get the actual list type, handling Optional wrapper
+                list_type = param_type
                 origin = get_origin(param_type)
-                args_types = get_args(param_type)
+
+                # If this is Optional[List[...]], unwrap to get List[...]
+                if origin is Union:
+                    args_types = get_args(param_type)
+                    # Find the non-None type in the union
+                    for arg_type in args_types:
+                        if arg_type is not type(None):
+                            list_type = arg_type
+                            break
+
+                origin = get_origin(list_type)
+                args_types = get_args(list_type)
 
                 if (
                     origin in (list, tuple, Sequence)

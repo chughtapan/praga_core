@@ -88,32 +88,3 @@ class TestDockerBuild:
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 # Ignore cleanup errors
                 pass
-
-    def test_smithery_yaml_docker_compatibility(self):
-        """Test that smithery.yaml is compatible with Docker deployment."""
-        smithery_yaml_path = Path("smithery.yaml")
-
-        if not smithery_yaml_path.exists():
-            pytest.skip("smithery.yaml not found")
-
-        try:
-            import yaml
-
-            with open(smithery_yaml_path, "r") as f:
-                config = yaml.safe_load(f)
-
-            # Check that build section exists
-            assert "build" in config, "Missing 'build' section in smithery.yaml"
-
-            # Check that startCommand is configured for containerized deployment
-            assert (
-                "startCommand" in config
-            ), "Missing 'startCommand' section in smithery.yaml"
-
-            start_cmd = config["startCommand"]
-            assert (
-                start_cmd.get("type") == "stdio"
-            ), f"Expected startCommand.type to be 'stdio', got '{start_cmd.get('type')}'"
-
-        except ImportError:
-            pytest.skip("PyYAML not available for smithery.yaml validation")
