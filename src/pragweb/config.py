@@ -34,9 +34,6 @@ class AppConfig(BaseModel):
         description="Maximum iterations for the retriever agent"
     )
 
-    # API Keys
-    openai_api_key: str = Field(description="OpenAI API key (required)")
-
     # Google API Configuration
     google_credentials_file: str = Field(
         description="Path to Google API credentials file"
@@ -45,16 +42,16 @@ class AppConfig(BaseModel):
     # Logging Configuration
     log_level: str = Field(description="Logging level")
 
-    @field_validator("openai_api_key")
-    @classmethod
-    def validate_openai_api_key(cls, v: str) -> str:
-        """Validate that OpenAI API key is provided."""
-        if not v:
+    @property
+    def openai_api_key(self) -> str:
+        """Lazy-load OpenAI API key from environment variable."""
+        key = os.getenv("OPENAI_API_KEY", "")
+        if not key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable is required. "
                 "Please set it in your .env file or environment."
             )
-        return v
+        return key
 
     @field_validator("log_level")
     @classmethod
@@ -141,7 +138,6 @@ def load_default_config() -> AppConfig:
         secrets_database_url=secrets_database_url,
         retriever_agent_model=os.getenv("RETRIEVER_AGENT_MODEL", "gpt-4o-mini"),
         retriever_max_iterations=int(os.getenv("RETRIEVER_MAX_ITERATIONS", "10")),
-        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         google_credentials_file=os.getenv(
             "GOOGLE_CREDENTIALS_FILE", "credentials.json"
         ),
