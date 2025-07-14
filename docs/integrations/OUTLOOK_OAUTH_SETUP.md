@@ -86,8 +86,6 @@ Set the following environment variable:
 export MICROSOFT_CLIENT_ID="your_application_id_here"
 ```
 
-**Note**: `MICROSOFT_CLIENT_SECRET` and `MICROSOFT_REDIRECT_URI` are no longer needed with MSAL authentication.
-
 ### Option B: Using .env File
 
 Create a `.env` file in your project root:
@@ -96,29 +94,6 @@ Create a `.env` file in your project root:
 # .env file
 MICROSOFT_CLIENT_ID=your_application_id_here
 ```
-
-**Note**: The secrets manager `store_oauth_token()` method is used internally for token storage, but manual secret storage is handled via environment variables only.
-
-## Step 7: Test the Integration
-
-1. Start your PragaWeb application
-2. When authentication is required, MSAL will automatically:
-   - Open your default browser to Microsoft's sign-in page
-   - Display a user-friendly authentication flow
-3. Sign in with your Microsoft account and grant permissions
-4. The browser will show a "Authentication completed" message
-5. The application will automatically receive and store the tokens
-
-**New Streamlined Experience**: No manual URL copying or code pasting required!
-
-## Step 8: Verify Access
-
-After authentication, you can verify the integration is working by:
-
-1. Checking that email search works
-2. Verifying calendar events can be retrieved
-3. Confirming contacts are accessible
-4. Testing OneDrive file access
 
 ## Troubleshooting
 
@@ -151,26 +126,6 @@ After authentication, you can verify the integration is working by:
 - MSAL automatically handles token refresh
 - If issues persist, clear the MSAL cache and re-authenticate
 
-## Security Best Practices
-
-1. **Never commit credentials to version control**
-2. **Use environment variables or secure secret storage**
-3. **Monitor API usage in Azure Portal**
-4. **MSAL handles token refresh automatically**
-5. **Use the principle of least privilege for scopes**
-6. **No client secrets needed for desktop apps (public clients)**
-
-## Production Deployment
-
-For production deployment:
-
-1. **Use a proper domain** instead of localhost for redirect URIs
-2. **Implement proper error handling** for authentication failures
-3. **Set up monitoring** for API usage
-4. **Configure proper backup** for refresh tokens
-5. **Consider using Azure Key Vault** for secret storage
-6. **Set up proper logging** for authentication events
-
 ## API Limits and Throttling
 
 Be aware of Microsoft Graph API limits:
@@ -181,38 +136,6 @@ Be aware of Microsoft Graph API limits:
 - **OneDrive**: Varies by operation type
 
 Microsoft Graph implements throttling and will return HTTP 429 responses when limits are exceeded.
-
-## Multi-Tenant Considerations
-
-If your application needs to support multiple organizations:
-
-1. Set supported account types to "Accounts in any organizational directory"
-2. Implement proper tenant-specific token storage
-3. Handle admin consent flows for organizational accounts
-4. Consider using the `/common` endpoint for authentication
-
-## Advanced Configuration
-
-### Custom Redirect URI for Production
-
-For production, you'll want to use a proper domain:
-
-1. Add your production redirect URI in the app registration
-2. Update the configuration in PragaWeb:
-
-```bash
-# For production - set in environment
-export MICROSOFT_CLIENT_ID="your_production_client_id"
-```
-
-### Using Azure Key Vault
-
-For enhanced security in production:
-
-1. Create an Azure Key Vault
-2. Store your client ID in the Key Vault
-3. Configure your application to retrieve the client ID from Key Vault
-4. Grant your application managed identity access to the Key Vault
 
 ## Monitoring and Analytics
 

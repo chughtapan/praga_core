@@ -153,25 +153,6 @@ After authentication, you can verify the integration is working by:
 - Ensure all required scopes are configured in the OAuth consent screen
 - Re-authenticate to get tokens with the new scopes
 
-## Security Best Practices
-
-1. **Never commit credentials to version control**
-2. **Use environment variables or secure secret storage**
-3. **Regularly rotate client secrets**
-4. **Monitor API usage in Google Cloud Console**
-5. **Implement proper token refresh logic**
-6. **Use the principle of least privilege for scopes**
-
-## Production Deployment
-
-For production deployment:
-
-1. **Verify your app** through Google's verification process
-2. **Use a proper domain** instead of localhost
-3. **Implement proper error handling** for authentication failures
-4. **Set up monitoring** for API quota usage
-5. **Configure proper backup** for refresh tokens
-
 ## API Quotas and Limits
 
 Be aware of Google API quotas:
