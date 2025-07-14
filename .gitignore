@@ -102,8 +102,11 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-
+# Editors
 .vscode/
+*.swp
+*.~undo-tree~
+
 
 # Ruff stuff:
 .ruff_cache/
@@ -117,3 +120,4 @@ token.pickle
 
 # Sqlite files
 *.db
+

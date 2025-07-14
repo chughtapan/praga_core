@@ -157,8 +157,8 @@ class TestEmailService:
         assert registered_service is service
 
     @pytest.mark.asyncio
-    async def test_search_emails(self, service):
-        """Test searching for emails."""
+    async def test_search_emails_by_content(self, service):
+        """Test searching for emails by content."""
         # Mock search results
         mock_results = {
             "messages": [
@@ -172,20 +172,18 @@ class TestEmailService:
             return_value=mock_results
         )
 
-        # Test search
-        uris, next_token = await service.search_emails("test query")
+        # Test content search
+        result = await service.search_emails_by_content("test query")
 
-        assert isinstance(uris, list)
-        assert len(uris) == 2
-        assert next_token == "next_token"
+        assert isinstance(result.results, list)
 
-        # Verify the search was called correctly
+        # Verify the search was called correctly with inbox prefix
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="test query",
+            query="in:inbox test query",
             page_token=None,
-            max_results=20,
+            max_results=10,
         )
 
     @pytest.mark.asyncio
@@ -203,11 +201,11 @@ class TestEmailService:
 
         assert isinstance(result.results, list)
 
-        # Verify the search was called with recent query
+        # Verify the search was called with recent query and inbox prefix
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="newer_than:5d",
+            query="in:inbox newer_than:5d",
             page_token=None,
             max_results=10,
         )
@@ -227,11 +225,11 @@ class TestEmailService:
 
         assert isinstance(result.results, list)
 
-        # Verify the search was called with unread query
+        # Verify the search was called with unread query and inbox prefix
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="is:unread",
+            query="in:inbox is:unread",
             page_token=None,
             max_results=10,
         )
@@ -345,7 +343,7 @@ class TestEmailService:
             return_value={"messages": []}
         )
 
-        uris, next_token = await service.search_emails("test")
+        result = await service.search_emails_by_content("test")
 
-        assert len(uris) == 0
-        assert next_token is None
+        assert len(result.results) == 0
+        assert result.next_cursor is None

@@ -1,6 +1,7 @@
 """Email orchestration service that coordinates between multiple providers."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from praga_core.agents import PaginatedResponse, tool
@@ -23,19 +24,20 @@ class EmailService(ToolkitService):
             raise ValueError("EmailService requires exactly one provider")
 
         self.providers = providers
+        self.provider_type = list(providers.keys())[0]
+        self.provider_client = list(providers.values())[0]
         super().__init__()
         self._register_handlers()
-        logger.info(
-            "Email service initialized with providers: %s", list(providers.keys())
-        )
+        logger.info("Email service initialized with provider: %s", self.provider_type)
 
     @property
     def name(self) -> str:
         """Service name used for registration."""
         # Use natural service names based on provider
-        provider_name = list(self.providers.keys())[0]
         provider_to_service = {"google": "gmail", "microsoft": "outlook"}
-        return provider_to_service.get(provider_name, f"{provider_name}_email")
+        return provider_to_service.get(
+            self.provider_type, f"{self.provider_type}_email"
+        )
 
     def _register_handlers(self) -> None:
         """Register page routes and actions with context."""
@@ -76,10 +78,6 @@ class EmailService(ToolkitService):
                 True if the reply was sent successfully
             """
             try:
-                provider = self._get_provider_for_thread(thread)
-                if not provider:
-                    return False
-
                 # If no specific email provided, reply to the latest email in thread
                 if email is None and thread.emails:
                     # Get the latest email URI from thread
@@ -128,7 +126,7 @@ class EmailService(ToolkitService):
                     subject = f"Re: {subject}"
 
                 # Send the reply using Gmail API
-                await provider.email_client.send_message(
+                await self.provider_client.email_client.send_message(
                     to=to_emails,
                     cc=cc_emails,
                     subject=subject,
@@ -172,14 +170,7 @@ class EmailService(ToolkitService):
                 cc_emails = [p.email for p in (cc_list or [])]
 
                 # Send the email using Gmail API
-                provider_client = (
-                    list(self.providers.values())[0] if self.providers else None
-                )
-                if not provider_client:
-                    logger.error("No provider available for service")
-                    return False
-
-                await provider_client.email_client.send_message(
+                await self.provider_client.email_client.send_message(
                     to=to_emails,
                     subject=subject,
                     body=message,
@@ -236,45 +227,72 @@ class EmailService(ToolkitService):
         except Exception as e:
             raise ValueError(f"Failed to fetch thread {thread_id}: {e}")
 
-    async def search_emails(
-        self, query: str, page_token: Optional[str] = None, page_size: int = 20
+    async def _search_emails_gmail(
+        self, query: str, cursor: Optional[str] = None, page_size: int = 10
     ) -> tuple[list[PageURI], Optional[str]]:
-        """Search emails and return list of PageURIs and next page token."""
-        try:
-            provider_client = (
-                list(self.providers.values())[0] if self.providers else None
-            )
-            if not provider_client:
-                raise ValueError("No provider available for service")
+        """Search emails using Gmail API."""
+        # Always add inbox filter for Gmail
+        inbox_query = f"in:inbox {query}" if query else "in:inbox"
 
-            # Search messages - returns dict with messages and nextPageToken
-            search_result = await provider_client.email_client.search_messages(
-                query=query, page_token=page_token, max_results=page_size
-            )
-            messages = search_result.get("messages", [])
-            next_token = search_result.get("nextPageToken")
+        search_result = await self.provider_client.email_client.search_messages(
+            query=inbox_query, page_token=cursor, max_results=page_size
+        )
+        messages = search_result.get("messages", [])
+        next_token = search_result.get("nextPageToken")
 
-            # Convert to PageURIs - use email page type, not service name
-            uris = [
-                PageURI(root=self.context.root, type=f"{self.name}_email", id=msg["id"])
-                for msg in messages
-            ]
+        uris = [
+            PageURI(root=self.context.root, type=f"{self.name}_email", id=msg["id"])
+            for msg in messages
+        ]
 
-            return uris, next_token
+        return uris, next_token
 
-        except Exception as e:
-            logger.error(f"Error searching emails: {e}")
-            raise
-
-    async def _search_emails_paginated_response(
+    async def _search_emails_microsoft(
         self,
-        query: str,
+        content_query: Optional[str] = None,
+        metadata_query: Optional[str] = None,
+        cursor: Optional[str] = None,
+        page_size: int = 10,
+    ) -> tuple[list[PageURI], Optional[str]]:
+        """Search emails using Microsoft Graph API."""
+        # Always search in inbox folder only
+        search_result = await self.provider_client.email_client.graph_client.list_messages(  # type: ignore
+            folder="inbox",
+            top=page_size,
+            skip=int(cursor) if cursor else 0,
+            filter_query=metadata_query,
+            search=content_query,
+            order_by="receivedDateTime desc",
+        )
+
+        messages = search_result.get("value", [])
+        next_token = str(int(cursor or 0) + len(messages)) if messages else None
+
+        uris = [
+            PageURI(root=self.context.root, type=f"{self.name}_email", id=msg["id"])
+            for msg in messages
+        ]
+
+        return uris, next_token
+
+    async def _search_emails(
+        self,
+        content_query: Optional[str] = None,
+        metadata_query: Optional[str] = None,
         cursor: Optional[str] = None,
         page_size: int = 10,
     ) -> PaginatedResponse[EmailPage]:
         """Search emails and return a paginated response."""
-        # Get the page data using the cursor directly
-        uris, next_page_token = await self.search_emails(query, cursor, page_size)
+        if self.provider_type == "microsoft":
+            uris, next_page_token = await self._search_emails_microsoft(
+                content_query, metadata_query, cursor, page_size
+            )
+        else:
+            # For Gmail, combine queries
+            combined_query = " ".join(filter(None, [metadata_query, content_query]))
+            uris, next_page_token = await self._search_emails_gmail(
+                combined_query, cursor, page_size
+            )
 
         # Resolve URIs to pages using context async - throw errors, don't fail silently
         pages = await self.context.get_pages(uris)
@@ -303,14 +321,18 @@ class EmailService(ToolkitService):
             cursor: Cursor token for pagination (optional)
         """
         # Try to resolve person to email if it's a name
-        query = resolve_person_identifier(person)
-        query = f'from:"{query}"'
+        email_addr = resolve_person_identifier(person)
 
-        # Add content to the query if provided
-        if content:
-            query += f" {content}"
+        if self.provider_type == "microsoft":
+            # Microsoft uses OData filter syntax for from
+            metadata_query = f"from/emailAddress/address eq '{email_addr}'"
+        else:
+            # Gmail uses from: syntax
+            metadata_query = f'from:"{email_addr}"'
 
-        return await self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails(
+            content_query=content, metadata_query=metadata_query, cursor=cursor
+        )
 
     @tool()
     async def search_emails_to_person(
@@ -324,14 +346,19 @@ class EmailService(ToolkitService):
             cursor: Cursor token for pagination (optional)
         """
         # Try to resolve person to email if it's a name
-        query = resolve_person_identifier(person)
-        query = f'to:"{query}" OR cc:"{query}"'
+        email_addr = resolve_person_identifier(person)
 
-        # Add content to the query if provided
-        if content:
-            query += f" {content}"
+        if self.provider_type == "microsoft":
+            # Microsoft uses OData filter syntax for recipients
+            # Note: This is complex as we need to check both toRecipients and ccRecipients collections
+            metadata_query = f"toRecipients/any(r:r/emailAddress/address eq '{email_addr}') or ccRecipients/any(r:r/emailAddress/address eq '{email_addr}')"
+        else:
+            # Gmail uses to: and cc: syntax
+            metadata_query = f'to:"{email_addr}" OR cc:"{email_addr}"'
 
-        return await self._search_emails_paginated_response(query, cursor)
+        return await self._search_emails(
+            content_query=content, metadata_query=metadata_query, cursor=cursor
+        )
 
     @tool()
     async def search_emails_by_content(
@@ -343,9 +370,8 @@ class EmailService(ToolkitService):
             content: Text to search for in subject or body
             cursor: Cursor token for pagination (optional)
         """
-        # Gmail search without specific field searches both subject and body
-        query = content
-        return await self._search_emails_paginated_response(query, cursor)
+        # Content search works the same for both providers
+        return await self._search_emails(content_query=content, cursor=cursor)
 
     @tool()
     async def get_recent_emails(
@@ -359,8 +385,21 @@ class EmailService(ToolkitService):
             days: Number of days to look back (default: 7)
             cursor: Cursor token for pagination (optional)
         """
-        query = f"newer_than:{days}d"
-        return await self._search_emails_paginated_response(query, cursor)
+        if self.provider_type == "microsoft":
+            # Microsoft uses ISO date format in filter
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            metadata_query = (
+                f"receivedDateTime ge {cutoff_date.isoformat().replace('+00:00', 'Z')}"
+            )
+            return await self._search_emails(
+                metadata_query=metadata_query, cursor=cursor
+            )
+        else:
+            # Gmail uses newer_than syntax
+            metadata_query = f"newer_than:{days}d"
+            return await self._search_emails(
+                metadata_query=metadata_query, cursor=cursor
+            )
 
     @tool()
     async def get_unread_emails(
@@ -368,17 +407,15 @@ class EmailService(ToolkitService):
         cursor: Optional[str] = None,
     ) -> PaginatedResponse[EmailPage]:
         """Get unread emails."""
-        query = "is:unread"
-        return await self._search_emails_paginated_response(query, cursor)
-
-    def _get_provider_for_email(self, email: EmailPage) -> Optional[BaseProviderClient]:
-        """Get provider client for an email."""
-        # Since each service instance has only one provider, return it
-        return list(self.providers.values())[0] if self.providers else None
-
-    def _get_provider_for_thread(
-        self, thread: EmailThreadPage
-    ) -> Optional[BaseProviderClient]:
-        """Get provider client for a thread."""
-        # Since each service instance has only one provider, return it
-        return list(self.providers.values())[0] if self.providers else None
+        if self.provider_type == "microsoft":
+            # Microsoft uses OData filter syntax
+            metadata_query = "isRead eq false"
+            return await self._search_emails(
+                metadata_query=metadata_query, cursor=cursor
+            )
+        else:
+            # Gmail uses is:unread syntax
+            metadata_query = "is:unread"
+            return await self._search_emails(
+                metadata_query=metadata_query, cursor=cursor
+            )

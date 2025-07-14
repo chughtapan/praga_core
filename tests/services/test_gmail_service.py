@@ -534,20 +534,20 @@ class TestEmailService:
             return_value={"messages": mock_messages, "nextPageToken": None}
         )
 
-        # Call search_emails
-        uris, next_token = await service.search_emails("test query")
+        # Call _search_emails with Gmail's expected query format
+        result = await service._search_emails(content_query="test query")
 
-        # Verify API client call
+        # Verify API client call - Gmail adds "in:inbox" prefix
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="test query", page_token=None, max_results=20
+            query="in:inbox test query", page_token=None, max_results=10
         )
 
         # Verify results
-        assert len(uris) == 2
-        assert all(uri.type == "gmail_email" for uri in uris)
-        assert next_token is None
+        assert len(result.results) == 2
+        assert all(isinstance(page, EmailPage) for page in result.results)
+        assert result.next_cursor is None
 
     @pytest.mark.asyncio
     async def test_search_emails_with_inbox_filter(self, service):
@@ -556,12 +556,12 @@ class TestEmailService:
             return_value={"messages": [], "nextPageToken": None}
         )
 
-        await service.search_emails("in:sent test query")
+        await service._search_emails(metadata_query="in:sent test query")
 
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="in:sent test query", page_token=None, max_results=20
+            query="in:inbox in:sent test query", page_token=None, max_results=10
         )
 
     @pytest.mark.asyncio
@@ -572,18 +572,18 @@ class TestEmailService:
             return_value={"messages": mock_messages, "nextPageToken": None}
         )
 
-        uris, next_token = await service.search_emails(
-            "test", page_token="prev_token", page_size=10
+        result = await service._search_emails(
+            content_query="test", cursor="prev_token", page_size=10
         )
 
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="test", page_token="prev_token", max_results=10
+            query="in:inbox test", page_token="prev_token", max_results=10
         )
 
-        assert len(uris) == 1
-        assert next_token is None
+        assert len(result.results) == 1
+        assert result.next_cursor is None
 
     @pytest.mark.asyncio
     async def test_search_emails_empty_query(self, service):
@@ -592,12 +592,12 @@ class TestEmailService:
             return_value={"messages": [], "nextPageToken": None}
         )
 
-        await service.search_emails("")
+        await service._search_emails()
 
         service.providers[
             "google"
         ].email_client.search_messages.assert_called_once_with(
-            query="", page_token=None, max_results=20
+            query="in:inbox", page_token=None, max_results=10
         )
 
     @pytest.mark.asyncio
@@ -609,7 +609,7 @@ class TestEmailService:
 
         # The service should propagate exceptions to the caller
         with pytest.raises(Exception, match="Search API Error"):
-            await service.search_emails("test query")
+            await service._search_emails(content_query="test query")
 
     @pytest.mark.asyncio
     async def test_search_emails_no_results(self, service):
@@ -618,10 +618,10 @@ class TestEmailService:
             return_value={"messages": [], "nextPageToken": None}
         )
 
-        uris, next_token = await service.search_emails("no results query")
+        result = await service._search_emails(content_query="no results query")
 
-        assert uris == []
-        assert next_token is None
+        assert result.results == []
+        assert result.next_cursor is None
 
     @pytest.mark.asyncio
     async def test_parse_email_uri(self, service):
@@ -662,10 +662,10 @@ class TestEmailService:
             return_value={"messages": [], "nextPageToken": None}
         )
 
-        uris, next_token = await service.search_emails("test")
+        result = await service._search_emails(content_query="test")
 
-        assert len(uris) == 0
-        assert next_token is None
+        assert len(result.results) == 0
+        assert result.next_cursor is None
 
 
 class TestEmailPage:
@@ -1102,7 +1102,7 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == 'from:"test@example.com"'
+        assert query == 'in:inbox from:"test@example.com"'
         assert len(result.results) == 2
 
     @pytest.mark.asyncio
@@ -1125,7 +1125,7 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == 'from:"test@example.com" urgent project'
+        assert query == 'in:inbox from:"test@example.com" urgent project'
         assert len(result.results) == 1
 
     @pytest.mark.asyncio
@@ -1146,7 +1146,9 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == 'to:"recipient@example.com" OR cc:"recipient@example.com"'
+        assert (
+            query == 'in:inbox to:"recipient@example.com" OR cc:"recipient@example.com"'
+        )
         assert len(result.results) == 1
 
     @pytest.mark.asyncio
@@ -1171,7 +1173,7 @@ class TestGmailToolkit:
         query = kwargs["query"]
         assert (
             query
-            == 'to:"recipient@example.com" OR cc:"recipient@example.com" meeting notes'
+            == 'in:inbox to:"recipient@example.com" OR cc:"recipient@example.com" meeting notes'
         )
         assert len(result.results) == 1
 
@@ -1189,7 +1191,7 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == "important announcement"
+        assert query == "in:inbox important announcement"
         assert len(result.results) == 1
 
     @pytest.mark.asyncio
@@ -1206,7 +1208,7 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == "newer_than:7d"
+        assert query == "in:inbox newer_than:7d"
         assert len(result.results) == 1
 
     @pytest.mark.asyncio
@@ -1223,7 +1225,7 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == "newer_than:3d"
+        assert query == "in:inbox newer_than:3d"
         assert len(result.results) == 1
 
     @pytest.mark.asyncio
@@ -1240,5 +1242,5 @@ class TestGmailToolkit:
             "google"
         ].email_client.search_messages.call_args
         query = kwargs["query"]
-        assert query == "is:unread"
+        assert query == "in:inbox is:unread"
         assert len(result.results) == 1

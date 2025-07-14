@@ -20,55 +20,58 @@ class TestMicrosoftAuthManager:
     """Test suite for Microsoft authentication."""
 
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
-    @patch("pragweb.api_clients.microsoft.auth.requests.post")
-    def test_auth_manager_initialization(self, mock_post, mock_get_secrets):
+    @patch("pragweb.api_clients.microsoft.auth.msal.PublicClientApplication")
+    @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
+    def test_auth_manager_initialization(self, mock_msal_app, mock_get_secrets):
         """Test auth manager initializes correctly."""
         # Mock secrets manager
         mock_secrets = Mock()
-        mock_secrets.get_secret.side_effect = lambda key, default=None: {
-            "microsoft_client_id": "test_client_id",
-            "microsoft_client_secret": "test_client_secret",
-            "microsoft_redirect_uri": "http://localhost:8080",
-            "microsoft_token": None,
-        }.get(key, default)
+        mock_secrets.get_oauth_token.return_value = None
         mock_get_secrets.return_value = mock_secrets
 
-        # Mock successful token response
-        mock_response = Mock()
-        mock_response.json.return_value = {
+        # Mock MSAL app
+        mock_app = Mock()
+        mock_app.get_accounts.return_value = []
+        mock_app.acquire_token_interactive.return_value = {
             "access_token": "test_access_token",
             "refresh_token": "test_refresh_token",
             "expires_in": 3600,
         }
-        mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+        mock_msal_app.return_value = mock_app
 
-        # Since OAuth flow requires user interaction, we'll mock it
-        with patch(
-            "builtins.input", return_value="http://localhost:8080?code=test_code"
-        ):
-            with patch(
-                "pragweb.api_clients.microsoft.auth.OAuth2Session"
-            ) as mock_oauth:
-                mock_session = Mock()
-                mock_session.authorization_url.return_value = (
-                    "http://auth.url",
-                    "state",
-                )
-                mock_session.fetch_token.return_value = {
-                    "access_token": "test_access_token",
-                    "refresh_token": "test_refresh_token",
-                    "expires_in": 3600,
-                }
-                mock_oauth.return_value = mock_session
+        # Test auth manager creation (will trigger OAuth flow)
+        try:
+            auth_manager = MicrosoftAuthManager()
+            assert auth_manager.is_authenticated()
+        except Exception:
+            # OAuth flow may fail in tests - that's expected
+            pass
 
-                # Test auth manager creation (will trigger OAuth flow)
-                try:
-                    auth_manager = MicrosoftAuthManager()
-                    assert auth_manager.is_authenticated()
-                except Exception:
-                    # OAuth flow may fail in tests - that's expected
-                    pass
+    @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
+    @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
+    def test_token_storage_includes_required_fields(self, mock_get_secrets):
+        """Test that token storage includes scopes and extra_data."""
+        from pragweb.api_clients.microsoft.auth import _SCOPES
+
+        mock_secrets = Mock()
+        mock_get_secrets.return_value = mock_secrets
+
+        with patch.object(MicrosoftAuthManager, "_authenticate"):
+            auth_manager = MicrosoftAuthManager()
+            auth_manager._access_token = "test_access_token"
+            auth_manager._refresh_token = "test_refresh_token"
+            auth_manager._client_id = "test_client_id"
+
+            auth_manager._save_token()
+
+            # Verify store_oauth_token was called with scopes and extra_data
+            mock_secrets.store_oauth_token.assert_called_once()
+            call_args = mock_secrets.store_oauth_token.call_args
+
+            # Check that scopes and extra_data are included
+            assert call_args[1]["scopes"] == _SCOPES
+            assert call_args[1]["extra_data"] == {"client_id": "test_client_id"}
+            assert call_args[1]["service_name"] == "microsoft"
 
 
 class TestMicrosoftGraphClient:

@@ -30,7 +30,7 @@ This guide walks you through setting up Microsoft OAuth 2.0 authentication for t
 - Supported account types: "Accounts in any organizational directory and personal Microsoft accounts"
 - Redirect URI: 
   - Type: "Public client/native (mobile & desktop)"
-  - URI: `http://localhost:8080`
+  - URI: `http://localhost`
 
 Click "Register" to create the application.
 
@@ -67,52 +67,49 @@ Click "Register" to create the application.
 
 3. Under "Redirect URIs", ensure you have:
    - Type: "Public client/native (mobile & desktop)"
-   - URI: `http://localhost:8080`
+   - URI: `http://localhost`
 
 ## Step 5: Get Application Credentials
 
 1. Go to "Overview" in your app registration
 2. Copy the **Application (client) ID** - you'll need this
-3. Go to "Certificates & secrets"
-4. Click "New client secret"
-5. Add a description (e.g., "PragaWeb Client Secret")
-6. Choose an expiration period (recommended: 24 months)
-7. Click "Add"
-8. **Important**: Copy the secret value immediately - it won't be shown again
+
+**Note**: For desktop applications using MSAL, you only need the client ID. Client secrets are not required or recommended for public client applications.
 
 ## Step 6: Configure PragaWeb
 
 ### Option A: Using Environment Variables
 
-Set the following environment variables:
+Set the following environment variable:
 
 ```bash
 export MICROSOFT_CLIENT_ID="your_application_id_here"
-export MICROSOFT_CLIENT_SECRET="your_client_secret_here"
-export MICROSOFT_REDIRECT_URI="http://localhost:8080"
 ```
 
-### Option B: Using Secrets Manager
+**Note**: `MICROSOFT_CLIENT_SECRET` and `MICROSOFT_REDIRECT_URI` are no longer needed with MSAL authentication.
 
-Add the credentials to your secrets manager:
+### Option B: Using .env File
 
-```python
-# Using PragaWeb's secrets manager
-from pragweb.secrets_manager import get_secrets_manager
+Create a `.env` file in your project root:
 
-secrets_manager = get_secrets_manager()
-secrets_manager.set_secret("microsoft_client_id", "your_application_id_here")
-secrets_manager.set_secret("microsoft_client_secret", "your_client_secret_here")
-secrets_manager.set_secret("microsoft_redirect_uri", "http://localhost:8080")
+```bash
+# .env file
+MICROSOFT_CLIENT_ID=your_application_id_here
 ```
+
+**Note**: The secrets manager `store_oauth_token()` method is used internally for token storage, but manual secret storage is handled via environment variables only.
 
 ## Step 7: Test the Integration
 
 1. Start your PragaWeb application
-2. The application will automatically detect the need for authentication
-3. A browser window will open asking you to sign in to Microsoft
-4. Grant the requested permissions
-5. The application will receive an authorization code and exchange it for tokens
+2. When authentication is required, MSAL will automatically:
+   - Open your default browser to Microsoft's sign-in page
+   - Display a user-friendly authentication flow
+3. Sign in with your Microsoft account and grant permissions
+4. The browser will show a "Authentication completed" message
+5. The application will automatically receive and store the tokens
+
+**New Streamlined Experience**: No manual URL copying or code pasting required!
 
 ## Step 8: Verify Access
 
@@ -132,12 +129,12 @@ After authentication, you can verify the integration is working by:
 - Try the authentication flow again
 
 **"AADSTS50011: The redirect URI specified in the request does not match":**
-- Verify the redirect URI in your app registration matches exactly: `http://localhost:8080`
+- Verify the redirect URI in your app registration is: `http://localhost`
 - Check for trailing slashes or case sensitivity
 
 **"invalid_client" error:**
-- Verify your client ID and secret are correct
-- Ensure the client secret hasn't expired
+- Verify your client ID is correct
+- Ensure you're using the correct Application (client) ID from Azure Portal
 
 **"insufficient_scope" error:**
 - Ensure all required permissions are granted
@@ -151,18 +148,17 @@ After authentication, you can verify the integration is working by:
 - Ensure the user's account type is supported
 
 **"Token has expired" error:**
-- The application should automatically refresh tokens
-- If issues persist, delete stored tokens and re-authenticate
+- MSAL automatically handles token refresh
+- If issues persist, clear the MSAL cache and re-authenticate
 
 ## Security Best Practices
 
 1. **Never commit credentials to version control**
 2. **Use environment variables or secure secret storage**
-3. **Regularly rotate client secrets**
-4. **Monitor API usage in Azure Portal**
-5. **Implement proper token refresh logic**
-6. **Use the principle of least privilege for scopes**
-7. **Set appropriate client secret expiration periods**
+3. **Monitor API usage in Azure Portal**
+4. **MSAL handles token refresh automatically**
+5. **Use the principle of least privilege for scopes**
+6. **No client secrets needed for desktop apps (public clients)**
 
 ## Production Deployment
 
@@ -204,9 +200,9 @@ For production, you'll want to use a proper domain:
 1. Add your production redirect URI in the app registration
 2. Update the configuration in PragaWeb:
 
-```python
-# For production
-secrets_manager.set_secret("microsoft_redirect_uri", "https://yourdomain.com/auth/callback")
+```bash
+# For production - set in environment
+export MICROSOFT_CLIENT_ID="your_production_client_id"
 ```
 
 ### Using Azure Key Vault
@@ -214,8 +210,8 @@ secrets_manager.set_secret("microsoft_redirect_uri", "https://yourdomain.com/aut
 For enhanced security in production:
 
 1. Create an Azure Key Vault
-2. Store your client secret in the Key Vault
-3. Configure your application to retrieve secrets from Key Vault
+2. Store your client ID in the Key Vault
+3. Configure your application to retrieve the client ID from Key Vault
 4. Grant your application managed identity access to the Key Vault
 
 ## Monitoring and Analytics
