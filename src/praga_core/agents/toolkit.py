@@ -3,7 +3,7 @@ from __future__ import annotations
 import abc
 import json
 from collections.abc import Sequence as ABCSequence
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from hashlib import md5
 from typing import (
@@ -207,7 +207,7 @@ class RetrieverToolkitMeta(abc.ABC):
                 is_cache_fresh = True
 
                 # Check TTL expiration
-                if ttl and datetime.utcnow() - cached_timestamp > ttl:
+                if ttl and datetime.now(timezone.utc) - cached_timestamp > ttl:
                     is_cache_fresh = False
 
                 # Check custom invalidation
@@ -221,7 +221,7 @@ class RetrieverToolkitMeta(abc.ABC):
 
             # Cache miss or stale - compute fresh result
             fresh_result = await tool_function(*args, **kwargs)
-            self._cache[cache_key] = (fresh_result, datetime.utcnow())
+            self._cache[cache_key] = (fresh_result, datetime.now(timezone.utc))
             return fresh_result
 
         return cast(ToolFunction, cached_tool)

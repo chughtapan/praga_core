@@ -1,10 +1,12 @@
 """Utility functions for pragweb services."""
 
+import asyncio
 import logging
 import re
 from typing import List
 
 from praga_core.global_context import get_global_context
+from pragweb.services.people import PeopleService
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +33,6 @@ def resolve_person_to_emails(person_identifier: str) -> List[str]:
             return []
 
         # Use the new PaginatedResponse return type from PeopleService
-        import asyncio
-
-        from pragweb.services import PeopleService
-
         loop = asyncio.get_event_loop()
         if isinstance(service, PeopleService):
             result = loop.run_until_complete(

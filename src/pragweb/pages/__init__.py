@@ -9,7 +9,7 @@ from .documents import (
     DocumentType,
 )
 from .email import EmailPage, EmailSummary, EmailThreadPage
-from .people import ContactGroupPage, PersonPage
+from .people import PersonPage
 
 __all__ = [
     # Email pages
@@ -20,7 +20,6 @@ __all__ = [
     "CalendarEventPage",
     # People pages
     "PersonPage",
-    "ContactGroupPage",
     # Document pages
     "DocumentHeader",
     "DocumentChunk",

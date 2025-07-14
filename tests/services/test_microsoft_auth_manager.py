@@ -50,10 +50,17 @@ class TestMicrosoftAuthManagerTokenStorage:
                 extra_data={"client_id": "test_client_id"},
             )
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
-    def test_save_token_handles_missing_client_id(self, mock_get_secrets):
+    def test_save_token_handles_missing_client_id(
+        self, mock_get_secrets, mock_get_config
+    ):
         """Test _save_token handles missing client_id gracefully."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
         mock_get_secrets.return_value = mock_secrets
 
@@ -77,10 +84,17 @@ class TestMicrosoftAuthManagerTokenStorage:
                 extra_data=None,
             )
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
-    def test_save_token_handles_empty_access_token(self, mock_get_secrets):
+    def test_save_token_handles_empty_access_token(
+        self, mock_get_secrets, mock_get_config
+    ):
         """Test _save_token handles empty access token."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
         mock_get_secrets.return_value = mock_secrets
 
@@ -104,10 +118,15 @@ class TestMicrosoftAuthManagerTokenStorage:
                 extra_data={"client_id": "test_client_id"},
             )
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
-    def test_load_token_with_matching_scopes(self, mock_get_secrets):
+    def test_load_token_with_matching_scopes(self, mock_get_secrets, mock_get_config):
         """Test _load_token loads credentials when scopes match."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
         mock_token_data = {
             "access_token": "test_access_token",
@@ -130,11 +149,18 @@ class TestMicrosoftAuthManagerTokenStorage:
             assert auth_manager._refresh_token == "test_refresh_token"
             assert auth_manager._token_expires_at is not None
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
-    def test_load_token_handles_json_string_token_data(self, mock_get_secrets):
+    def test_load_token_handles_json_string_token_data(
+        self, mock_get_secrets, mock_get_config
+    ):
         """Test _load_token handles JSON string token data."""
         import json
+
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
 
         mock_secrets = Mock(spec=SecretsManager)
         token_data = {
@@ -183,10 +209,17 @@ class TestMicrosoftAuthManagerTokenStorage:
             assert auth_manager._token_expires_at is not None
             assert isinstance(auth_manager._token_expires_at, datetime)
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
-    def test_load_token_handles_timestamp_format(self, mock_get_secrets):
+    def test_load_token_handles_timestamp_format(
+        self, mock_get_secrets, mock_get_config
+    ):
         """Test _load_token handles timestamp format correctly."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
 
         # Test with timestamp (for backward compatibility)
@@ -244,13 +277,18 @@ class TestMicrosoftAuthManagerIntegration:
         MicrosoftAuthManager._instance = None
         MicrosoftAuthManager._initialized = False
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch("pragweb.api_clients.microsoft.auth.msal.PublicClientApplication")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
     def test_interactive_flow_saves_token_with_scopes(
-        self, mock_msal_app, mock_get_secrets
+        self, mock_msal_app, mock_get_secrets, mock_get_config
     ):
         """Test that interactive flow saves token with scopes and extra_data."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
         mock_secrets.get_oauth_token.return_value = None
         mock_get_secrets.return_value = mock_secrets
@@ -274,13 +312,18 @@ class TestMicrosoftAuthManagerIntegration:
         assert call_args[1]["scopes"] == _SCOPES
         assert call_args[1]["extra_data"] == {"client_id": "test_client_id"}
 
+    @patch("pragweb.api_clients.microsoft.auth.get_current_config")
     @patch("pragweb.api_clients.microsoft.auth.get_secrets_manager")
     @patch("pragweb.api_clients.microsoft.auth.msal.PublicClientApplication")
     @patch.dict("os.environ", {"MICROSOFT_CLIENT_ID": "test_client_id"})
     def test_refresh_access_token_saves_updated_token(
-        self, mock_msal_app, mock_get_secrets
+        self, mock_msal_app, mock_get_secrets, mock_get_config
     ):
         """Test that token refresh saves updated token with scopes."""
+        mock_config = Mock()
+        mock_config.secrets_database_url = "sqlite:///:memory:"
+        mock_get_config.return_value = mock_config
+
         mock_secrets = Mock(spec=SecretsManager)
         mock_secrets.get_oauth_token.return_value = None
         mock_get_secrets.return_value = mock_secrets

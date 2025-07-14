@@ -107,12 +107,14 @@ class TestMicrosoftGraphClient:
     async def test_get_user_profile(self, graph_client):
         """Test getting user profile."""
         # Mock response
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "id": "test_user_id",
-            "displayName": "Test User",
-            "mail": "test@example.com",
-        }
+        mock_response = Mock()
+        mock_response.json = AsyncMock(
+            return_value={
+                "id": "test_user_id",
+                "displayName": "Test User",
+                "mail": "test@example.com",
+            }
+        )
         mock_response.raise_for_status.return_value = None
         mock_response.status = 200
 
@@ -129,17 +131,19 @@ class TestMicrosoftGraphClient:
     async def test_list_messages(self, graph_client):
         """Test listing messages."""
         # Mock response
-        mock_response = AsyncMock()
-        mock_response.json.return_value = {
-            "value": [
-                {
-                    "id": "message1",
-                    "subject": "Test Email",
-                    "sender": {"emailAddress": {"address": "sender@example.com"}},
-                }
-            ],
-            "@odata.nextLink": None,
-        }
+        mock_response = Mock()
+        mock_response.json = AsyncMock(
+            return_value={
+                "value": [
+                    {
+                        "id": "message1",
+                        "subject": "Test Email",
+                        "sender": {"emailAddress": {"address": "sender@example.com"}},
+                    }
+                ],
+                "@odata.nextLink": None,
+            }
+        )
         mock_response.raise_for_status.return_value = None
         mock_response.status = 200
 

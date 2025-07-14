@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -61,8 +62,6 @@ class MicrosoftAuthManager(BaseAuthManager):
     def _authenticate(self) -> None:
         """Authenticate with Microsoft Graph API using MSAL."""
         # Get client credentials from environment variables
-        import os
-
         self._client_id = os.getenv("MICROSOFT_CLIENT_ID", "")
 
         if not self._client_id:

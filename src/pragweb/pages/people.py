@@ -30,24 +30,3 @@ class PersonPage(Page):
         # Compute full_name if not provided
         if self.full_name is None:
             self.full_name = f"{self.first_name} {self.last_name}".strip()
-
-
-class ContactGroupPage(Page):
-    """A page representing a contact group/label."""
-
-    # Provider-specific metadata
-    provider_group_id: str = Field(
-        description="Provider-specific group ID", exclude=True
-    )
-
-    # Core group fields
-    name: str = Field(description="Group name")
-    description: Optional[str] = Field(None, description="Group description")
-    member_count: int = Field(default=0, description="Number of members in group")
-
-    # Group metadata
-    is_system_group: bool = Field(
-        default=False, description="Whether this is a system-created group"
-    )
-    created_time: Optional[str] = Field(None, description="When group was created")
-    updated_time: Optional[str] = Field(None, description="When group was last updated")
