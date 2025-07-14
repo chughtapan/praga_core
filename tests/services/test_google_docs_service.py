@@ -1,5 +1,6 @@
 """Tests for Google Documents integration with the new architecture."""
 
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from praga_core import ServerContext, clear_global_context, set_global_context
+from praga_core.page_cache.schema import Base, clear_table_registry
 from praga_core.types import PageURI
 from pragweb.pages import (
     DocumentChunk,
@@ -140,8 +142,18 @@ class TestGoogleDocumentsService:
         """Create service with test context and mock providers."""
         clear_global_context()
 
-        # Create real context
-        context = await ServerContext.create(root="test://example")
+        # Clear SQLAlchemy metadata and table registry between tests
+        Base.metadata.clear()
+        clear_table_registry()
+
+        # Create temporary file for each test to ensure complete isolation
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
+            temp_db_path = tmp_file.name
+
+        cache_url = f"sqlite+aiosqlite:///{temp_db_path}"
+
+        # Create real context with isolated temporary database
+        context = await ServerContext.create(root="example", cache_url=cache_url)
         set_global_context(context)
 
         # Create mock provider
@@ -154,6 +166,17 @@ class TestGoogleDocumentsService:
         yield service
 
         clear_global_context()
+        # Clear metadata and registry again after test
+        Base.metadata.clear()
+        clear_table_registry()
+
+        # Clean up temporary database file
+        import os
+
+        try:
+            os.unlink(temp_db_path)
+        except:
+            pass  # Best effort cleanup
 
     @pytest.mark.asyncio
     async def test_service_initialization(self, service):
@@ -220,7 +243,11 @@ class TestGoogleDocumentsService:
         header_page = await service.create_document_header_page(page_uri)
 
         assert isinstance(header_page, DocumentHeader)
-        assert header_page.uri == page_uri
+        # The header URI should have version=1 after processing
+        expected_uri = PageURI(
+            root=page_uri.root, type=page_uri.type, id=page_uri.id, version=1
+        )
+        assert header_page.uri == expected_uri
         assert header_page.title == "Test Document"
 
         # Verify API was called
@@ -241,14 +268,55 @@ class TestGoogleDocumentsService:
         service.providers["google"].documents_client.get_document = AsyncMock(
             return_value=document_data
         )
-
-        # Create page URI with new format (chunk URI includes chunk index)
-        page_uri = PageURI(
-            root="test://example", type="google_docs_chunk", id="test_document_0"
+        service.providers["google"].documents_client.get_document_content = AsyncMock(
+            return_value="Test chunk content"
         )
 
-        # Test page creation
-        chunk_page = await service.create_document_chunk_page(page_uri)
+        # Mock parse_document_to_header_page to return DocumentHeader
+        from datetime import datetime, timezone
+
+        expected_header = DocumentHeader(
+            uri=PageURI(
+                root=service.context.root, type="google_docs_header", id="test_document"
+            ),
+            provider_document_id="test_document",
+            title="Test Document",
+            summary="Test document summary",
+            created_time=datetime.now(timezone.utc),
+            modified_time=datetime.now(timezone.utc),
+            owner="test@example.com",
+            word_count=50,
+            chunk_count=1,
+            chunk_uris=[
+                PageURI(
+                    root=service.context.root,
+                    type="google_docs_chunk",
+                    id="test_document_0",
+                )
+            ],
+            permalink="https://docs.google.com/document/d/test_document",
+        )
+        service.providers["google"].documents_client.parse_document_to_header_page = (
+            AsyncMock(return_value=expected_header)
+        )
+
+        # First create the header page to ensure proper setup
+        header_uri = PageURI(
+            root=service.context.root, type="google_docs_header", id="test_document"
+        )
+        header_page = await service.create_document_header_page(header_uri)
+
+        # Verify header was created
+        assert isinstance(header_page, DocumentHeader)
+        assert header_page.title == "Test Document"
+
+        # Now create the chunk page URI
+        page_uri = PageURI(
+            root=service.context.root, type="google_docs_chunk", id="test_document_0"
+        )
+
+        # Test chunk page retrieval from cache (chunks were created when header was created)
+        chunk_page = await service.context.get_page(page_uri)
 
         assert isinstance(chunk_page, DocumentChunk)
         assert chunk_page.uri.type == "google_docs_chunk"
@@ -436,8 +504,9 @@ class TestGoogleDocumentsService:
     @pytest.mark.asyncio
     async def test_empty_providers(self, service):
         """Test handling of service with no providers."""
-        # Clear providers to simulate error
+        # Clear providers and provider_client to simulate error
         service.providers = {}
+        service.provider_client = None
 
         page_uri = PageURI(
             root="test://example", type="google_docs_header", id="doc123"
@@ -663,3 +732,258 @@ class TestGoogleDocumentsService:
 
         result = await service._validate_document_header(header)
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_automatic_chunking_on_header_creation(self, service):
+        """Test that chunks are automatically created and cached when header is created."""
+        # Set up mock document data with long content that will definitely be chunked
+        # Chonkie with 4000 token chunks should split this content
+        long_content = (
+            "This is a test document with many words that should be chunked. " * 500
+        )  # Create content that will be chunked
+        document_data = {
+            "id": "test_document",
+            "title": "Test Document",
+            "content": long_content,
+        }
+
+        service.providers["google"].documents_client.get_document = AsyncMock(
+            return_value=document_data
+        )
+        service.providers["google"].documents_client.get_document_content = AsyncMock(
+            return_value=long_content
+        )
+
+        # Create page URI using the context's root
+        page_uri = PageURI(
+            root=service.context.root, type="google_docs_header", id="test_document"
+        )
+
+        # Test header creation through context (should automatically chunk)
+        # This goes through the route system which handles versions properly
+        header_page = await service.context.get_page(page_uri)
+
+        # Verify header has chunk information
+        assert isinstance(header_page, DocumentHeader)
+        assert header_page.chunk_count > 1  # Should be chunked due to length
+        assert len(header_page.chunk_uris) == header_page.chunk_count
+
+        # Verify all chunk URIs follow the correct pattern
+        for i, chunk_uri in enumerate(header_page.chunk_uris):
+            assert chunk_uri.type == "google_docs_chunk"
+            assert chunk_uri.id == f"test_document_{i}"
+            assert chunk_uri.root == service.context.root
+
+        # Verify chunks are actually cached
+        for chunk_uri in header_page.chunk_uris:
+            cached_chunk = await service.context.get_page(chunk_uri)
+            assert cached_chunk is not None
+            assert isinstance(cached_chunk, DocumentChunk)
+            assert cached_chunk.chunk_index >= 0
+            assert len(cached_chunk.content) > 0
+            assert cached_chunk.doc_title == "Test Document"
+            assert cached_chunk.header_uri == header_page.uri
+
+    def test_chunk_content_method(self, service):
+        """Test that content is properly chunked using Chonkie."""
+        content = "This is a test document. " * 100  # Create content to chunk
+        chunks = service._chunk_content(content)
+
+        assert len(chunks) > 0
+        # Verify chunks have text content
+        for chunk in chunks:
+            chunk_text = getattr(chunk, "text", str(chunk))
+            assert len(chunk_text) > 0
+
+    def test_build_document_header(self, service):
+        """Test document header building with metadata."""
+
+        from chonkie.types.recursive import RecursiveChunk
+
+        document_data = {
+            "id": "test_doc",
+            "title": "Test Document",
+            "createdTime": "2024-01-01T00:00:00Z",
+            "modifiedTime": "2024-01-02T00:00:00Z",
+            "owners": [{"emailAddress": "test@example.com"}],
+        }
+
+        page_uri = PageURI(
+            root="test://example", type="google_docs_header", id="test_doc"
+        )
+
+        # Mock chunks with proper RecursiveChunk constructor
+        mock_chunks = [
+            RecursiveChunk("Chunk 1 content", 0, 16, 4),
+            RecursiveChunk("Chunk 2 content", 16, 32, 4),
+        ]
+        content = "Test document content"
+
+        header = service._build_document_header(
+            document_data, content, mock_chunks, page_uri, "test_doc"
+        )
+
+        assert header.title == "Test Document"
+        assert header.chunk_count == 2
+        assert len(header.chunk_uris) == 2
+        assert header.owner == "test@example.com"
+        assert header.word_count == 3  # "Test document content"
+        assert "test_doc" in header.permalink
+
+    @pytest.mark.asyncio
+    async def test_document_update_triggers_chunk_updates(self, service):
+        """Test that updating parent document triggers chunk updates on next retrieval."""
+        document_id = "test_doc_update"
+
+        # Original document content
+        original_content = "Original content that will be replaced. " * 20
+        original_document_data = {
+            "id": document_id,
+            "title": "Test Document",
+            "content": original_content,
+            "modifiedTime": "2024-01-01T00:00:00Z",
+        }
+
+        # Updated document content
+        updated_content = "Updated content with different text. " * 25
+        updated_document_data = {
+            "id": document_id,
+            "title": "Test Document Updated",
+            "content": updated_content,
+            "modifiedTime": "2024-01-02T00:00:00Z",  # Newer timestamp
+        }
+
+        # Create page URI
+        page_uri = PageURI(
+            root=service.context.root, type="google_docs_header", id=document_id
+        )
+
+        # Step 1: Mock API to return original document data
+        service.providers["google"].documents_client.get_document = AsyncMock(
+            return_value=original_document_data
+        )
+        service.providers["google"].documents_client.get_document_content = AsyncMock(
+            return_value=original_content
+        )
+
+        # Step 2: Create initial document header and chunks
+        original_header = await service.context.get_page(page_uri)
+        assert isinstance(original_header, DocumentHeader)
+        assert original_header.title == "Test Document"
+        assert len(original_header.chunk_uris) > 0
+
+        # Verify original chunks exist and contain original content
+        original_chunks = await service.context.get_pages(original_header.chunk_uris)
+        original_first_chunk = original_chunks[0]
+        assert isinstance(original_first_chunk, DocumentChunk)
+        assert "Original content" in original_first_chunk.content
+
+        # Step 3: Update API mock to return updated document data
+        service.providers["google"].documents_client.get_document = AsyncMock(
+            return_value=updated_document_data
+        )
+        service.providers["google"].documents_client.get_document_content = AsyncMock(
+            return_value=updated_content
+        )
+
+        # Step 4: Manually invalidate the header to simulate validation failure
+        # In real usage, this would happen when the validator detects newer modified time
+        await service.context.page_cache.invalidate(original_header.uri)
+
+        # Step 5: Retrieve document again - should get updated version
+        updated_header = await service.context.get_page(page_uri)
+        assert isinstance(updated_header, DocumentHeader)
+        assert updated_header.title == "Test Document Updated"
+
+        # Step 6: Verify chunks are updated with new content
+        updated_chunks = await service.context.get_pages(updated_header.chunk_uris)
+        updated_first_chunk = updated_chunks[0]
+        assert isinstance(updated_first_chunk, DocumentChunk)
+        assert "Updated content" in updated_first_chunk.content
+        assert "Original content" not in updated_first_chunk.content
+
+        # Step 7: Verify chunk count may have changed due to different content length
+        # Updated content is longer, so we might get more chunks
+        assert len(updated_chunks) >= len(original_chunks)
+
+        # Step 8: Verify all chunk URIs reference the new header version
+        for chunk in updated_chunks:
+            assert chunk.header_uri == updated_header.uri
+            assert chunk.doc_title == "Test Document Updated"
+
+    @pytest.mark.asyncio
+    async def test_validation_with_stale_document_returns_false(self, service):
+        """Test that validation returns False when document is modified externally."""
+        document_id = "stale_doc_test"
+
+        # Create document with older timestamp
+        old_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        header = DocumentHeader(
+            uri=PageURI(
+                root=service.context.root, type="google_docs_header", id=document_id
+            ),
+            provider_document_id=document_id,
+            title="Stale Document",
+            summary="Test summary",
+            content_type=DocumentType.DOCUMENT,
+            provider="google",
+            created_time=old_time,
+            modified_time=old_time,  # Older timestamp
+            owner="test@example.com",
+            current_user_permission=DocumentPermission.EDITOR,
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+
+        # Mock API to return newer timestamp
+        newer_time = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        google_time = (
+            newer_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        service.providers["google"].documents_client.get_document = AsyncMock(
+            return_value={"modifiedTime": google_time}
+        )
+
+        # Validation should return False because API time is newer
+        result = await service._validate_document_header(header)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_validation_with_current_document_returns_true(self, service):
+        """Test that validation returns True when document is current."""
+        document_id = "current_doc_test"
+
+        # Create document with current timestamp
+        current_time = datetime(2024, 1, 2, tzinfo=timezone.utc)
+        header = DocumentHeader(
+            uri=PageURI(
+                root=service.context.root, type="google_docs_header", id=document_id
+            ),
+            provider_document_id=document_id,
+            title="Current Document",
+            summary="Test summary",
+            content_type=DocumentType.DOCUMENT,
+            provider="google",
+            created_time=current_time,
+            modified_time=current_time,  # Current timestamp
+            owner="test@example.com",
+            current_user_permission=DocumentPermission.EDITOR,
+            word_count=100,
+            chunk_count=1,
+            chunk_uris=[],
+            permalink="https://docs.google.com/test",
+        )
+
+        # Mock API to return same timestamp
+        google_time = (
+            current_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        service.providers["google"].documents_client.get_document = AsyncMock(
+            return_value={"modifiedTime": google_time}
+        )
+
+        # Validation should return True because times match
+        result = await service._validate_document_header(header)
+        assert result is True

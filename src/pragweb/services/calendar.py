@@ -54,6 +54,11 @@ class CalendarService(ToolkitService):
 
             return await self.create_page(page_uri, event_id, calendar_id)
 
+        # Register validator for calendar events
+        @ctx.validator
+        async def validate_calendar_event(page: CalendarEventPage) -> bool:
+            return await self._validate_calendar_event(page)
+
         # Register calendar actions
 
         @ctx.action()
@@ -810,3 +815,40 @@ class CalendarService(ToolkitService):
             return list(events_result.get("value", [])), events_result.get(
                 "nextPageToken"
             )
+
+    async def _validate_calendar_event(self, event: CalendarEventPage) -> bool:
+        """Validate that a calendar event is up to date by checking modification time."""
+        provider = self._get_provider_for_event(event)
+        if not provider:
+            raise ValueError("No provider available for event validation")
+
+        # Get event metadata from provider
+        event_data = await provider.calendar_client.get_event(
+            event_id=event.provider_event_id, calendar_id=event.calendar_id
+        )
+        if not event_data:
+            raise ValueError(f"Event {event.provider_event_id} not found in provider")
+
+        # Extract modified time from event data (handle both Google and Microsoft formats)
+        api_modified_time_str = event_data.get("updated") or event_data.get(
+            "lastModifiedDateTime"
+        )
+        if not api_modified_time_str:
+            raise ValueError(
+                f"No modified time found for event {event.provider_event_id}"
+            )
+
+        # Parse API modified time (handle both ISO formats)
+        if api_modified_time_str.endswith("Z"):
+            api_modified_time = datetime.fromisoformat(
+                api_modified_time_str.replace("Z", "+00:00")
+            )
+        else:
+            api_modified_time = datetime.fromisoformat(api_modified_time_str)
+
+        # Compare with cached event's modified time
+        cached_modified_time = event.modified_time
+
+        # Event is valid if API modified time is older or equal to cached modified time
+        # (i.e., the cached version is up to date)
+        return api_modified_time <= cached_modified_time

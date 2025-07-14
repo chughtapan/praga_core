@@ -206,7 +206,17 @@ class OutlookCalendarClient(BaseCalendarClient):
         if online_meeting:
             online_meeting.get("joinUrl")
 
-        # Parse timestamps
+        # Parse modified time (lastModifiedDateTime field in Microsoft Graph)
+        modified_time_str = event_data[
+            "lastModifiedDateTime"
+        ]  # Required field, let it raise KeyError if missing
+        # Microsoft Graph timestamps are already in ISO format
+        if modified_time_str.endswith("Z"):
+            modified_time = datetime.fromisoformat(
+                modified_time_str.replace("Z", "+00:00")
+            )
+        else:
+            modified_time = datetime.fromisoformat(modified_time_str)
 
         return CalendarEventPage(
             uri=page_uri,
@@ -219,5 +229,6 @@ class OutlookCalendarClient(BaseCalendarClient):
             end_time=end_time,
             attendees=attendees,
             organizer=organizer,
+            modified_time=modified_time,
             permalink=event_data.get("webLink", ""),
         )

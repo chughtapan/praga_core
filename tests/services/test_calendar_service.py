@@ -77,6 +77,9 @@ class MockGoogleCalendarClient:
             organizer="test@example.com",
             attendees=["attendee@example.com"],  # Simple email list
             calendar_id="primary",
+            modified_time=datetime.now(
+                timezone.utc
+            ),  # Add required modified_time field
             permalink="https://calendar.google.com/event/test",
         )
 
@@ -383,3 +386,150 @@ class TestCalendarService:
         service.providers["google"].calendar_client.search_events.assert_called_once()
         assert isinstance(result.results, list)
         assert len(result.results) == 1
+
+    @pytest.mark.asyncio
+    async def test_calendar_event_validator_with_updated_event(self, service):
+        """Test that calendar event validator returns False when event is updated."""
+        event_id = "test_event_123"
+        calendar_id = "primary"
+
+        # Create cached event with older modified time
+        cached_modified_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        cached_event = CalendarEventPage(
+            uri=PageURI(root="test://example", type="google_calendar", id=event_id),
+            provider_event_id=event_id,
+            calendar_id=calendar_id,
+            summary="Test Event",
+            description="Test description",
+            location="Test location",
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+            attendees=["test@example.com"],
+            organizer="organizer@example.com",
+            modified_time=cached_modified_time,
+            permalink=f"https://calendar.google.com/event?eid={event_id}",
+        )
+
+        # Mock API to return event with newer modified time
+        api_modified_time = datetime(
+            2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc
+        )  # 1 day later
+        service.providers["google"].calendar_client.get_event = AsyncMock(
+            return_value={
+                "id": event_id,
+                "updated": api_modified_time.isoformat().replace("+00:00", "Z"),
+                "start": {"dateTime": "2024-01-01T10:00:00Z"},
+                "end": {"dateTime": "2024-01-01T11:00:00Z"},
+            }
+        )
+
+        # Validation should return False because API modified time is newer
+        result = await service._validate_calendar_event(cached_event)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_calendar_event_validator_with_unchanged_event(self, service):
+        """Test that calendar event validator returns True when event is unchanged."""
+        event_id = "test_event_456"
+        calendar_id = "primary"
+
+        # Create cached event with specific modified time
+        cached_modified_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        cached_event = CalendarEventPage(
+            uri=PageURI(root="test://example", type="google_calendar", id=event_id),
+            provider_event_id=event_id,
+            calendar_id=calendar_id,
+            summary="Test Event",
+            description="Test description",
+            location="Test location",
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+            attendees=["test@example.com"],
+            organizer="organizer@example.com",
+            modified_time=cached_modified_time,
+            permalink=f"https://calendar.google.com/event?eid={event_id}",
+        )
+
+        # Mock API to return event with same modified time
+        service.providers["google"].calendar_client.get_event = AsyncMock(
+            return_value={
+                "id": event_id,
+                "updated": cached_modified_time.isoformat().replace("+00:00", "Z"),
+                "start": {"dateTime": "2024-01-01T10:00:00Z"},
+                "end": {"dateTime": "2024-01-01T11:00:00Z"},
+            }
+        )
+
+        # Validation should return True because modified times match
+        result = await service._validate_calendar_event(cached_event)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_calendar_event_validator_with_older_api_time(self, service):
+        """Test that calendar event validator returns True when API modified time is older."""
+        event_id = "test_event_789"
+        calendar_id = "primary"
+
+        # Create cached event with newer modified time
+        cached_modified_time = datetime(2024, 1, 2, 12, 0, 0, tzinfo=timezone.utc)
+        cached_event = CalendarEventPage(
+            uri=PageURI(root="test://example", type="google_calendar", id=event_id),
+            provider_event_id=event_id,
+            calendar_id=calendar_id,
+            summary="Test Event",
+            description="Test description",
+            location="Test location",
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+            attendees=["test@example.com"],
+            organizer="organizer@example.com",
+            modified_time=cached_modified_time,
+            permalink=f"https://calendar.google.com/event?eid={event_id}",
+        )
+
+        # Mock API to return event with older modified time
+        api_modified_time = datetime(
+            2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc
+        )  # 1 day earlier
+        service.providers["google"].calendar_client.get_event = AsyncMock(
+            return_value={
+                "id": event_id,
+                "updated": api_modified_time.isoformat().replace("+00:00", "Z"),
+                "start": {"dateTime": "2024-01-01T10:00:00Z"},
+                "end": {"dateTime": "2024-01-01T11:00:00Z"},
+            }
+        )
+
+        # Validation should return True because API modified time is older
+        result = await service._validate_calendar_event(cached_event)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_calendar_event_validator_api_error(self, service):
+        """Test that calendar event validator raises exception when API call fails."""
+        event_id = "test_event_error"
+        calendar_id = "primary"
+
+        cached_event = CalendarEventPage(
+            uri=PageURI(root="test://example", type="google_calendar", id=event_id),
+            provider_event_id=event_id,
+            calendar_id=calendar_id,
+            summary="Test Event",
+            description="Test description",
+            location="Test location",
+            start_time=datetime(2024, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
+            end_time=datetime(2024, 1, 1, 11, 0, 0, tzinfo=timezone.utc),
+            attendees=["test@example.com"],
+            organizer="organizer@example.com",
+            modified_time=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            permalink=f"https://calendar.google.com/event?eid={event_id}",
+        )
+
+        # Mock API to raise an exception
+        service.providers["google"].calendar_client.get_event = AsyncMock(
+            side_effect=Exception("API Error")
+        )
+
+        # Validation should raise exception when API fails
+        with pytest.raises(Exception, match="API Error"):
+            await service._validate_calendar_event(cached_event)

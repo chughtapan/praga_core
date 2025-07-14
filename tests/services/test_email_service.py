@@ -1,6 +1,6 @@
 """Tests for the new EmailService orchestration layer."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock
 
@@ -9,7 +9,7 @@ import pytest
 from praga_core import ServerContext, clear_global_context, set_global_context
 from praga_core.types import PageURI
 from pragweb.api_clients.base import BaseEmailClient, BaseProviderClient
-from pragweb.pages import EmailPage, EmailThreadPage
+from pragweb.pages import EmailPage, EmailSummary, EmailThreadPage
 from pragweb.services import EmailService
 
 
@@ -347,3 +347,116 @@ class TestEmailService:
 
         assert len(result.results) == 0
         assert result.next_cursor is None
+
+    @pytest.mark.asyncio
+    async def test_thread_validator_with_new_messages(self, service):
+        """Test that thread validator returns False when there are new messages."""
+        thread_id = "test_thread_123"
+
+        # Create thread with 2 cached messages
+        cached_emails = [
+            EmailSummary(
+                uri=PageURI(root="test://example", type="gmail_email", id="msg1"),
+                sender="user1@example.com",
+                recipients=["user2@example.com"],
+                cc_list=[],
+                body="First message",
+                time=datetime.now(timezone.utc),
+            ),
+            EmailSummary(
+                uri=PageURI(root="test://example", type="gmail_email", id="msg2"),
+                sender="user2@example.com",
+                recipients=["user1@example.com"],
+                cc_list=[],
+                body="Second message",
+                time=datetime.now(timezone.utc),
+            ),
+        ]
+
+        cached_thread = EmailThreadPage(
+            uri=PageURI(root="test://example", type="gmail_thread", id=thread_id),
+            thread_id=thread_id,
+            subject="Test Thread",
+            emails=cached_emails,
+            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+        )
+
+        # Mock API to return 3 messages (more than cached)
+        service.providers["google"].email_client.get_thread = AsyncMock(
+            return_value={
+                "id": thread_id,
+                "messages": [
+                    {"id": "msg1"},
+                    {"id": "msg2"},
+                    {"id": "msg3"},  # New message
+                ],
+            }
+        )
+
+        # Validation should return False because API has more messages
+        result = await service._validate_email_thread(cached_thread)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_thread_validator_with_same_message_count(self, service):
+        """Test that thread validator returns True when message count matches."""
+        thread_id = "test_thread_456"
+
+        # Create thread with 2 cached messages
+        cached_emails = [
+            EmailSummary(
+                uri=PageURI(root="test://example", type="gmail_email", id="msg1"),
+                sender="user1@example.com",
+                recipients=["user2@example.com"],
+                cc_list=[],
+                body="First message",
+                time=datetime.now(timezone.utc),
+            ),
+            EmailSummary(
+                uri=PageURI(root="test://example", type="gmail_email", id="msg2"),
+                sender="user2@example.com",
+                recipients=["user1@example.com"],
+                cc_list=[],
+                body="Second message",
+                time=datetime.now(timezone.utc),
+            ),
+        ]
+
+        cached_thread = EmailThreadPage(
+            uri=PageURI(root="test://example", type="gmail_thread", id=thread_id),
+            thread_id=thread_id,
+            subject="Test Thread",
+            emails=cached_emails,
+            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+        )
+
+        # Mock API to return same number of messages
+        service.providers["google"].email_client.get_thread = AsyncMock(
+            return_value={"id": thread_id, "messages": [{"id": "msg1"}, {"id": "msg2"}]}
+        )
+
+        # Validation should return True because message counts match
+        result = await service._validate_email_thread(cached_thread)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_thread_validator_api_error(self, service):
+        """Test that thread validator raises exception when API call fails."""
+        thread_id = "test_thread_error"
+
+        cached_thread = EmailThreadPage(
+            uri=PageURI(root="test://example", type="gmail_thread", id=thread_id),
+            thread_id=thread_id,
+            subject="Test Thread",
+            emails=[],
+            permalink=f"https://mail.google.com/mail/u/0/#inbox/{thread_id}",
+        )
+
+        # Mock API to raise an exception
+        service.providers["google"].email_client.get_thread = AsyncMock(
+            side_effect=Exception("API Error")
+        )
+
+        # Validation should raise exception when API fails
+        with pytest.raises(Exception, match="API Error"):
+            await service._validate_email_thread(cached_thread)

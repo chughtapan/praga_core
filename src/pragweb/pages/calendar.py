@@ -27,4 +27,5 @@ class CalendarEventPage(Page):
         default_factory=list, description="List of event attendees"
     )
     organizer: str = Field(description="Event organizer")
+    modified_time: datetime = Field(description="Event last modified time")
     permalink: str = Field(description="Provider-specific event permalink URL")

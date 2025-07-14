@@ -52,9 +52,14 @@ class EmailService(ToolkitService):
         async def handle_email(page_uri: PageURI) -> EmailPage:
             return await self.create_email_page(page_uri)
 
-        @ctx.route(thread_type, cache=False)
+        @ctx.route(thread_type, cache=True)
         async def handle_thread(page_uri: PageURI) -> EmailThreadPage:
             return await self.create_thread_page(page_uri)
+
+        # Register validator for email threads
+        @ctx.validator
+        async def validate_email_thread(page: EmailThreadPage) -> bool:
+            return await self._validate_email_thread(page)
 
         # Register email actions
         @ctx.action()
@@ -419,3 +424,28 @@ class EmailService(ToolkitService):
             return await self._search_emails(
                 metadata_query=metadata_query, cursor=cursor
             )
+
+    async def _validate_email_thread(self, thread: EmailThreadPage) -> bool:
+        """Validate that an email thread is up to date by checking for new messages."""
+        # Get current thread data from provider
+        provider = self._get_provider_for_thread(thread)
+        if not provider:
+            raise ValueError("No provider available for thread validation")
+
+        # Get thread metadata from provider to check for new messages
+        thread_data = await provider.email_client.get_thread(thread.thread_id)
+        if not thread_data:
+            raise ValueError(f"Thread {thread.thread_id} not found in provider")
+
+        # Get message count from API
+        api_message_count = len(thread_data.get("messages", []))
+        cached_message_count = len(thread.emails)
+
+        # Thread is valid if API doesn't have more messages than cached version
+        return api_message_count <= cached_message_count
+
+    def _get_provider_for_thread(
+        self, thread: EmailThreadPage
+    ) -> Optional[BaseProviderClient]:
+        """Get provider client for a thread."""
+        return self.provider_client

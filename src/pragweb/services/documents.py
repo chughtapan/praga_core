@@ -1,7 +1,12 @@
 """Documents orchestration service that coordinates between multiple providers."""
 
+import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Sequence
+
+from chonkie import RecursiveChunker
+from chonkie.types.recursive import RecursiveChunk
 
 from praga_core.agents import PaginatedResponse, tool
 from praga_core.types import PageURI
@@ -15,7 +20,9 @@ logger = logging.getLogger(__name__)
 class DocumentService(ToolkitService):
     """Orchestration service for document operations across multiple providers."""
 
-    def __init__(self, providers: Dict[str, BaseProviderClient]):
+    def __init__(
+        self, providers: Dict[str, BaseProviderClient], chunk_size: int = 4000
+    ):
         if not providers:
             raise ValueError("DocumentService requires at least one provider")
         if len(providers) != 1:
@@ -23,37 +30,54 @@ class DocumentService(ToolkitService):
 
         self.providers = providers
         self.provider_client = list(providers.values())[0]
+        self.provider_name = list(providers.keys())[0]
+        self.chunk_size = chunk_size
+
+        # Initialize Chonkie chunker with configurable chunk size
+        self.chunker = RecursiveChunker(
+            tokenizer_or_token_counter="gpt2",
+            chunk_size=chunk_size,
+        )
+
         super().__init__()
+
+        # Set page types based on service name (after super init)
+        self.header_page_type = f"{self.name}_header"
+        self.chunk_page_type = f"{self.name}_chunk"
         self._register_handlers()
         logger.info(
-            "Document service initialized with providers: %s", list(providers.keys())
+            "Document service initialized with provider: %s, chunk_size: %d",
+            self.provider_name,
+            chunk_size,
         )
 
     @property
     def name(self) -> str:
         """Service name used for registration."""
         # Auto-derive service name from provider
-        provider_name = list(self.providers.keys())[0]
         provider_to_service = {"google": "google_docs", "microsoft": "outlook_docs"}
-        return provider_to_service.get(provider_name, f"{provider_name}_docs")
+        return provider_to_service.get(self.provider_name, f"{self.provider_name}_docs")
 
     def _register_handlers(self) -> None:
         """Register page routes and actions with context."""
         ctx = self.context
 
-        # Register page route handlers using dynamic service name
-        service_name = self.name
-
-        @ctx.route(f"{service_name}_header", cache=True)
+        # Register page route handlers using page type variables
+        @ctx.route(self.header_page_type, cache=True)
         async def handle_document_header(page_uri: PageURI) -> DocumentHeader:
             return await self.create_document_header_page(page_uri)
 
-        @ctx.route(f"{service_name}_chunk", cache=True)
+        @ctx.route(self.chunk_page_type, cache=True)
         async def handle_document_chunk(page_uri: PageURI) -> DocumentChunk:
             return await self.create_document_chunk_page(page_uri)
 
+        # Register validator for document headers
+        @ctx.validator
+        async def validate_document_header(page: DocumentHeader) -> bool:
+            return await self._validate_document_header(page)
+
     async def create_document_header_page(self, page_uri: PageURI) -> DocumentHeader:
-        """Create a DocumentHeader from a URI."""
+        """Create a DocumentHeader from a URI with automatic chunking and caching."""
         # Extract provider and document ID from URI
         provider_name, document_id = self._parse_document_uri(page_uri)
 
@@ -65,43 +89,45 @@ class DocumentService(ToolkitService):
             document_id
         )
 
-        # Parse to DocumentHeader
-        return (
-            await self.provider_client.documents_client.parse_document_to_header_page(
-                document_data, page_uri
+        # Get document content for chunking
+        document_content = (
+            await self.provider_client.documents_client.get_document_content(
+                document_id
             )
         )
 
+        # Chunk the content using Chonkie
+        chunks = self._chunk_content(document_content)
+        logger.info(f"Document {document_id} chunked into {len(chunks)} pieces")
+
+        # Parse document metadata and create DocumentHeader directly
+        header = self._build_document_header(
+            document_data, document_content, chunks, page_uri, document_id
+        )
+
+        # Store the header first so it exists for chunk relationships
+        await self.context.page_cache.store(header)
+
+        # Create and store chunk pages asynchronously
+        chunk_pages = self._build_chunk_pages(document_id, chunks, header, header.uri)
+        await self._store_chunk_pages(chunk_pages, header)
+
+        logger.info(
+            f"Successfully auto-chunked document {document_id} with {len(chunks)} chunks"
+        )
+        return header
+
     async def create_document_chunk_page(self, page_uri: PageURI) -> DocumentChunk:
-        """Create a DocumentChunk from a URI."""
-        # Extract provider, document ID, and chunk index from URI
+        """Create a DocumentChunk from a URI - should retrieve from cache only."""
+        # Extract chunk index from URI for error message
         provider_name, document_id, chunk_index = self._parse_chunk_uri(page_uri)
 
-        if not self.provider_client:
-            raise ValueError("No provider available")
-
-        # Get document data from provider
-        document_data = await self.provider_client.documents_client.get_document(
-            document_id
+        # Chunks should only be retrieved from cache, never created directly
+        # If a chunk doesn't exist, it means the header wasn't properly ingested
+        raise ValueError(
+            f"Chunk {chunk_index} for document {document_id} not found in cache. "
+            f"Document header must be ingested first to create chunks."
         )
-
-        # Create header URI for parsing chunks
-        header_uri = PageURI(
-            root=page_uri.root,
-            type=f"{self.name}_header",
-            id=document_id,
-            version=page_uri.version,
-        )
-
-        # Parse to DocumentChunk list and return the requested chunk
-        chunks = self.provider_client.documents_client.parse_document_to_chunks(
-            document_data, header_uri
-        )
-
-        if chunk_index >= len(chunks):
-            raise ValueError(f"Chunk index {chunk_index} out of range")
-
-        return chunks[chunk_index]
 
     @tool()
     async def search_documents_by_title(
@@ -141,7 +167,7 @@ class DocumentService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=f"{self.name}_header",
+                    type=self.header_page_type,
                     id=document_id,
                 )
                 for document_id in document_ids
@@ -197,7 +223,7 @@ class DocumentService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=f"{self.name}_header",
+                    type=self.header_page_type,
                     id=document_id,
                 )
                 for document_id in document_ids
@@ -247,7 +273,7 @@ class DocumentService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=f"{self.name}_header",
+                    type=self.header_page_type,
                     id=document_id,
                 )
                 for document_id in document_ids
@@ -300,7 +326,7 @@ class DocumentService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=f"{self.name}_header",
+                    type=self.header_page_type,
                     id=document_id,
                 )
                 for document_id in document_ids
@@ -351,7 +377,7 @@ class DocumentService(ToolkitService):
             uris = [
                 PageURI(
                     root=self.context.root,
-                    type=f"{self.name}_header",
+                    type=self.header_page_type,
                     id=document_id,
                 )
                 for document_id in document_ids
@@ -444,17 +470,11 @@ class DocumentService(ToolkitService):
     def _parse_document_uri(self, page_uri: PageURI) -> tuple[str, str]:
         """Parse document URI to extract provider and document ID."""
         # URI format: google_docs_header with document_id as the ID
-        # Extract provider from service name
-        if not self.providers:
-            raise ValueError("No provider available for service")
-        provider_name = list(self.providers.keys())[0]
-        return provider_name, page_uri.id
+        return self.provider_name, page_uri.id
 
     def _parse_chunk_uri(self, page_uri: PageURI) -> tuple[str, str, int]:
         """Parse chunk URI to extract provider, document ID, and chunk index."""
         # URI format: google_docs_chunk with document_id_chunk_index as the ID
-        provider_name = list(self.providers.keys())[0] if self.providers else "google"
-
         # Extract document ID and chunk index from ID
         # Format: document_id_chunk_index
         last_underscore = page_uri.id.rfind("_")
@@ -464,7 +484,7 @@ class DocumentService(ToolkitService):
         document_id = page_uri.id[:last_underscore]
         chunk_index = int(page_uri.id[last_underscore + 1 :])
 
-        return provider_name, document_id, chunk_index
+        return self.provider_name, document_id, chunk_index
 
     def _get_provider_for_document(
         self, document: DocumentHeader
@@ -501,16 +521,191 @@ class DocumentService(ToolkitService):
 
         return "".join(text_parts)
 
-    def _get_chunk_title(self, content: str, max_length: int = 50) -> str:
-        """Generate a title for a document chunk from its content (provider-agnostic)."""
-        # Remove extra whitespace and newlines
-        clean_content = " ".join(content.split())
+    def _chunk_content(self, full_content: str) -> Sequence[RecursiveChunk]:
+        """Chunk document content using Chonkie."""
+        return self.chunker.chunk(full_content)
 
-        if len(clean_content) <= max_length:
-            return clean_content
+    def _build_chunk_pages(
+        self,
+        document_id: str,
+        chunks: Sequence[RecursiveChunk],
+        header: DocumentHeader,
+        header_uri: PageURI,
+    ) -> List[DocumentChunk]:
+        """Build DocumentChunk pages from chunked content."""
+        chunk_pages: List[DocumentChunk] = []
 
-        # Truncate and add ellipsis
-        return clean_content[: max_length - 3] + "..."
+        for i, chunk in enumerate(chunks):
+            chunk_text = getattr(chunk, "text", str(chunk))
+            chunk_title = self._get_chunk_title(chunk_text)
+
+            # Build chunk URI
+            chunk_uri = PageURI(
+                root=header_uri.root,
+                type=self.chunk_page_type,
+                id=f"{document_id}_{i}",
+                version=header_uri.version,
+            )
+
+            # Navigation URIs
+            prev_chunk_uri = None
+            if i > 0:
+                prev_chunk_uri = PageURI(
+                    root=header_uri.root,
+                    type=self.chunk_page_type,
+                    id=f"{document_id}_{i-1}",
+                    version=header_uri.version,
+                )
+
+            next_chunk_uri = None
+            if i < len(chunks) - 1:
+                next_chunk_uri = PageURI(
+                    root=header_uri.root,
+                    type=self.chunk_page_type,
+                    id=f"{document_id}_{i+1}",
+                    version=header_uri.version,
+                )
+
+            # Create chunk page
+            chunk_page = DocumentChunk(
+                uri=chunk_uri,
+                provider_document_id=document_id,
+                chunk_index=i,
+                chunk_title=chunk_title,
+                content=chunk_text,
+                doc_title=header.title,
+                header_uri=header_uri,
+                prev_chunk_uri=prev_chunk_uri,
+                next_chunk_uri=next_chunk_uri,
+                permalink=header.permalink,
+            )
+            chunk_pages.append(chunk_page)
+
+        return chunk_pages
+
+    async def _store_chunk_pages(
+        self, chunk_pages: List[DocumentChunk], header: DocumentHeader
+    ) -> None:
+        """Store chunk pages in the cache asynchronously."""
+        if not chunk_pages:
+            return
+
+        # Ensure DocumentChunk type is registered first to avoid race condition
+        await self.context.page_cache._registry.ensure_registered(DocumentChunk)
+
+        # Store all chunks in parallel using context
+        tasks = [
+            self.context.page_cache.store(chunk_page, parent_uri=header.uri)
+            for chunk_page in chunk_pages
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Check for exceptions and log them
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Failed to store chunk {i}: {result}")
+                raise result
+
+    def _get_chunk_title(self, content: str) -> str:
+        """Generate a chunk title from the first few words or sentence."""
+        # Take first sentence or first 50 characters, whichever is shorter
+        sentences = content.split(". ")
+        first_sentence = sentences[0].strip()
+
+        if len(first_sentence) <= 50:
+            return first_sentence
+        else:
+            # Take first 50 characters and add ellipsis
+            return content[:47].strip() + "..."
+
+    def _build_document_header(
+        self,
+        document_data: Dict[str, Any],
+        document_content: str,
+        chunks: Sequence[RecursiveChunk],
+        page_uri: PageURI,
+        document_id: str,
+    ) -> DocumentHeader:
+        """Build DocumentHeader from document data and chunks."""
+        # Extract metadata from document data
+        title = document_data.get("title", "Untitled Document")
+
+        # Build chunk URIs
+        chunk_uris = []
+        for i in range(len(chunks)):
+            chunk_uris.append(
+                PageURI(
+                    root=page_uri.root,
+                    type=self.chunk_page_type,
+                    id=f"{document_id}_{i}",
+                    version=page_uri.version or 1,
+                )
+            )
+
+        # Create summary from content
+        summary = (
+            document_content[:500] + "..."
+            if len(document_content) > 500
+            else document_content
+        )
+        word_count = len(document_content.split()) if document_content else 0
+
+        # Extract timestamps and owner info (provider-specific)
+        created_time = datetime.now(timezone.utc)  # Fallback
+        modified_time = datetime.now(timezone.utc)  # Fallback
+        owner = None
+
+        # Try to get actual metadata from provider if available
+        try:
+            # For Google Docs, we might have metadata in the document_data
+            if "createdTime" in document_data:
+                created_time = self._parse_datetime(document_data["createdTime"])
+            if "modifiedTime" in document_data:
+                modified_time = self._parse_datetime(document_data["modifiedTime"])
+            if "owners" in document_data and document_data["owners"]:
+                owner = document_data["owners"][0].get("emailAddress")
+        except Exception:
+            pass  # Use fallback values
+
+        # Ensure the URI has a version
+        if page_uri.version is None:
+            page_uri = PageURI(
+                root=page_uri.root,
+                type=page_uri.type,
+                id=page_uri.id,
+                version=1,
+            )
+
+        return DocumentHeader(
+            uri=page_uri,
+            provider_document_id=document_id,
+            title=title,
+            summary=summary,
+            created_time=created_time,
+            modified_time=modified_time,
+            owner=owner,
+            word_count=word_count,
+            chunk_count=len(chunks),
+            chunk_uris=chunk_uris,
+            permalink=self._build_permalink(document_id),
+        )
+
+    def _parse_datetime(self, dt_str: str) -> datetime:
+        """Parse datetime string from provider API."""
+        if dt_str.endswith("Z"):
+            return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        else:
+            return datetime.fromisoformat(dt_str)
+
+    def _build_permalink(self, document_id: str) -> str:
+        """Build permalink URL for document."""
+        if self.provider_name == "google":
+            return f"https://docs.google.com/document/d/{document_id}/edit"
+        elif self.provider_name == "microsoft":
+            # Microsoft Word Online URL format
+            return f"https://office365.com/word?resid={document_id}"
+        else:
+            return f"https://docs.{self.provider_name}.com/document/{document_id}"
 
     async def _validate_document_header(self, document: DocumentHeader) -> bool:
         """Validate that a document header is up to date (provider-agnostic)."""

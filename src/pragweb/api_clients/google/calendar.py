@@ -254,6 +254,17 @@ class GoogleCalendarClient(BaseCalendarClient):
         organizer_data = event_data.get("organizer", {})
         organizer = organizer_data.get("email", "")
 
+        # Parse modified time (updated field in Google Calendar)
+        modified_time_str = event_data[
+            "updated"
+        ]  # Required field, let it raise KeyError if missing
+        if modified_time_str.endswith("Z"):
+            modified_time = datetime.fromisoformat(
+                modified_time_str.replace("Z", "+00:00")
+            )
+        else:
+            modified_time = datetime.fromisoformat(modified_time_str)
+
         return CalendarEventPage(
             uri=page_uri,
             provider_event_id=event_data["id"],
@@ -265,5 +276,6 @@ class GoogleCalendarClient(BaseCalendarClient):
             end_time=end_time,
             attendees=attendees,
             organizer=organizer,
+            modified_time=modified_time,
             permalink=event_data.get("htmlLink", ""),
         )
